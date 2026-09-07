@@ -37,7 +37,7 @@ test('untrusted records are sanitized and cannot inject prototype keys or bogus 
   const adapter = memory({ [PROFILE_KEY]: payload });
   const store = createStore(adapter);
   assert.deepEqual(store.getProfile(), {
-    version: 1, completed: { 1: { stars: 2, bestTurns: 10 } }, daily: {},
+    version: 1, completed: { 1: { stars: 2, bestTurns: 10 } }, daily: {}, expert: {},
     settings: { sound: false, haptics: true }, totalWins: 1,
   });
   assert.equal(Object.prototype.stars, undefined);
@@ -55,6 +55,40 @@ test('corrupt JSON/read failures are repaired where writes still work', () => {
   assert.equal(store.getProfile().totalWins, 0);
   assert.equal(adapter.values.get(PROFILE_KEY).version, 1);
   assert.equal(store.getStatus().persisted, true);
+});
+
+test('version-one progress gains an independent expert table without losing existing data', () => {
+  const legacy = {
+    version: 1, completed: { 1: { stars: 2, bestTurns: 10 } },
+    daily: { '2026-09-07': { stars: 3, bestTurns: 14 } },
+    settings: { sound: false, haptics: true }, totalWins: 2,
+  };
+  const adapter = memory({ [PROFILE_KEY]: legacy });
+  const store = createStore(adapter);
+  assert.deepEqual(store.getProfile(), { ...legacy, expert: {} });
+  store.recordWin(1, 2, 9, 'expert');
+  store.recordWin(1, 3, 8, 'expert');
+  store.recordWin(1, 1, 12, 'expert');
+  const reloaded = createStore(adapter).getProfile();
+  assert.deepEqual(reloaded.completed, legacy.completed, 'expert replay does not award campaign stars');
+  assert.deepEqual(reloaded.daily, legacy.daily);
+  assert.deepEqual(reloaded.expert, { 1: { stars: 3, bestTurns: 8 } });
+  assert.equal(reloaded.totalWins, 3, 'the same level has one win per mode, regardless of retries');
+  assert.equal(reloaded.settings.sound, false);
+});
+
+test('expert data uses the same validation and repaired unique-win total as campaign data', () => {
+  const payload = JSON.parse('{"version":1,"completed":{"1":{"stars":2,"bestTurns":10}},"daily":{"2026-09-07":{"stars":3,"bestTurns":14}},"expert":{"__proto__":{"stars":3,"bestTurns":0},"constructor":{"stars":3,"bestTurns":0},"1":{"stars":3,"bestTurns":8},"2":{"stars":4,"bestTurns":0},"3":{"stars":2,"bestTurns":-1}},"totalWins":900}');
+  const store = createStore(memory({ [PROFILE_KEY]: payload }));
+  assert.deepEqual(store.getProfile().expert, { 1: { stars: 3, bestTurns: 8 } });
+  assert.equal(store.getProfile().totalWins, 3);
+  store.recordWin('__proto__', 3, 0, 'expert');
+  store.recordWin('2', 4, 0, 'expert');
+  store.recordWin('2', 3, -1, 'expert');
+  assert.deepEqual(store.getProfile().expert, { 1: { stars: 3, bestTurns: 8 } });
+  store.reset();
+  assert.deepEqual(store.getProfile().expert, {});
+  assert.equal(store.getProfile().totalWins, 0);
 });
 
 test('quota failures retain playable memory, with persistence status until all dirty keys recover', () => {

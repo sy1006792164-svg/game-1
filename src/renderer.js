@@ -1,7 +1,7 @@
 'use strict';
 const { CAMPAIGN, chapterNames } = require('./levels');
 const { VERSION } = require('./config');
-const C = { paper: '#f5f2e8', ink: '#24473d', green: '#315e4c', soft: '#e6eadb', line: '#d5dccb', muted: '#7a8978', orange: '#dd8152', peach: '#f3ddc8', blue: '#7babc0', bluePale: '#dfedf0', white: '#fffdf6', yellow: '#d7b667' };
+const C = { paper: '#f5f2e8', ink: '#24473d', green: '#315e4c', soft: '#e6eadb', line: '#d5dccb', muted: '#647660', orange: '#c96b3d', peach: '#f3ddc8', blue: '#6493a8', bluePale: '#dfedf0', white: '#fffdf6', yellow: '#c39b45' };
 const STAMPS = [
   ['第一缕风', 1, 'leaf'], ['三拍之后', 3, 'echo'], ['纸翼初展', 6, 'letter'], ['苔阶来信', 12, 'tree'],
   ['巷口微光', 18, 'lamp'], ['随风远行', 24, 'wind'], ['林间回响', 30, 'echo'], ['不迷路的月', 40, 'moon'],
@@ -28,6 +28,30 @@ class Renderer {
     if (!quiet) this.round(x, y, w, h, 15, primary ? C.green : C.white, primary ? null : C.line);
     this.text(text, x + w / 2, y + h / 2, quiet ? 13 : 15, primary ? C.white : C.ink, 'center', primary ? '600' : '500');
     this.hit(x, y, w, h, action);
+  }
+  meter(x, y, w, value, target, color) {
+    this.round(x, y, w, 5, 2.5, '#dce2d2');
+    const filled = Math.max(0, Math.min(1, value / Math.max(1, target))) * w;
+    if (filled > 0) this.round(x, y, Math.max(5, filled), 5, 2.5, color || C.green);
+  }
+  wrapped(text, x, y, width, size, color, lineHeight) {
+    let line = '', row = 0;
+    this.ctx.font = '400 ' + size + 'px "PingFang SC","Microsoft YaHei",sans-serif';
+    for (const char of String(text)) {
+      if (line && this.ctx.measureText(line + char).width > width) { this.text(line, x, y + row++ * lineHeight, size, color); line = char; }
+      else line += char;
+    }
+    if (line) this.text(line, x, y + row++ * lineHeight, size, color);
+    return row;
+  }
+  nav(game, selected) {
+    this.line([[24, this.H - 68], [366, this.H - 68]], C.line, 1);
+    [['邮局', 'home', 'home'], ['旅程', 'levels', 'wind'], ['成长', 'progress', 'star'], ['邮票册', 'collection', 'letter']].forEach(([name, page, icon], i) => {
+      const x = 60 + i * 90;
+      this.icon(icon, x, this.H - 47, 18, selected === page ? C.green : '#94a087');
+      this.text(name, x, this.H - 24, 10, selected === page ? C.ink : C.muted, 'center', selected === page ? '600' : '400');
+      this.hit(x - 41, this.H - 66, 82, 61, () => page === 'home' ? game.home() : game.openPage(page));
+    });
   }
   icon(type, x, y, size, color) {
     const c = this.ctx; c.save(); c.translate(x, y); c.scale(size / 24, size / 24); color = color || C.green;
@@ -90,6 +114,7 @@ class Renderer {
     else if (game.page === 'levels') this.levels(game);
     else if (game.page === 'collection') this.collection(game);
     else if (game.page === 'settings') this.settings(game);
+    else if (game.page === 'progress') this.progress(game);
     else this.home(game, now);
     if (game.modal) { this.hits = []; this.modal(game.modal); }
     if (game.toastUntil > now) {
@@ -100,23 +125,58 @@ class Renderer {
     if (!status.persisted) { this.round(18, this.H - 28, 354, 22, 5, C.peach); this.text('存储不可用：当前进度仅在本次运行保留', 195, this.H - 17, 10, C.ink, 'center'); }
   }
   home(game, now) {
-    const H = this.H;
+    const H = this.H, p = game.progress(), next = game.nextLevel(), saved = game.store.loadRun();
     this.icon('wind', 37, 34, 26); this.text('风笺回廊', 60, 33, 17, C.ink, 'left', '600');
     this.text('WIND LETTER', 60, 54, 8, C.muted);
-    this.round(290, 17, 76, 31, 16, C.soft); this.icon('star', 308, 32, 13, C.yellow); this.text(game.starCount(), 341, 33, 12, C.ink, 'center');
-    this.text('一间把时间折进信里的邮局', 27, 108, 12, C.muted);
-    this.text('把下一步，', 25, 151, 34, C.ink, 'left', '600');
-    this.text('寄给三步后的自己。', 25, 194, 30, C.ink, 'left', '600');
-    const c = this.ctx; c.save(); c.translate(195, (220 + H - 266) / 2); c.scale(Math.min(1.12, (H - 464) / 292), Math.min(1.12, (H - 464) / 292));
-    this.scene(now); c.restore();
-    this.text('你负责前行，回声替你收起沿途的风。', 195, H - 269, 11, C.muted, 'center');
-    const next = game.nextLevel();
-    this.button(game.store.loadRun() ? '继续上次的投递  →' : game.completion() ? '继续旅程  →' : '寄出第一封信  →', 24, H - 242, 342, 56, () => game.primary(), 'primary');
-    this.text('第 ' + String(CAMPAIGN.indexOf(next) + 1).padStart(2, '0') + ' 程 · ' + next.title, 195, H - 169, 11, C.muted, 'center');
-    this.round(24, H - 147, 342, 66, 15, C.soft);
-    this.icon('sun', 49, H - 114, 22, C.orange); this.text('今日风笺', 73, H - 122, 15, C.ink, 'left', '600');
-    this.text(game.profile().daily[game.dateKey] ? '今日已送达 · 再走一条更好的路' : '每天一条新路线，慢慢来就好', 73, H - 101, 10, C.muted); this.text('↗', 341, H - 115, 24, C.green); this.hit(24, H - 147, 342, 66, () => game.daily());
-    [['旅程', 'levels'], ['邮票册', 'collection'], ['设置', 'settings']].forEach(([name, page], i) => { this.text(name, 74 + i * 121, H - 44, 13, C.ink, 'center'); this.hit(24 + i * 121, H - 67, 100, 46, () => game.openPage(page)); });
+    this.round(276, 17, 50, 31, 16, C.soft); this.icon('star', 290, 32, 12, C.yellow); this.text(p.stars, 310, 33, 12, C.ink, 'center');
+    this.text('设置', 351, 33, 11, C.muted, 'center'); this.hit(329, 11, 43, 44, () => game.openPage('settings'));
+    const heroH = Math.min(250, H - 526), heroBottom = 77 + heroH;
+    this.round(24, 77, 342, heroH, 20, '#e7ebdc');
+    this.text('每一步，都有回响', 42, 101, 10, C.muted);
+    this.text('把下一步，', 42, 132, 24, C.ink, 'left', '600');
+    this.text('寄给未来的自己。', 42, 163, 22, C.ink, 'left', '600');
+    if (heroH > 220) this.text('你负责前行，回声替你盖章。', 42, 194, 10, C.muted);
+    this.round(42, heroBottom - 44, 135, 27, 13, C.white);
+    this.text('回合解谜  ·  三拍回声', 109, heroBottom - 30, 10, C.green, 'center');
+    const c = this.ctx; c.save(); c.beginPath(); c.rect(187, 84, 176, heroH - 9); c.clip(); c.translate(282, 77 + heroH * .59); c.scale(.54, .54); this.scene(now); c.restore();
+    const rankY = heroBottom + 12;
+    this.round(24, rankY, 342, 65, 14, C.white, C.line); this.icon('leaf', 47, rankY + 25, 23);
+    this.text(p.rank.name, 67, rankY + 23, 13, C.ink, 'left', '600');
+    this.text('成长手记  ↗', 348, rankY + 23, 10, C.muted, 'right');
+    this.meter(43, rankY + 43, 202, p.rank.current, p.rank.target);
+    this.text(p.rank.nextName ? p.rank.current + '/' + p.rank.target + ' 成长' : '最高称号', 348, rankY + 45, 10, C.muted, 'right');
+    this.hit(24, rankY, 342, 65, () => game.openPage('progress'));
+    const routeY = rankY + 78;
+    let routeLabel = '第 ' + String(CAMPAIGN.indexOf(next) + 1).padStart(2, '0') + ' 封 · ' + next.title;
+    if (saved) { const l = CAMPAIGN.find(item => item.id === saved.levelId); routeLabel = (saved.mode === 'daily' ? '每日风笺 · ' + saved.dateKey : (saved.mode === 'expert' ? '高手 · ' : '') + (l ? l.title : '上次的路线')) + ' · 已走 ' + (Array.isArray(saved.actions) ? saved.actions.length : 0) + ' 拍'; }
+    this.text(routeLabel, 26, routeY + 9, 11, C.muted);
+    this.text(p.totalCompleted + '/30 送达', 365, routeY + 9, 10, C.muted, 'right');
+    this.button(saved ? '继续上次的投递  →' : p.totalCompleted ? '继续我的旅程  →' : '寄出第一封信  →', 24, routeY + 25, 342, 52, () => game.primary(), 'primary');
+    const dailyY = routeY + 91;
+    this.round(24, dailyY, 165, 91, 15, C.bluePale); this.icon('sun', 45, dailyY + 23, 19, C.orange);
+    this.text('今日风笺', 63, dailyY + 23, 14, C.ink, 'left', '600');
+    this.text(game.profile().daily[game.dateKey] ? '已送达 · 再挑战纪录' : '新路线，等你来解', 40, dailyY + 51, 10, C.muted);
+    this.text('本周 ' + p.weekly.count + '/3 天  →', 40, dailyY + 73, 11, C.green); this.hit(24, dailyY, 165, 91, () => game.daily());
+    this.round(201, dailyY, 165, 91, 15, C.peach); this.icon('wind', 222, dailyY + 23, 19, C.orange);
+    this.text('高手邮路', 240, dailyY + 23, 14, C.ink, 'left', '600');
+    this.text(p.totalCompleted >= 3 ? '更少灯火，更精妙的路线' : '完成前三封信后开启', 217, dailyY + 51, 10, C.muted);
+    this.text(p.totalCompleted >= 3 ? p.expertCompleted + '/30 已征服  →' : p.totalCompleted + '/3 封送达', 217, dailyY + 73, 11, C.orange);
+    this.hit(201, dailyY, 165, 91, () => { if (game.completion() < 3) game.selectMode('expert'); else game.goal('expert'); });
+    const stampY = dailyY + 106;
+    this.icon('letter', 39, stampY + 13, 19, C.orange);
+    this.text(p.nextStamp ? '下一枚 · ' + p.nextStamp.name : '成长邮票已全部点亮', 58, stampY + 6, 12, C.ink, 'left', '500');
+    this.text(p.nextStamp ? '再得 ' + (p.nextStamp.target - p.stars) + ' 星，收进邮票册' : '去每日风笺，留下今天的邮戳', 58, stampY + 26, 10, C.muted);
+    this.text('↗', 348, stampY + 15, 19, C.green); this.hit(24, stampY - 6, 342, 50, () => game.openPage('collection'));
+    const goal = p.goals.find(item => !item.complete);
+    if (goal && H - 68 - stampY > 122) {
+      const y = H - 155;
+      this.round(24, y, 342, 65, 14, C.soft);
+      this.text('下一小步', 42, y + 17, 9, C.muted);
+      this.text(goal.title, 42, y + 40, 13, C.ink, 'left', '500');
+      this.text('去挑战  ↗', 346, y + 40, 11, C.green, 'right');
+      this.hit(24, y, 342, 65, () => game.goal(goal.action));
+    }
+    this.nav(game, 'home');
   }
   scene(now) {
     const c = this.ctx, t = now / 1900;
@@ -140,20 +200,23 @@ class Renderer {
   }
   levels(game) {
     this.header('沿风的旅程', '30 封来信 / 5 段回廊', () => game.home());
-    this.text(String(game.chapter + 1).padStart(2, '0'), 26, 124, 37, '#a9bba1', 'left', '500');
-    this.text(chapterNames[game.chapter] || ['初信苔阶', '回声小巷', '顺风庭院', '灯火长街', '风的回廊'][game.chapter], 91, 112, 23, C.ink, 'left', '600');
-    this.text(['学会和三拍后的自己同行', '绕个小弯，让回声刚好路过', '借一阵风，改变脚下的路线', '在灯光熄灭之前抵达', '把每一拍，都寄向远方'][game.chapter], 91, 143, 11, C.muted);
-    const top = 180, cardH = Math.min(137, (this.H - 318) / 3);
+    const expert = game.levelMode === 'expert', profile = game.profile();
+    this.button('标准邮路', 24, 91, 165, 42, () => game.selectMode('campaign'), expert ? 'secondary' : 'primary');
+    this.button('高手邮路' + (game.completion() < 3 ? ' · 待解锁' : ''), 201, 91, 165, 42, () => game.selectMode('expert'), expert ? 'primary' : 'secondary');
+    this.text(String(game.chapter + 1).padStart(2, '0'), 26, 168, 31, '#90a487', 'left', '500');
+    this.text(chapterNames[game.chapter], 80, 158, 21, C.ink, 'left', '600');
+    this.text(expert ? '收紧灯火预算 · 不续灯 · 独立纪录' : ['学会和三拍后的自己同行', '安排支路顺序，让每次折返都有价值', '借一阵风，改变脚下的路线', '串起补给，让灯火刚好照到终点', '长路线与多目标，每一拍都算数'][game.chapter], 80, 184, 10, C.muted);
+    const top = 209, cardH = Math.min(137, (this.H - 341) / 3);
     CAMPAIGN.slice(game.chapter * 6, game.chapter * 6 + 6).forEach((l, j) => {
       const i = game.chapter * 6 + j, x = 24 + (j % 2) * 178, y = top + Math.floor(j / 2) * (cardH + 13);
-      const record = game.profile().completed[String(l.id)], unlocked = game.unlocked(i);
+      const record = (expert ? profile.expert : profile.completed)[String(l.id)], unlocked = expert ? game.expertUnlocked(l) : game.unlocked(i);
       this.round(x, y, 164, cardH, 16, unlocked ? C.white : '#eeeee3', unlocked ? C.line : '#e2e5d7');
       this.text(String(i + 1).padStart(2, '0'), x + 17, y + 29, 23, unlocked ? C.green : '#aeb6a4', 'left', '500');
       this.icon(unlocked ? 'letter' : 'lock', x + 134, y + 29, 20, record ? C.orange : '#b5c2a9');
       this.text(l.title, x + 17, y + 61, 14, unlocked ? C.ink : C.muted, 'left', '500');
-      this.text('目标 ' + l.par + ' 拍', x + 17, y + 83, 10, C.muted);
+      this.text(record ? '最佳 ' + record.bestTurns + ' 拍' : '三星 ' + l.par + ' 拍', x + 17, y + 82, 10, C.muted);
       for (let s = 0; s < 3; s++) this.icon('star', x + 24 + s * 20, y + cardH - 23, 14, record && record.stars > s ? C.yellow : '#e0e4d6');
-      this.hit(x, y, 164, cardH, () => unlocked ? game.start(l, 'campaign') : game.toast('先送达上一封信，就能开启这里'));
+      this.hit(x, y, 164, cardH, () => unlocked ? game.levelInfo(l, game.levelMode) : game.toast(expert ? '先在标准邮路完成这封信' : '先送达上一封信，就能开启这里'));
     });
     for (let i = 0; i < 5; i++) { this.circle(159 + i * 18, this.H - 99, i === game.chapter ? 4 : 3, i === game.chapter ? C.green : C.line); }
     this.button('← 上一章', 24, this.H - 74, 153, 47, () => { game.chapter = Math.max(0, game.chapter - 1); });
@@ -164,8 +227,9 @@ class Renderer {
     const stars = game.starCount(), daily = Object.keys(game.profile().daily).length;
     const owned = STAMPS.filter(s => s[1] === 'daily' ? daily > 0 : stars >= s[1]).length;
     this.text(owned + ' / 12', 27, 116, 31, C.green, 'left', '500'); this.text('枚邮票已点亮', 149, 117, 13, C.muted);
-    this.text('通关积累星星，留下属于你的邮戳。', 27, 151, 12, C.muted);
-    const h = Math.min(139, (this.H - 232) / 4);
+    const progress = game.progress();
+    this.text(progress.nextStamp ? '再得 ' + (progress.nextStamp.target - stars) + ' 星，点亮「' + progress.nextStamp.name + '」' : '成长邮票全部收齐，今天也来寄一封信吧。', 27, 151, 12, C.muted);
+    const h = Math.min(139, (this.H - 282) / 4);
     STAMPS.forEach(([name, goal, type], i) => {
       const x = 24 + (i % 3) * 118, y = 180 + Math.floor(i / 3) * h;
       const unlocked = goal === 'daily' ? daily > 0 : stars >= goal;
@@ -177,7 +241,41 @@ class Renderer {
       this.text(unlocked ? '已收藏' : goal === 'daily' ? '完成每日挑战' : '累计 ' + goal + ' 星', x + 53, y + h - 31, 9, C.muted, 'center');
       this.hit(x, y, 110, h - 10, () => game.toast(unlocked ? '「' + name + '」已经收入你的邮票册' : goal === 'daily' ? '完成一次每日挑战即可获得' : '累计获得 ' + goal + ' 颗关卡星星即可获得'));
     });
-    this.text('没有抽取概率，每一枚都靠自己的脚步获得。', 195, this.H - 27, 10, C.muted, 'center');
+    this.nav(game, 'collection');
+  }
+  progress(game) {
+    this.header('送信员成长手记', '每一次精进，都留下自己的印记', () => game.home());
+    const p = game.progress();
+    this.round(24, 94, 342, 111, 18, C.green);
+    this.icon('leaf', 53, 129, 30, '#d9dda8');
+    this.text('LV.' + p.rank.level + '  ' + p.rank.name, 79, 121, 20, C.white, 'left', '600');
+    this.text(p.rank.nextName ? '下一站 · ' + p.rank.nextName : '已抵达最高称号', 79, 150, 11, '#d1debe');
+    this.meter(43, 177, 225, p.rank.current, p.rank.target, '#dfbd6e');
+    this.text(p.rank.current + '/' + p.rank.target, 346, 180, 11, C.white, 'right');
+    this.round(24, 219, 342, 133, 17, C.white, C.line);
+    this.text('本周，寄出三天的问候', 42, 244, 15, C.ink, 'left', '600');
+    this.text(p.weekly.count + '/3 天', 347, 244, 12, p.weekly.count >= 3 ? C.green : C.orange, 'right');
+    p.weekly.days.forEach((day, i) => {
+      const x = 52 + i * 47.5;
+      this.circle(x, 288, 15, day.done ? C.green : day.today ? C.peach : C.soft, day.today ? C.orange : null);
+      this.text(day.done ? '✓' : day.label, x, 288, 12, day.done ? C.white : C.muted, 'center');
+      if (day.today) this.text('今天', x, 312, 8, C.orange, 'center');
+    });
+    this.text(p.weekly.count >= 3 ? '本周目标已完成，下一封信随时再寄。' : '任意三天完成每日风笺，不要求连续签到。', 42, 332, 10, C.muted);
+    this.hit(24, 219, 342, 133, () => game.daily());
+    this.text('接下来，想挑战哪一封？', 25, 377, 14, C.ink, 'left', '600');
+    p.goals.forEach((goal, i) => {
+      const y = 397 + i * 69;
+      this.round(24, y, 342, 59, 13, goal.complete ? C.soft : C.white, C.line);
+      this.circle(47, y + 26, 12, goal.complete ? C.green : C.peach);
+      this.text(goal.complete ? '✓' : String(i + 1).padStart(2, '0'), 47, y + 27, 10, goal.complete ? C.white : C.orange, 'center');
+      this.text(goal.title, 69, y + 19, 13, C.ink, 'left', '500');
+      this.text(goal.detail, 69, y + 40, 10, C.muted);
+      this.text('↗', 345, y + 27, 18, C.green);
+      this.hit(24, y, 342, 59, () => game.goal(goal.action));
+    });
+    this.text('主线 ' + p.totalCompleted + '/30   ·   星星 ' + p.stars + '/90   ·   高手 ' + p.expertCompleted + '/30', 195, Math.max(617, this.H - 90), 11, C.muted, 'center');
+    this.nav(game, 'progress');
   }
   settings(game) {
     this.header('邮局小记', '设置 / 玩法 / 本地数据', () => game.home());
@@ -197,19 +295,20 @@ class Renderer {
   }
   game(game, now) {
     const l = game.level, s = game.state, H = this.H;
-    const index = CAMPAIGN.indexOf(l);
-    this.text(game.mode === 'daily' ? '今日风笺' : '第 ' + String(index + 1).padStart(2, '0') + ' 封来信', 25, 27, 11, C.muted);
+    const index = CAMPAIGN.findIndex(item => item.id === l.id), low = s.energy <= 3;
+    this.text(game.mode === 'daily' ? '今日风笺 · ' + game.runDate : (game.mode === 'expert' ? '高手邮路 · ' : '标准邮路 · ') + String(index + 1).padStart(2, '0') + '/30', 25, 27, 11, game.mode === 'expert' ? C.orange : C.muted);
     this.text(l.title, 25, 53, 23, C.ink, 'left', '600');
     this.round(315, 17, 51, 45, 13, C.soft); this.icon('pause', 340, 39, 20); this.hit(312, 14, 57, 51, () => game.pause());
-    this.round(24, 85, 342, 64, 16, C.green);
-    this.icon('lamp', 48, 116, 25, '#ebd99c'); this.text(s.energy, 82, 111, 26, C.white, 'center', '600'); this.text('剩余拍数', 82, 133, 8, '#c0d0b6');
+    this.round(24, 85, 342, 64, 16, low ? '#89503a' : C.green);
+    this.icon('lamp', 48, 116, 25, '#ebd99c'); this.text(s.energy, 82, 111, 26, C.white, 'center', '600'); this.text(low ? '灯火吃紧' : '剩余拍数', 82, 133, 9, '#e2e6d4');
     this.line([[117, 101], [117, 134]], '#577963', 1);
     this.icon('letter', 143, 112, 22, '#e6a478'); this.text((l.letters.length - s.letters.length) + '/' + l.letters.length, 175, 112, 16, C.white, 'center'); this.text('你收信笺', 158, 133, 9, '#c0d0b6');
     this.icon('echo', 236, 111, 24, '#acd0da'); this.text((l.seals.length - s.seals.length) + '/' + l.seals.length, 271, 112, 16, C.white, 'center'); this.text('回声收邮票', 255, 133, 9, '#c0d0b6');
     this.text('?', 341, 116, 19, '#c0d0b6', 'center'); this.hit(319, 94, 43, 45, () => game.help());
-    const brief = s.turn === 0 ? l.brief : s.letters.length === 0 && s.seals.length === 0 ? '信笺齐了！走到绿色邮局，完成投递。' : s.turn < 3 ? '回声还有 ' + (3 - s.turn) + ' 拍出现。等待也会推进它。' : '蓝色脚印是回声接下来会经过的位置。';
-    this.text(brief, 195, 175, 11, C.muted, 'center');
-    const size = Math.min(342, H - 425), bx = (390 - size) / 2, by = 201;
+    const brief = game.reviewing ? '路线复盘 · 橙线是刚才走过的路，目标留在原处。' : s.turn === 0 ? l.brief : s.letters.length === 0 && s.seals.length === 0 ? '收集完成！前往绿色邮局，寄出这封信。' : s.turn < 3 ? '回声还有 ' + (3 - s.turn) + ' 拍出现。等待也会推进它。' : '① 是下一拍回声落点；先经过蓝票，再等回声盖章。';
+    this.meter(31, 151, 328, s.energy, l.budget, low ? C.orange : C.green);
+    this.wrapped(brief, 26, 169, 338, 10.5, C.muted, 14);
+    const size = Math.min(342, H - 433), bx = (390 - size) / 2, by = 209;
     this.boardRect = { x: bx, y: by, w: size, h: size };
     this.board(game, now, bx, by, size);
     const queueY = by + size + 24;
@@ -219,16 +318,28 @@ class Renderer {
     queue.forEach((pos, i) => {
       const x = 132 + i * 50; this.round(x, queueY - 13, 43, 26, 7, C.bluePale);
       this.text(pos == null ? '—' : String.fromCharCode(65 + pos % l.width) + (Math.floor(pos / l.width) + 1), x + 21, queueY, 11, '#5a8697', 'center');
+      this.text(['① 下一拍', '② 两拍后', '③ 三拍后'][i], x + 21, queueY + 22, 8, C.muted, 'center');
     });
     this.text(s.turn + ' 拍', 350, queueY, 11, C.muted, 'right');
     const controlY = H - 151;
+    if (game.reviewing) {
+      this.wrapped(game.failureHint(), 31, controlY + 4, 327, 12, C.ink, 18);
+      this.button('重新规划 · 免费再试', 24, controlY + 44, 342, 48, () => game.start(game.level, game.mode), 'primary');
+      this.button('返回结果', 24, controlY + 101, 164, 40, () => game.failure(), 'quiet');
+      this.button('返回邮局', 202, controlY + 101, 164, 40, () => game.home(), 'quiet');
+      return;
+    }
     this.text('滑动棋盘', 73, controlY + 33, 12, C.ink, 'center'); this.text('或点相邻格移动', 73, controlY + 56, 10, C.muted, 'center');
     this.button('↑', 170, controlY - 20, 50, 42, () => game.act('up'));
     this.button('←', 114, controlY + 29, 50, 42, () => game.act('left'));
     this.button('等一拍', 170, controlY + 29, 50, 42, () => game.act('wait'), 'primary');
     this.button('→', 226, controlY + 29, 50, 42, () => game.act('right'));
     this.button('↓', 170, controlY + 78, 50, 42, () => game.act('down'));
-    this.icon('star', 319, controlY + 28, 17, C.yellow); this.text('目标 ' + l.par + ' 拍', 319, controlY + 54, 10, C.muted, 'center');
+    const rating = s.revived ? Math.min(2, s.turn <= l.par ? 3 : s.turn <= Math.ceil(l.par * 1.35) ? 2 : 1) : s.turn <= l.par ? 3 : s.turn <= Math.ceil(l.par * 1.35) ? 2 : 1;
+    for (let i = 0; i < 3; i++) this.icon('star', 301 + i * 18, controlY + 20, 14, i < rating ? C.yellow : C.line);
+    this.text('三星 ≤ ' + l.par + ' 拍', 319, controlY + 44, 10, C.muted, 'center');
+    const best = game.record(l, game.mode);
+    this.text(best ? '最佳 ' + best.bestTurns + ' 拍' : game.mode === 'expert' ? '高手 · 不续灯' : '首次探索', 319, controlY + 65, 10, C.muted, 'center');
     this.text('可以停下来想一想，风不会催你。', 195, H - 12, 10, C.muted, 'center');
   }
   board(game, now, x, y, size) {
@@ -238,6 +349,7 @@ class Renderer {
     for (let i = 0; i < l.width * l.height; i++) {
       const [cx, cy] = point(i), wall = l.walls.includes(i);
       this.round(cx - cell / 2 + pad, cy - cell / 2 + pad, cell - pad * 2, cell - pad * 2, 8, wall ? '#c2ceb5' : C.white);
+      if (!wall && !game.reviewing && Math.abs(i % l.width - s.player % l.width) + Math.abs(Math.floor(i / l.width) - Math.floor(s.player / l.width)) === 1) this.round(cx - cell / 2 + pad, cy - cell / 2 + pad, cell - pad * 2, cell - pad * 2, 8, null, '#b2c29f');
       if (wall) {
         this.icon('leaf', cx + 6, cy - 2, cell * .29, '#94aa84'); this.icon('leaf', cx - 7, cy + 6, cell * .22, '#a6b695');
       } else {
@@ -261,7 +373,21 @@ class Renderer {
         else game.toast('点相邻格移动，点送信员原地等一拍');
       });
     }
-    (s.history || []).slice(-3).forEach((pos, i) => { const [px, py] = point(pos); if (pos !== s.player) { this.circle(px - 7, py + cell * .30, 2, '#87b0bf'); this.circle(px + 1, py + cell * .25, 2, '#87b0bf'); } });
+    if (game.reviewing) this.line((s.history || []).map(point), '#c96b3d90', 2.5, [4, 5]);
+    const forecast = (s.history || []).slice(-3); while (forecast.length < 3) forecast.unshift(null);
+    forecast.forEach((pos, i) => {
+      if (pos == null) return;
+      const [px, py] = point(pos);
+      if (i === 0) this.round(px - cell / 2 + 4, py - cell / 2 + 4, cell - 8, cell - 8, 8, null, C.blue);
+      this.circle(px - cell * .29 + i * 10, py + cell * .30, 5.5, i === 0 ? C.blue : '#b8d1d7');
+      this.text(i + 1, px - cell * .29 + i * 10, py + cell * .30, 8, i === 0 ? C.white : C.ink, 'center');
+    });
+    const feedbackAge = now - game.transitionAt;
+    if (feedbackAge >= 0 && feedbackAge < 550 && !game.reviewing) (game.moveEvents || []).filter(e => ['letter', 'seal', 'light'].includes(e.type)).forEach(e => {
+      const [fx, fy] = point(e.cell); c.save(); c.globalAlpha = 1 - feedbackAge / 550;
+      this.circle(fx, fy, cell * (.22 + feedbackAge / 1600), null, e.type === 'seal' ? C.blue : C.orange);
+      this.text(e.type === 'light' ? '+3 拍' : '+1', fx, fy - cell * .3 - feedbackAge / 35, 13, e.type === 'seal' ? C.blue : C.orange, 'center', '600'); c.restore();
+    });
     const progress = Math.min(1, Math.max(0, (now - game.transitionAt) / 140));
     const ease = 1 - Math.pow(1 - progress, 3);
     if (s.echo != null) {

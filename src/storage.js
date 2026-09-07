@@ -32,7 +32,7 @@ function dateId(id) {
 }
 
 function defaults() {
-  return { version: 1, completed: {}, daily: {}, settings: { sound: true, haptics: true }, totalWins: 0 };
+  return { version: 1, completed: {}, daily: {}, expert: {}, settings: { sound: true, haptics: true }, totalWins: 0 };
 }
 
 function score(value) {
@@ -48,7 +48,7 @@ function profileFrom(value) {
     if (typeof value.settings.sound === 'boolean') next.settings.sound = value.settings.sound;
     if (typeof value.settings.haptics === 'boolean') next.settings.haptics = value.settings.haptics;
   }
-  [['completed', safeId], ['daily', dateId]].forEach(function (pair) {
+  [['completed', safeId], ['daily', dateId], ['expert', safeId]].forEach(function (pair) {
     const name = pair[0], valid = pair[1];
     if (!plain(value[name])) return;
     Object.keys(value[name]).slice(0, 1000).forEach(function (id) {
@@ -57,7 +57,7 @@ function profileFrom(value) {
       if (record) next[name][id] = record;
     });
   });
-  next.totalWins = Object.keys(next.completed).length + Object.keys(next.daily).length;
+  next.totalWins = Object.keys(next.completed).length + Object.keys(next.daily).length + Object.keys(next.expert).length;
   return next;
 }
 
@@ -173,7 +173,7 @@ function createStore(adapter) {
       const id = daily ? dateKey : (typeof levelId === 'number' ? String(levelId) : levelId);
       if (!(daily ? dateId(id) : safeId(id)) || !Number.isInteger(stars) || stars < 1 || stars > 3 ||
           !Number.isInteger(turns) || turns < 0 || turns > 100000) return snapshot();
-      const map = daily ? profile.daily : profile.completed;
+      const map = daily ? profile.daily : mode === 'expert' ? profile.expert : profile.completed;
       const before = own(map, id) ? map[id] : null;
       if (!before && Object.keys(map).length >= 1000) return snapshot();
       map[id] = {
