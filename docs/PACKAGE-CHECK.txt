@@ -1,0 +1,24 @@
+
+> wind-letter-corridor@1.0.0 check
+> node tools/check.js
+
+PASS AppID matches requested project.
+PASS Native portrait WeChat Mini Game.
+PASS Native entry points to the new game.
+PASS ads.js: no business backend or personal information API.
+PASS config.js: no business backend or personal information API.
+PASS engine.js: no business backend or personal information API.
+PASS levels.js: no business backend or personal information API.
+PASS main.js: no business backend or personal information API.
+PASS platform.js: no business backend or personal information API.
+PASS renderer.js: no business backend or personal information API.
+PASS sound.js: no business backend or personal information API.
+PASS storage.js: no business backend or personal information API.
+PASS Original move audio exists.
+PASS Original collect audio exists.
+PASS Original start audio exists.
+PASS Original win audio exists.
+PASS Starter template, tooling and QA excluded from upload.
+PASS Source/assets below 1 MiB: 183769 bytes; final upload size subject to WeChat tools.
+PENDING Real adUnitId; real-ad acceptance remains pending.
+Code/package checks passed; physical devices, real ads and platform review require separate acceptance.

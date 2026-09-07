@@ -1,0 +1,23 @@
+
+> wind-letter-corridor@1.0.0 release:check
+> node tools/check.js --release
+
+PASS AppID matches requested project.
+PASS Native portrait WeChat Mini Game.
+PASS Native entry points to the new game.
+PASS ads.js: no business backend or personal information API.
+PASS config.js: no business backend or personal information API.
+PASS engine.js: no business backend or personal information API.
+PASS levels.js: no business backend or personal information API.
+PASS main.js: no business backend or personal information API.
+PASS platform.js: no business backend or personal information API.
+PASS renderer.js: no business backend or personal information API.
+PASS sound.js: no business backend or personal information API.
+PASS storage.js: no business backend or personal information API.
+PASS Original move audio exists.
+PASS Original collect audio exists.
+PASS Original start audio exists.
+PASS Original win audio exists.
+PASS Starter template, tooling and QA excluded from upload.
+PASS Source/assets below 1 MiB: 182410 bytes; final upload size subject to WeChat tools.
+FAIL Real rewarded-video adUnitId configured.
