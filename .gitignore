@@ -1,0 +1,17 @@
+# Development scratch files and machine-specific settings
+/work/
+/project.private.config.json
+
+# Dependencies and generated browser bundle
+node_modules/
+/preview/bundle.js
+
+# Local secrets and logs
+.env
+.env.*
+!.env.example
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
