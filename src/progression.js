@@ -2,14 +2,15 @@
 
 const { CAMPAIGN } = require('./levels');
 
+// Collection thresholds span the whole 120-route campaign (360 stars at most).
 const STAMPS = [
-  ['第一缕风', 1], ['三拍之后', 3], ['纸翼初展', 6], ['苔阶来信', 12],
-  ['巷口微光', 18], ['随风远行', 24], ['林间回响', 30], ['不迷路的月', 40],
-  ['星光邮戳', 50], ['长长的回廊', 65], ['满天风笺', 80],
+  ['第一缕风', 1], ['三拍之后', 3], ['纸翼初展', 9], ['苔阶来信', 18],
+  ['巷口微光', 30], ['随风远行', 48], ['林间回响', 72], ['不迷路的月', 100],
+  ['星光邮戳', 135], ['长长的回廊', 175], ['满天风笺', 220],
 ];
 const RANKS = [
-  ['见习送信人', 0], ['纸翼新手', 12], ['巷间信使', 30], ['回廊旅人', 60],
-  ['追风邮差', 90], ['星夜领航员', 120], ['风笺大师', 180],
+  ['见习送信人', 0], ['纸翼新手', 12], ['巷间信使', 36], ['回廊旅人', 75],
+  ['追风邮差', 130], ['星夜领航员', 200], ['风笺大师', 290],
 ];
 const DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -32,12 +33,11 @@ function calendarDate(dateKey) {
 
 function getProgress(profile, dateKey) {
   const data = profile || {};
-  const completed = table(data.completed), expert = table(data.expert), daily = table(data.daily);
+  const completed = table(data.completed), daily = table(data.daily);
   const passed = CAMPAIGN.filter(level => hasWin(completed, String(level.id)));
-  const expertPassed = CAMPAIGN.filter(level => hasWin(expert, String(level.id)));
   const stars = passed.reduce((sum, level) => sum + completed[String(level.id)].stars, 0);
-  const totalCompleted = passed.length, expertCompleted = expertPassed.length;
-  const points = stars + expertCompleted * 3;
+  const totalCompleted = passed.length;
+  const points = stars;
   let rankIndex = 0;
   while (rankIndex + 1 < RANKS.length && points >= RANKS[rankIndex + 1][1]) rankIndex += 1;
   const nextRank = RANKS[rankIndex + 1];
@@ -65,7 +65,6 @@ function getProgress(profile, dateKey) {
 
   const nextLevel = CAMPAIGN.find(level => !hasWin(completed, String(level.id)));
   const refineLevel = passed.find(level => completed[String(level.id)].stars < 3);
-  const expertLevel = totalCompleted >= 3 ? passed.find(level => !hasWin(expert, String(level.id))) : null;
   const fullStars = passed.filter(level => completed[String(level.id)].stars === 3).length;
   const goals = [];
   if (nextLevel) goals.push({
@@ -77,25 +76,17 @@ function getProgress(profile, dateKey) {
     detail: weekly.count >= weekly.target ? '本周已投递 ' + weekly.count + ' 天，目标已达成' : '本周任选 3 天投递，已完成 ' + weekly.count + ' 天',
     current: hasWin(daily, todayKey) ? 1 : 0, target: 1, complete: hasWin(daily, todayKey), action: 'daily',
   });
-  const refinement = refineLevel ? {
+  // Every goal is optional, derived from progress, and never expires.
+  if (refineLevel) goals.push({
     title: '把一封信送到三星', detail: '第 ' + refineLevel.id + ' 封 · ' + refineLevel.title,
     current: fullStars, target: totalCompleted, complete: false, action: 'stars',
-  } : null;
-  const expertise = expertLevel ? {
-    title: expertCompleted ? '再征服一封高手来信' : '挑战第一封高手来信',
-    detail: '第 ' + expertLevel.id + ' 封 · ' + expertLevel.title,
-    current: expertCompleted, target: totalCompleted, complete: false, action: 'expert',
-  } : null;
-  // Introduce the new challenge at unlock, then alternate toward unclaimed
-  // stars. All goals are optional, derived from progress, and never expire.
-  const optional = expertise && !expertCompleted ? [expertise, refinement] : [refinement, expertise];
-  optional.forEach(goal => { if (goal && goals.length < 3) goals.push(goal); });
-  if (!nextLevel && !refinement && !expertise) goals.push({
-    title: '风笺全路线精通', detail: '全部主线三星与高手来信已收集',
-    current: CAMPAIGN.length, target: CAMPAIGN.length, complete: true, action: 'expert',
+  });
+  if (!nextLevel && !refineLevel) goals.push({
+    title: '风笺全路线精通', detail: '全部主线三星已收集',
+    current: CAMPAIGN.length, target: CAMPAIGN.length, complete: true, action: 'stars',
   });
 
-  return { stars, totalCompleted, expertCompleted, rank, nextStamp, weekly, goals };
+  return { stars, totalCompleted, rank, nextStamp, weekly, goals };
 }
 
-module.exports = { getProgress };
+module.exports = { getProgress, STAMPS };

@@ -2,15 +2,22 @@
 
 const DIRECTIONS = Object.freeze({ up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] });
 const ACTIONS = Object.freeze(['up', 'down', 'left', 'right', 'wait']);
+const STAR_TWO_MARGIN = 2;
 
-function neighbor(level, cell, direction) {
+/** A paper bridge that the courier has already stepped off is a wall for the rest of the route. */
+function collapsed(level, state, cell) {
+  return !!state && (level.bridges || []).indexOf(cell) >= 0 && (state.bridges || []).indexOf(cell) < 0;
+}
+
+function neighbor(level, cell, direction, state) {
   const delta = DIRECTIONS[direction];
   if (!delta) return null;
   const x = cell % level.width + delta[0];
   const y = Math.floor(cell / level.width) + delta[1];
   if (x < 0 || x >= level.width || y < 0 || y >= level.height) return null;
   const next = y * level.width + x;
-  return (level.walls || []).indexOf(next) >= 0 ? null : next;
+  if ((level.walls || []).indexOf(next) >= 0 || collapsed(level, state, next)) return null;
+  return next;
 }
 
 function createState(level) {
@@ -25,6 +32,7 @@ function createState(level) {
     letters: (level.letters || []).filter(cell => cell !== level.start),
     seals: (level.seals || []).slice(),
     lights: (level.lights || []).filter(cell => cell !== level.start),
+    bridges: (level.bridges || []).slice(),
     status: 'playing',
     revived: false
   };
@@ -38,7 +46,7 @@ function step(level, state, action) {
   if (!state || state.status !== 'playing' || ACTIONS.indexOf(action) < 0) {
     return { state, moved: false, events: [] };
   }
-  const destination = action === 'wait' ? state.player : neighbor(level, state.player, action);
+  const destination = action === 'wait' ? state.player : neighbor(level, state.player, action, state);
   if (destination === null) return { state, moved: false, events: [{ type: 'blocked', cell: state.player }] };
 
   const next = {
@@ -49,17 +57,24 @@ function step(level, state, action) {
     history: state.history.slice(),
     letters: state.letters.slice(),
     seals: state.seals.slice(),
-    lights: state.lights.slice()
+    lights: state.lights.slice(),
+    bridges: (state.bridges || []).slice()
   };
   const events = [{ type: action === 'wait' ? 'wait' : 'move', cell: destination }];
   // Entering a wind tile pushes once. Waiting does not re-trigger the tile.
   const wind = action !== 'wait' && level.winds && level.winds[destination];
   if (wind) {
-    const pushed = neighbor(level, destination, wind);
+    const pushed = neighbor(level, destination, wind, state);
     if (pushed !== null) {
       next.player = pushed;
       events.push({ type: 'wind', cell: pushed });
     }
+  }
+  // Paper bridges carry the courier once. Leaving one tears it; the echo is
+  // only a memory of the route and is never blocked by the torn paper.
+  if (next.player !== state.player && next.bridges.indexOf(state.player) >= 0) {
+    next.bridges = next.bridges.filter(cell => cell !== state.player);
+    events.push({ type: 'bridge', cell: state.player });
   }
   next.history.push(next.player);
   next.echo = next.turn >= 3 ? next.history[next.turn - 3] : null;
@@ -89,15 +104,32 @@ function step(level, state, action) {
   return { state: next, moved: true, events };
 }
 
+/** Rebuild a state from its action history; an optional revival index replays the one-time relight. */
+function replay(level, actions, reviveAt) {
+  let state = createState(level);
+  for (let index = 0; index <= actions.length; index++) {
+    if (reviveAt === index) {
+      if (state.status !== 'failed') throw new Error('invalid revive');
+      state = revive(level, state);
+    }
+    if (index === actions.length) break;
+    const result = step(level, state, actions[index]);
+    if (!result.moved) throw new Error('invalid action');
+    state = result.state;
+  }
+  return state;
+}
+
 function revive(level, state) {
   if (!state || state.status !== 'failed' || state.revived) return state;
   return { ...state, energy: Math.max(8, Math.ceil(level.budget * 0.5)), status: 'playing', revived: true };
 }
 
+/** Three stars at the verified minimum, two within a short margin, one for any other delivery. */
 function stars(level, state) {
   const par = Math.max(1, level.par || level.budget);
-  const earned = state.turn <= par ? 3 : state.turn <= Math.ceil(par * 1.35) ? 2 : 1;
+  const earned = state.turn <= par ? 3 : state.turn <= par + STAR_TWO_MARGIN ? 2 : 1;
   return state.revived ? Math.min(2, earned) : earned;
 }
 
-module.exports = { ACTIONS, DIRECTIONS, createState, step, revive, stars, neighbor };
+module.exports = { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, createState, step, replay, revive, stars, neighbor };

@@ -10,5 +10,7 @@
     "check": "node tools/check.js",
     "release:check": "node tools/check.js --release"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

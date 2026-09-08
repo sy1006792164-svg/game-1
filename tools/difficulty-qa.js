@@ -4,11 +4,12 @@
 // Defaults to 1,000 days, with an engine-based BFS separate from levels.js.
 const assert = require('node:assert/strict');
 const { performance } = require('node:perf_hooks');
-const { CAMPAIGN, getDaily, CONTENT_VERSION } = require('../src/levels');
+const { CAMPAIGN, getDaily, CONTENT_VERSION, PER_CHAPTER } = require('../src/levels');
 const { createState, step } = require('../src/engine');
 const { solve } = require('./solve');
 
-// Release 1 snapshot: [shortest witness turns, starting light, remaining light].
+// Release 1 snapshot for the hand-made routes: [shortest witness turns, starting light, remaining light].
+// Generated routes (31+) have no release-1 counterpart and report null there.
 const BASELINE = [[4,8,4],[6,10,4],[9,15,6],[12,20,8],[7,12,5],[10,16,6],[18,25,7],[17,23,6],[22,30,8],[17,23,6],[23,32,9],[22,30,8],[9,13,4],[18,25,7],[21,29,8],[18,25,7],[21,29,8],[23,32,9],[20,27,10],[19,26,10],[18,25,7],[19,26,10],[22,30,11],[22,30,11],[21,29,11],[21,29,11],[26,36,13],[23,32,12],[22,30,14],[25,34,12]];
 
 function audit(level) {
@@ -26,12 +27,13 @@ function audit(level) {
   assert.equal(state.status, 'won', `${level.id}: witness requires revival`);
   assert.equal(state.turn, level.par);
   assert.equal(state.revived, false);
-  return { turns: state.turn, budget: level.budget, reserve: state.energy };
+  assert.deepEqual(state.bridges, [], `${level.id}: every paper bridge is used by the witness`);
+  return { turns: state.turn, budget: level.budget, reserve: state.energy, bridges: level.bridges.length };
 }
 
 const campaign = CAMPAIGN.map((level, index) => {
   const result = audit(level);
-  const [oldTurns, oldBudget, oldReserve] = BASELINE[index];
+  const [oldTurns, oldBudget, oldReserve] = BASELINE[index] || [null, null, null];
   return { id: level.id, oldTurns, ...result, oldBudget, oldReserve };
 });
 const dailyCount = process.argv[2] === undefined ? 1000 : Number(process.argv[2]);
@@ -50,7 +52,7 @@ for (let index = 0; index < dailyCount; index++) {
   assert.equal(level.seals.length, 3);
   signatures.add(JSON.stringify([level.walls, level.start, level.exit, level.letters, level.seals, level.winds]));
   const result = audit(level);
-  assert.ok(result.reserve >= 4 && result.reserve <= 6, `${key}: unexpected reserve ${result.reserve}`);
+  assert.ok(result.reserve >= 1 && result.reserve <= 3, `${key}: unexpected reserve ${result.reserve}`);
   dailyResults.push(result);
 }
 assert.equal(signatures.size, dailyCount, 'duplicate daily map');
@@ -60,6 +62,9 @@ generationMs.sort((a,b) => a-b);
 console.log(JSON.stringify({
   contentVersion: CONTENT_VERSION,
   campaign,
-  chapters: Array.from({length: 5}, (_, index) => ({ chapter: index + 1, ...aggregate(campaign.slice(index * 6, index * 6 + 6)), oldMeanTurns: average(campaign.slice(index * 6, index * 6 + 6).map(row => row.oldTurns)), oldMeanReserve: average(campaign.slice(index * 6, index * 6 + 6).map(row => row.oldReserve)) })),
+  chapters: Array.from({length: CAMPAIGN.length / PER_CHAPTER}, (_, index) => {
+    const rows = campaign.slice(index * PER_CHAPTER, index * PER_CHAPTER + PER_CHAPTER), old = rows.filter(row => row.oldTurns !== null);
+    return { chapter: index + 1, size: CAMPAIGN[index * PER_CHAPTER].width, ...aggregate(rows), oldMeanTurns: old.length ? average(old.map(row => row.oldTurns)) : null, oldMeanReserve: old.length ? average(old.map(row => row.oldReserve)) : null };
+  }),
   daily: { count: dailyCount, unique: signatures.size, independentMinimumVerified: dailyCount, ...aggregate(dailyResults), generationMeanMs: average(generationMs), generationP95Ms: Math.round(generationMs[Math.floor((generationMs.length - 1) * 0.95)] * 100) / 100, generationMaxMs: Math.round(generationMs[generationMs.length - 1] * 100) / 100, auditSeconds: Math.round((performance.now() - began) / 10) / 100 }
 }, null, 2));

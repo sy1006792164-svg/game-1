@@ -1,5 +1,7 @@
 'use strict';
 
+const { createPinchGesture } = require('./pointer-zoom');
+
 // A small platform boundary; game rules never depend on wx or the DOM.
 function defaultEnvironment() {
   return {
@@ -69,19 +71,25 @@ function createPlatform(environment) {
     return Object.assign({}, dimensions);
   }
 
-  function onPointer(listener) {
+  // Zoom receives canvas coordinates, a relative scale, and optional center motion.
+  function onPointer(listener, onZoom) {
     if (typeof listener !== 'function') return function () {};
     let activeId = null;
     let last = null;
     let source = null;
     let lastNativeTouchAt = -Infinity;
     const removeListeners = [];
+    const pinch = typeof onZoom === 'function' ? createPinchGesture(cancelPointer, onZoom) : null;
 
-    function cancel() {
+    function cancelPointer() {
       const point = last;
       const wasActive = source !== null;
       activeId = null; last = null; source = null;
       if (wasActive) listener(point ? point.x : 0, point ? point.y : 0, 'cancel');
+    }
+    function cancel() {
+      if (pinch) pinch.reset();
+      cancelPointer();
     }
     function listen(target, name, handler) {
       if (!target || typeof target.addEventListener !== 'function') return;
@@ -100,6 +108,19 @@ function createPlatform(environment) {
       };
     }
     function finitePoint(point) { return point && Number.isFinite(point.x) && Number.isFinite(point.y); }
+    function listenWheel() {
+      if (!pinch) return;
+      listen(canvas, 'wheel', function (event) {
+        if (pinch.isActive() || !Number.isFinite(event.deltaY) || event.deltaY === 0) return;
+        const point = canvasPoint(event);
+        if (!finitePoint(point)) return;
+        if (event.preventDefault) event.preventDefault();
+        cancel();
+        const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? dimensions.height : 1;
+        const exponent = Math.max(-0.35, Math.min(0.35, -event.deltaY * unit * 0.002));
+        onZoom(point.x, point.y, Math.exp(exponent));
+      });
+    }
 
     if (api) {
       const handlers = {};
@@ -109,6 +130,7 @@ function createPlatform(environment) {
           // In the desktop simulator, a canvas mouse event may subsequently be
           // translated to wx touch at the document. Its existing owner wins.
           if (source === 'mouse') return;
+          if (pinch && pinch.touch(type, event)) { lastNativeTouchAt = now(); return; }
           const changed = Array.from((event && event.changedTouches) || []);
           const touches = Array.from((event && event.touches) || []);
           const points = changed.length ? changed : touches;
@@ -119,7 +141,7 @@ function createPlatform(environment) {
               // A missing end/cancel must not permanently lock the next finger.
               // A genuine second finger leaves the first in the active list.
               if (!touches.length || touches.some(function (touch) { return (touch.identifier == null ? 0 : touch.identifier) === activeId; })) return;
-              cancel();
+              cancelPointer();
             }
             point = points[0];
             const x = Number.isFinite(point.clientX) ? point.clientX : point.x;
@@ -173,7 +195,7 @@ function createPlatform(environment) {
             // A new left-button down is also a recovery point if an overlay
             // swallowed the previous release. It cannot be a second finger.
             if (source === 'mouse') cancel();
-            if (source !== null || now() - lastNativeTouchAt < 700) return;
+            if (source !== null || (pinch && pinch.isActive()) || now() - lastNativeTouchAt < 700) return;
             const point = canvasPoint(event);
             if (!finitePoint(point)) return;
             source = 'mouse'; activeId = 'mouse'; last = point;
@@ -194,6 +216,7 @@ function createPlatform(environment) {
         listen(releaseTarget, 'mouseup', function (event) { mouse('end', event); });
         listen(canvas, 'mouseleave', cancel);
         listen(windowTarget, 'blur', cancel);
+        listenWheel();
       }
       return cleanup;
     }
@@ -201,6 +224,15 @@ function createPlatform(environment) {
     ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (name) {
       const type = name === 'pointerdown' ? 'start' : name === 'pointermove' ? 'move' : name === 'pointerup' ? 'end' : 'cancel';
       listen(canvas, name, function (event) {
+        if (type === 'start' && event.button != null && event.button !== 0) return;
+        const point = canvasPoint(event);
+        if (pinch && (event.pointerType === 'touch' || pinch.isActive())) {
+          if (event.preventDefault) event.preventDefault();
+          if (type === 'start' && canvas.setPointerCapture) {
+            try { canvas.setPointerCapture(event.pointerId); } catch (_) { /* Synthetic pointer. */ }
+          }
+          if (pinch.pointer(type, event, point)) return;
+        }
         if (type === 'start') {
           if (activeId !== null || (event.button != null && event.button !== 0)) return;
           activeId = event.pointerId;
@@ -210,7 +242,6 @@ function createPlatform(environment) {
           }
         } else if (activeId === null || (event.pointerId !== activeId && !(type === 'cancel' && event.pointerId == null))) return;
         if (event.preventDefault) event.preventDefault();
-        const point = canvasPoint(event);
         if (type === 'cancel') { if (finitePoint(point)) last = point; cancel(); return; }
         if (!finitePoint(point)) return;
         last = point;
@@ -218,6 +249,7 @@ function createPlatform(environment) {
         listener(point.x, point.y, type);
       });
     });
+    listenWheel();
     listen(win, 'blur', cancel);
     listen(doc, 'visibilitychange', function () { if (doc.hidden) cancel(); });
     return cleanup;

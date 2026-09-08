@@ -1,0 +1,160 @@
+'use strict';
+
+const { DIRECTIONS } = require('./engine');
+
+const MOVE_MS = 180;
+const TAU = Math.PI * 2;
+const COLORS = { gold: '#ffdc8c', cyan: '#94ece7', paper: '#f4ddb5' };
+const clamp = value => Math.max(0, Math.min(1, value));
+const validCell = value => Number.isInteger(value) && value >= 0;
+const finite = value => typeof value === 'number' && Number.isFinite(value);
+const smooth = value => value * value * (3 - 2 * value);
+
+function position(point, cell) {
+  if (typeof point !== 'function' || !validCell(cell)) return [0, 0];
+  const value = point(cell);
+  return Array.isArray(value) && value.length >= 2 && value.slice(0, 2).every(finite) ? value : [0, 0];
+}
+
+// Echoes replay recorded actions, including the corner between a step and a wind push.
+function echoPath(game, from, to) {
+  const level = game.level, previous = game.previousState, state = game.state;
+  const direct = from === to ? [to] : [from, to];
+  if (!level || !previous || !Array.isArray(game.actions) || !level.width) return direct;
+  const backwards = previous.turn > state.turn;
+  const action = game.actions[Math.max(previous.turn, state.turn) - 4];
+  const delta = DIRECTIONS[action];
+  if (!delta) return direct;
+  const start = backwards ? to : from, end = backwards ? from : to;
+  const middle = start + delta[0] + delta[1] * level.width;
+  const wind = level.winds && DIRECTIONS[level.winds[middle]];
+  if (!wind || middle + wind[0] + wind[1] * level.width !== end) return direct;
+  return [from, middle, to];
+}
+
+function movementPath(game, from, to, ghost) {
+  if (!validCell(from)) return [to];
+  if (ghost) return echoPath(game, from, to);
+  const explicit = game.motionPath;
+  if (Array.isArray(explicit) && explicit.length > 1 && explicit.every(validCell) && explicit[0] === from && explicit[explicit.length - 1] === to) return explicit;
+  const path = [from];
+  for (const event of game.moveEvents || []) {
+    if (event && (event.type === 'move' || event.type === 'wind') && validCell(event.cell) && event.cell !== path[path.length - 1]) path.push(event.cell);
+  }
+  if (path[path.length - 1] !== to) path.push(to);
+  return path;
+}
+
+function actorFrame(game, now, point, ghost = false) {
+  const state = game && game.state, previous = game && game.previousState;
+  const key = ghost ? 'echo' : 'player';
+  const time = finite(now) ? now : 0;
+  const age = game && finite(game.transitionAt) ? Math.max(0, time - game.transitionAt) : MOVE_MS;
+  const progress = clamp(age / MOVE_MS), eased = smooth(progress);
+  const target = state && state[key], from = previous && previous[key];
+  const disappearing = ghost && !validCell(target) && validCell(from) && progress < 1;
+  if (!validCell(target) && !disappearing) return { x: 0, y: 0, lift: 0, stride: 0, alpha: 0, moving: false, facing: 1 };
+  const path = disappearing ? [from] : movementPath(game, from, target, ghost);
+  const segment = Math.min(Math.max(0, path.length - 2), Math.floor(eased * (path.length - 1)));
+  const fraction = path.length > 1 ? eased * (path.length - 1) - segment : 0;
+  const [x0, y0] = position(point, path[segment]);
+  const [x1, y1] = position(point, path[Math.min(segment + 1, path.length - 1)]);
+  const moving = path.length > 1 && progress < 1;
+  const breathing = Math.sin(time / (ghost ? 390 : 610) + (ghost ? 1.7 : 0));
+  const stride = moving ? Math.sin(progress * TAU) : 0;
+  const lift = ghost ? 4 + breathing * 1.7 + (moving ? Math.sin(progress * Math.PI) * 3 : 0) : .6 + breathing * .6 + (moving ? Math.sin(progress * Math.PI) * 4 : 0);
+  const alpha = !ghost ? 1 : disappearing ? 1 - eased : !validCell(from) ? eased : 1;
+  return { x: x0 + (x1 - x0) * fraction, y: y0 + (y1 - y0) * fraction, lift, stride, alpha, moving, facing: x1 < x0 ? -1 : 1 };
+}
+
+// A stable seed keeps every particle on the same trajectory between animation frames.
+function random(seed) {
+  let value = Math.imul(seed + 1, 2654435761);
+  value = Math.imul(value ^ value >>> 16, 2246822519);
+  return (value >>> 0) / 4294967296;
+}
+
+function burst(renderer, x, y, unit, progress, color, seed, paper) {
+  const c = renderer.ctx;
+  for (let index = 0; index < (paper ? 9 : 13); index++) {
+    const n = seed + index * 31;
+    const angle = random(n) * TAU;
+    const distance = unit * (.16 + random(n + 1) * .43) * Math.sqrt(progress);
+    const px = x + Math.cos(angle) * distance;
+    const py = y + Math.sin(angle) * distance * .6 - Math.sin(progress * Math.PI) * unit * .32 + (paper ? progress * progress * unit * .44 : -progress * unit * .12);
+    const radius = 1.1 + random(n + 2) * 1.5;
+    if (paper) {
+      c.save(); c.translate(px, py); c.rotate(angle + progress * (random(n + 3) - .5) * 9);
+      renderer.round(-radius * 1.4, -radius * .6, radius * 2.8, radius * 1.2, .5, color); c.restore();
+    } else {
+      renderer.circle(px, py, radius * (1 - progress * .5), color);
+      if (index % 3 === 0) renderer.line([[px - radius * 2, py], [px + radius * 2, py]], color, .8);
+    }
+  }
+}
+
+function drawEffectBatch(renderer, batch, now, point, scale) {
+  const c = renderer.ctx, age = now - batch.at, events = batch.events;
+  events.forEach((event, index) => {
+    if (!event || !validCell(event.cell)) return;
+    const [x, y] = position(point, event.cell);
+    const seed = event.cell * 193 + index * 997;
+    c.save();
+    if (['letter', 'seal', 'light', 'bridge'].includes(event.type)) {
+      const paper = event.type === 'bridge';
+      const delay = paper ? 25 : MOVE_MS * .6;
+      const progress = (age - delay) / (paper ? 700 : 650);
+      if (progress >= 0 && progress <= 1) {
+        const color = event.type === 'seal' ? COLORS.cyan : paper ? COLORS.paper : COLORS.gold;
+        c.globalAlpha *= 1 - progress;
+        renderer.circle(x, y - scale * .08, scale * (.15 + progress * .48), null, color);
+        burst(renderer, x, y - scale * .18, scale, progress, color, seed, paper);
+        renderer.text(event.type === 'light' ? '+3 拍' : paper ? '纸桥碎了' : '+1', x, y - scale * .52 - progress * 20, paper ? 10 : 14, color, 'center', '600');
+      }
+    } else if (event.type === 'wind' && age < 600) {
+      const progress = age / 600;
+      const entry = events.slice(0, index).find(item => item && item.type === 'move');
+      const [sx, sy] = position(point, entry ? entry.cell : event.cell);
+      c.globalAlpha *= (1 - progress) * .7;
+      for (let ribbon = 0; ribbon < 3; ribbon++) {
+        const offset = (ribbon - 1) * scale * .1;
+        const lead = clamp(progress * 1.7), tail = Math.max(0, lead - .65);
+        renderer.line([[sx + (x - sx) * tail, sy + (y - sy) * tail + offset], [sx + (x - sx) * lead, sy + (y - sy) * lead + offset - Math.sin(progress * Math.PI) * 4]], COLORS.cyan, 1.4 - ribbon * .2);
+      }
+    } else if (event.type === 'wait' && age < 650) {
+      const progress = age / 650;
+      c.globalAlpha *= (1 - progress) * .75;
+      renderer.circle(x, y, scale * (.13 + progress * .42), null, COLORS.cyan);
+      renderer.circle(x, y, scale * (.07 + progress * .29), null, COLORS.gold);
+      renderer.text('等一拍', x, y - scale * .6 - progress * 12, 10, COLORS.cyan, 'center');
+    }
+    c.restore();
+  });
+}
+
+function drawEffects(renderer, game, now, point, unit) {
+  if (!renderer || !renderer.ctx || !game || !finite(now) || !finite(game.transitionAt) || typeof point !== 'function') return;
+  let buffer = renderer.motionEffects;
+  if (!buffer || buffer.game !== game || buffer.session !== game.session || buffer.level !== game.level) {
+    // Preserve the last observed source so changing screens cannot replay an old burst.
+    buffer = renderer.motionEffects = {
+      game, session: game.session, level: game.level, batches: [], turn: null, undosUsed: null,
+      at: buffer ? buffer.at : null, events: buffer ? buffer.events : null
+    };
+  }
+  const turn = game.state && game.state.turn;
+  const backwards = (finite(turn) && finite(buffer.turn) && turn < buffer.turn) ||
+    (finite(game.undosUsed) && finite(buffer.undosUsed) && game.undosUsed !== buffer.undosUsed);
+  if (game.reviewing || backwards) buffer.batches = [];
+  const changed = buffer.at !== game.transitionAt || buffer.events !== game.moveEvents;
+  if (!game.reviewing && changed && Array.isArray(game.moveEvents) && game.moveEvents.length) {
+    buffer.batches.push({ at: game.transitionAt, events: game.moveEvents.slice() });
+  }
+  buffer.at = game.transitionAt; buffer.events = game.moveEvents; buffer.turn = turn; buffer.undosUsed = game.undosUsed;
+  buffer.batches = buffer.batches.filter(batch => now >= batch.at && now - batch.at <= 800).slice(-12);
+  if (game.reviewing) return;
+  const scale = finite(unit) && unit > 0 ? unit : 40;
+  buffer.batches.forEach(batch => drawEffectBatch(renderer, batch, now, point, scale));
+}
+
+module.exports = { MOVE_MS, actorFrame, drawEffects };

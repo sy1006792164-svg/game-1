@@ -3,10 +3,10 @@
 const { createState, step, ACTIONS } = require('../src/engine');
 
 /** Breadth-first reference solver. Light is unlimited while finding a witness. */
-function solve(level, limit = 350000) {
+function solve(level, limit = 400000) {
   const unlimited = { ...level, budget: 9999 };
   const first = createState(unlimited);
-  const key = state => [state.player, state.history.slice(-3).join('.'), state.letters.join('.'), state.seals.join('.')].join('|');
+  const key = state => [state.player, state.history.slice(-3).join('.'), state.letters.join('.'), state.seals.join('.'), (state.bridges || []).join('.')].join('|');
   const queue = [{ state: first, parent: -1, action: null }];
   const seen = new Set([key(first)]);
   for (let head = 0; head < queue.length && queue.length <= limit; head++) {

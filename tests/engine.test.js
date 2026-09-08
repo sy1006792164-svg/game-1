@@ -2,8 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ACTIONS, createState, step, revive, stars } = require('../src/engine');
-const { CAMPAIGN, getDaily, chapterNames, CONTENT_VERSION } = require('../src/levels');
+const { ACTIONS, createState, step, replay, revive, stars, STAR_TWO_MARGIN } = require('../src/engine');
+const { CAMPAIGN, getDaily, chapterNames, CONTENT_VERSION, PER_CHAPTER, reserveFor, undoFor } = require('../src/levels');
 const { solve } = require('../tools/solve');
 
 function board(overrides = {}) {
@@ -38,32 +38,43 @@ function checkLevel(level) {
   return state;
 }
 
-test('all 30 campaign witnesses win without revival and fit five chapters', () => {
-  assert.equal(CAMPAIGN.length, 30);
-  assert.equal(chapterNames.length, 5);
-  assert.equal(new Set(CAMPAIGN.map(level => level.solution.join(','))).size, 30);
-  assert.equal(new Set(CAMPAIGN.map(level => JSON.stringify([level.walls, level.start, level.exit, level.letters, level.seals, level.winds, level.lights]))).size, 30);
+test('all 120 campaign witnesses win without revival and fill twenty chapters of six', () => {
+  assert.equal(CAMPAIGN.length, 120);
+  assert.equal(PER_CHAPTER, 6);
+  assert.equal(chapterNames.length, CAMPAIGN.length / PER_CHAPTER);
+  assert.equal(new Set(CAMPAIGN.map(level => level.solution.join(','))).size, CAMPAIGN.length);
+  assert.equal(new Set(CAMPAIGN.map(level => JSON.stringify([level.walls, level.start, level.exit, level.letters, level.seals, level.winds, level.lights]))).size, CAMPAIGN.length);
   for (const [index, level] of CAMPAIGN.entries()) {
     assert.equal(level.id, index + 1);
     assert.equal(level.revision, CONTENT_VERSION);
-    assert.equal(level.chapter, Math.floor(index / 6));
+    assert.equal(level.chapter, Math.floor(index / PER_CHAPTER));
+    assert.equal(level.undo, undoFor(index));
+    assert.equal(level.width, level.height);
+    assert.equal(level.width, index < 54 ? 6 : index < 84 ? 7 : 8, `${level.id}: board size grows by chapter`);
     checkLevel(level);
     if (index >= 3) assert.ok(new Set(level.solution).size >= 3, `${level.id}: route should use turns`);
   }
 });
 
-test('revised campaign has independently optimal targets and a sustained late-game challenge', () => {
-  assert.equal(CONTENT_VERSION, '2');
+test('the campaign has independently optimal targets and a tight, sustained light budget', () => {
+  assert.equal(CONTENT_VERSION, '4');
+  assert.equal(STAR_TWO_MARGIN, 2);
   assert.deepEqual(CAMPAIGN.slice(0, 3).map(level => level.par), [4, 6, 9]);
+  assert.deepEqual([reserveFor(0), reserveFor(3), reserveFor(6), reserveFor(17), reserveFor(18), reserveFor(119)], [null, 3, 2, 2, 1, 1]);
   for (const level of CAMPAIGN) {
     const shortest = solve(level);
     assert.ok(shortest, `${level.id}: independent solver exhausted`);
     assert.equal(shortest.length, level.par, `${level.id}: three-star target must equal the independent minimum`);
     const final = follow(level, level.solution);
-    if (level.id >= 4) assert.ok(final.energy >= 3 && final.energy <= 5, `${level.id}: reserve must include collected lamps`);
-    if (level.id >= 7) assert.ok(level.par >= 23, `${level.id}: chapter 2+ should require a planned route`);
-    if (level.id >= 19) assert.ok(level.par >= 30, `${level.id}: later maps should sustain difficulty`);
-    if (level.id >= 25) assert.ok(level.par >= 35, `${level.id}: finale route too short`);
+    const reserve = reserveFor(level.id - 1);
+    // A late lamp can force one extra starting unit so the route survives until the lamp; never more.
+    if (level.id >= 4) assert.ok(final.energy >= reserve && final.energy <= reserve + 1, `${level.id}: reserve ${final.energy} must be the chapter margin ${reserve} after collected lamps`);
+    if (level.id >= 19) assert.equal(final.energy, 1, `${level.id}: from route 19 exactly one spare turn remains`);
+    if (level.id >= 7 && level.id <= 30) assert.ok(level.par >= 23, `${level.id}: chapter 2+ should require a planned route`);
+    if (level.id >= 19 && level.id <= 30) assert.ok(level.par >= 30, `${level.id}: later maps should sustain difficulty`);
+    if (level.id >= 31) assert.ok(level.par >= (level.width === 6 ? 28 : level.width === 7 ? 36 : 44), `${level.id}: generated ${level.width}x${level.width} route too short (${level.par})`);
+    if (level.id >= 31) assert.ok(level.letters.length >= 3 && level.letters.length === level.seals.length, `${level.id}: generated routes carry matched letters and stamps`);
+    if (level.id >= 61) assert.ok(level.letters.length >= 4, `${level.id}: later generated routes carry at least four letters`);
     if (level.id >= 4) {
       const junctions = Array.from({length: level.width * level.height}, (_, cell) => cell).filter(cell => {
         if (level.walls.includes(cell)) return false;
@@ -73,7 +84,8 @@ test('revised campaign has independently optimal targets and a sustained late-ga
           nx >= 0 && nx < level.width && ny >= 0 && ny < level.height && !level.walls.includes(ny * level.width + nx)
         ).length >= 3;
       });
-      assert.ok(junctions.length >= 3, `${level.id}: difficulty must include genuine route choices`);
+      if (level.id <= 6) assert.equal(junctions.length, level.id - 2, `${level.id}: introductory choices should increase one junction at a time`);
+      else assert.ok(junctions.length >= 3, `${level.id}: difficulty must include genuine route choices`);
     }
   }
 });
@@ -106,7 +118,7 @@ test('daily maps are deterministic, independent, varied and solvable across 60 d
     assert.equal(level.seals.length, 3);
     assert.deepEqual(getDaily(key), level);
     const final = checkLevel(level);
-    assert.ok(final.energy >= 4 && final.energy <= 6, `${key}: daily reserve should stay compact`);
+    assert.ok(final.energy >= 1 && final.energy <= 3, `${key}: daily reserve should stay tight`);
     signatures.add(JSON.stringify([level.walls, level.start, level.exit, level.letters, level.seals]));
   }
   assert.equal(signatures.size, 60);
@@ -249,8 +261,102 @@ test('three-star targets and revival cap apply at their exact boundaries', () =>
   const level = board({ par: 10 });
   assert.equal(stars(level, { turn: 10, revived: false }), 3);
   assert.equal(stars(level, { turn: 11, revived: false }), 2);
-  assert.equal(stars(level, { turn: 14, revived: false }), 2);
+  assert.equal(stars(level, { turn: 12, revived: false }), 2);
+  assert.equal(stars(level, { turn: 13, revived: false }), 1);
   assert.equal(stars(level, { turn: 15, revived: false }), 1);
+  assert.equal(stars(board({ par: 40 }), { turn: 42, revived: false }), 2, 'the margin is absolute, not proportional');
+  assert.equal(stars(board({ par: 40 }), { turn: 43, revived: false }), 1);
   assert.equal(stars(level, { turn: 10, revived: true }), 2);
   assert.equal(stars(level, { turn: 15, revived: true }), 1);
+});
+
+test('paper bridges tear once the courier leaves them and never block the echo', () => {
+  // S = . B . E in one row: cells 0..4, the bridge is cell 2.
+  const level = board({ width: 5, height: 1, start: 0, exit: 4, bridges: [2], seals: [2], budget: 20 });
+  let state = createState(level);
+  assert.deepEqual(state.bridges, [2]);
+  state = step(level, state, 'right').state;
+  state = step(level, state, 'right').state;
+  assert.equal(state.player, 2);
+  assert.deepEqual(state.bridges, [2], 'standing on a bridge keeps it intact');
+  state = step(level, state, 'wait').state;
+  assert.deepEqual(state.bridges, [2], 'waiting on a bridge does not tear it');
+  const leave = step(level, state, 'right');
+  state = leave.state;
+  assert.deepEqual(state.bridges, []);
+  assert.ok(leave.events.some(event => event.type === 'bridge' && event.cell === 2));
+  const back = step(level, state, 'left');
+  assert.equal(back.moved, false, 'a torn bridge is a wall');
+  assert.equal(back.state, state);
+  state = step(level, state, 'wait').state;
+  assert.equal(state.echo, 2, 'the echo still walks the torn bridge');
+  assert.deepEqual(state.seals, [], 'and still collects there');
+  state = step(level, state, 'right').state;
+  assert.equal(state.status, 'won');
+});
+
+test('wind cannot push the courier onto a torn bridge and cannot tear a bridge it only crosses', () => {
+  // Row: S(0) B(1) W>(2) .(3) with the wind on cell 2 pushing right.
+  const level = board({ width: 4, height: 1, start: 0, exit: 3, bridges: [1], winds: { 2: 'right' }, budget: 20 });
+  let state = createState(level);
+  state = step(level, state, 'right').state;
+  state = step(level, state, 'right').state;
+  assert.equal(state.player, 3, 'entering the wind tile pushes to the exit cell');
+  assert.deepEqual(state.bridges, [], 'leaving the bridge tore it even though the same turn also blew the courier onward');
+  // Two rows of five. Top row: .(0) bridge(1) wind<(2) .(3) .(4); bottom row is a bypass with the exit at 8.
+  const pushed = board({ width: 5, height: 2, start: 9, exit: 8, letters: [0], bridges: [1], winds: { 2: 'left' }, budget: 20 });
+  let other = createState(pushed);
+  other = step(pushed, other, 'up').state;
+  other = step(pushed, other, 'left').state;
+  assert.equal(other.player, 3);
+  other = step(pushed, other, 'left').state;
+  assert.equal(other.player, 1, 'wind carries the courier onto an intact bridge');
+  assert.deepEqual(other.bridges, [1]);
+  const bounce = step(pushed, other, 'right').state;
+  assert.equal(bounce.player, 1, 'a wind tile that blows the courier straight back leaves them on the bridge');
+  assert.deepEqual(bounce.bridges, [1], 'the bridge only tears once the courier actually ends the turn elsewhere');
+  other = step(pushed, other, 'left').state;
+  assert.deepEqual(other.bridges, []);
+  assert.equal(step(pushed, other, 'right').moved, false);
+  other = step(pushed, other, 'down').state;
+  other = step(pushed, other, 'right').state;
+  other = step(pushed, other, 'right').state;
+  const blocked = step(pushed, other, 'up');
+  assert.equal(blocked.moved, true);
+  assert.equal(blocked.state.player, 2, 'the wind tile is entered but the push toward the torn bridge is cancelled');
+  assert.ok(!blocked.events.some(event => event.type === 'wind'));
+});
+
+test('replay rebuilds any state from its action history and rejects impossible histories', () => {
+  const level = board({ letters: [1], budget: 3 });
+  const direct = step(level, step(level, createState(level), 'right').state, 'wait').state;
+  assert.deepEqual(replay(level, ['right', 'wait']), direct);
+  assert.deepEqual(replay(level, []), createState(level));
+  assert.throws(() => replay(level, ['up']), /invalid action/);
+  const failed = replay(level, ['right', 'wait', 'wait']);
+  assert.equal(failed.status, 'failed');
+  assert.throws(() => replay(level, ['right', 'wait'], 1), /invalid revive/);
+  const revived = replay(level, ['right', 'wait', 'wait', 'right'], 3);
+  assert.equal(revived.revived, true);
+  assert.equal(revived.turn, 4);
+  assert.deepEqual(revived.history, [0, 1, 1, 1, 2]);
+});
+
+test('bridge routes tear every bridge on their witness and cannot be crossed twice', () => {
+  const bridged = CAMPAIGN.filter(level => level.bridges.length);
+  assert.deepEqual(bridged.filter(level => level.id <= 30).map(level => level.id), [16, 20, 21, 25, 27, 28, 29]);
+  assert.ok(CAMPAIGN.slice(36).every(level => level.bridges.length >= 1), 'every generated route from chapter 7 on has a paper bridge');
+  assert.ok(CAMPAIGN.slice(54).every(level => level.bridges.length === 2), 'the bigger boards carry two paper bridges');
+  for (const level of bridged) {
+    for (const cell of level.bridges) {
+      assert.ok(!level.walls.includes(cell) && !level.letters.includes(cell) && !level.seals.includes(cell) && !level.lights.includes(cell) && !level.winds[cell], `${level.id}: a bridge is plain floor`);
+      assert.ok(cell !== level.start && cell !== level.exit, `${level.id}: start and exit are never bridges`);
+    }
+    const final = follow(level, level.solution);
+    assert.equal(final.status, 'won');
+    assert.deepEqual(final.bridges, [], `${level.id}: the shortest route uses its paper bridge`);
+    if (level.id > 30) continue;
+    const noBridge = { ...level, walls: level.walls.concat(level.bridges), bridges: [] };
+    assert.equal(solve(noBridge) === null || solve(noBridge).length >= level.par, true, `${level.id}: closing the bridge must not reveal a shorter route`);
+  }
 });
