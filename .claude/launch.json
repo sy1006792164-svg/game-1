@@ -4,8 +4,19 @@
     {
       "name": "preview",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["tools/serve.js"],
+      "runtimeArgs": [
+        "tools/serve.js"
+      ],
       "port": 8765
+    },
+    {
+      "name": "preview-alt",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "tools/serve.js",
+        "8766"
+      ],
+      "port": 8766
     }
   ]
 }

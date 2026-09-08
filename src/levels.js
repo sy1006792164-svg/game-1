@@ -2,15 +2,17 @@
 
 const { createState, step } = require('./engine');
 
-// Version 4: tighter light budgets on every chapter, fewer undos, and the
-// generated routes 31+ (src/levels-extra.js) with bigger boards and paper bridges.
-const CONTENT_VERSION = '4';
+// Version 5: 999 routes. The generated routes 31+ (src/levels-extra.js) keep
+// climbing to the end: boards up to 10x10, six letters and six stamps, up to
+// four winds and four paper bridges, no lamps on the late routes, and from
+// route 301 a light budget that equals the shortest route exactly.
+const CONTENT_VERSION = '5';
 const PER_CHAPTER = 6;
 const chapterNames = [
   '初寄微光', '双生回廊', '风过纸巷', '灯火借路', '星夜长信',
   '雾巷折返', '纸桥残页', '逆风而行', '薄暮邮差', '灯塔守夜',
   '雪线来信', '潮汐回声', '千折回廊', '暗巷灯语', '风眼之中',
-  '星海长路', '孤岛邮局', '霜夜远信', '旧城重游', '寄往终章'
+  '星海长路', '孤岛邮局', '霜夜远信', '旧城重游', '灯河渡口'
 ];
 const specs = [
   ["第一封信",["######","######","#ST.LE","######","######","######"],"你拾信，三步后的回声盖邮票。沿路走到信箱。"],
@@ -77,16 +79,19 @@ const encodedSolutions = [
   "DRDRRLLUUUUUDLRRRURRDULLDDRDRDUUULULLDDR",
   "URRUUUULLLDURRRRRDDDULRUULLDDLRDRLDDRLULLU"
 ];
-// Generated routes carry their own witness as a fourth entry.
-for (const entry of require('./levels-extra')) { specs.push(entry.slice(0, 3)); encodedSolutions.push(entry[3]); }
+// Generated routes carry their own witness as a fourth entry; chapters 21+ take their names from the same file.
+const extra = require('./levels-extra');
+for (const entry of extra.routes) { specs.push(entry.slice(0, 3)); encodedSolutions.push(entry[3]); }
+chapterNames.push(...extra.chapters);
 const decode = code => code.split('').map(letter => ({ U: 'up', D: 'down', L: 'left', R: 'right', W: 'wait' })[letter]);
 
-/** Spare light after the shortest route. Only the three tutorial routes forgive; from route 19 one wasted turn ends the delivery. */
+/** Spare light after the shortest route: one spare turn from route 19, none from route 301. */
 function reserveFor(index) {
   if (index < 3) return null;
   if (index < 6) return 3;
   if (index < 18) return 2;
-  return 1;
+  if (index < 300) return 1;
+  return 0;
 }
 
 /** Undos per run shrink with the chapters, so a mis-tap on a late route costs the lantern. */
@@ -138,151 +143,4 @@ function parseLevel(spec, index, code) {
 
 const CAMPAIGN = specs.map((spec, index) => parseLevel(spec, index));
 
-function getDaily(dateKey) {
-  const key = String(dateKey || '1970-01-01');
-  let seed = 2166136261;
-  for (let index = 0; index < key.length; index++) seed = Math.imul(seed ^ key.charCodeAt(index), 16777619) >>> 0;
-  const random = () => {
-    seed = (seed + 0x6D2B79F5) >>> 0;
-    let value = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    value ^= value + Math.imul(value ^ (value >>> 7), 61 | value);
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
-  const shuffle = array => {
-    for (let index = array.length - 1; index > 0; index--) {
-      const other = Math.floor(random() * (index + 1));
-      const value = array[index]; array[index] = array[other]; array[other] = value;
-    }
-    return array;
-  };
-  const deltas = [[0, -1], [0, 1], [-1, 0], [1, 0]];
-  const actions = ['up', 'down', 'left', 'right', 'wait'];
-  const adjacent = (cell, direction) => {
-    const x = cell % 6 + deltas[direction][0];
-    const y = Math.floor(cell / 6) + deltas[direction][1];
-    return x < 0 || x > 5 || y < 0 || y > 5 ? -1 : y * 6 + x;
-  };
-  const floors = new Set(Array.from({ length: 36 }, (_, index) => index));
-  const reachable = (start, winds) => {
-    const distances = new Map([[start, 0]]);
-    const queue = [start];
-    for (let index = 0; index < queue.length; index++) {
-      for (let direction = 0; direction < 4; direction++) {
-        let next = adjacent(queue[index], direction);
-        if (!floors.has(next)) continue;
-        if (winds && winds[next]) {
-          const pushed = adjacent(next, actions.indexOf(winds[next]));
-          if (floors.has(pushed)) next = pushed;
-        }
-        if (distances.has(next)) continue;
-        distances.set(next, distances.get(queue[index]) + 1);
-        queue.push(next);
-      }
-    }
-    return distances;
-  };
-  // Remove walls only when the remaining floor stays connected.
-  for (const candidate of shuffle(Array.from(floors))) {
-    if (floors.size <= 23) break;
-    floors.delete(candidate);
-    if (reachable(floors.values().next().value).size !== floors.size) floors.add(candidate);
-  }
-  const floorList = Array.from(floors).sort((a, b) => a - b);
-  const start = floorList[Math.floor(random() * floorList.length)];
-  const winds = {};
-  for (const candidate of shuffle(floorList.slice())) {
-    if (candidate === start) continue;
-    const directions = [0, 1, 2, 3].filter(direction => floors.has(adjacent(candidate, direction)));
-    if (directions.length < 3) continue;
-    winds[candidate] = actions[directions[Math.floor(random() * directions.length)]];
-    if (floorList.every(cell => cell === candidate || reachable(cell, winds).size >= floors.size - 1)) break;
-    delete winds[candidate];
-  }
-  const distances = reachable(start, winds);
-  const exit = Array.from(distances.keys()).sort((a, b) => distances.get(b) - distances.get(a) || a - b)[0];
-  const candidates = shuffle(Array.from(distances.keys()).filter(cell => cell !== start && cell !== exit && !winds[cell]));
-  // Spread objectives across distinct branches instead of letting all six
-  // cluster beside the same corridor. Seeded tie-breaking keeps dates stable.
-  const selected = [];
-  const separation = [distances, reachable(exit, winds)];
-  for (let index = 0; index < 6; index++) {
-    let best = null;
-    let bestDistance = -1;
-    for (const cell of candidates) {
-      if (selected.includes(cell)) continue;
-      const distance = Math.min(...separation.map(map => map.get(cell) || 0));
-      if (distance > bestDistance) { best = cell; bestDistance = distance; }
-    }
-    selected.push(best);
-    separation.push(reachable(best, winds));
-  }
-  shuffle(selected);
-  const letters = selected.slice(0, 3);
-  const seals = selected.slice(3, 6);
-  const lights = candidates.filter(cell => !selected.includes(cell)).slice(0, 2);
-  const level = {
-    id: 'daily-' + key, revision: CONTENT_VERSION, title: '今日邮路', chapter: 4, width: 6, height: 6,
-    walls: Array.from({ length: 36 }, (_, index) => index).filter(cell => !floors.has(cell)),
-    start, exit, letters, seals, winds, lights, bridges: [], budget: 100, par: 100, undo: 2,
-    brief: '每日一张离线邮路。灯火按最短路线安排，只容许多走一两拍。', solution: []
-  };
-  // Exact compact BFS: the last three positions + six collection bits suffice.
-  // Empty history slots use cell 63; a next action plays back the oldest slot.
-  const letterBits = {}; const sealBits = {};
-  letters.forEach((cell, index) => { letterBits[cell] = 1 << index; });
-  seals.forEach((cell, index) => { sealBits[cell] = 1 << (index + letters.length); });
-  const fullMask = (1 << (letters.length + seals.length)) - 1;
-  const first = 63 | (63 << 6) | (start << 12);
-  const queue = [first]; const parents = [-1]; const moves = [-1]; const seen = new Set(queue);
-  let finish = -1;
-  for (let head = 0; head < queue.length; head++) {
-    const signature = queue[head];
-    const oldest = signature & 63;
-    const previous = (signature >>> 6) & 63;
-    const player = (signature >>> 12) & 63;
-    const collected = signature >>> 18;
-    if (player === exit && collected === fullMask) { finish = head; break; }
-    for (let action = 0; action < 5; action++) {
-      let next = action === 4 ? player : adjacent(player, action);
-      if (!floors.has(next)) continue;
-      if (action !== 4 && winds[next]) {
-        const pushed = adjacent(next, actions.indexOf(winds[next]));
-        if (floors.has(pushed)) next = pushed;
-      }
-      const mask = collected | (letterBits[next] || 0) | (sealBits[oldest] || 0);
-      const nextKey = previous | (player << 6) | (next << 12) | (mask << 18);
-      if (seen.has(nextKey)) continue;
-      seen.add(nextKey); queue.push(nextKey); parents.push(head); moves.push(action);
-    }
-  }
-  // Connectivity checks above guarantee every target is reachable and can be
-  // followed by three waits. The fallback still provides a known playable map.
-  if (finish < 0) {
-    const fallback = JSON.parse(JSON.stringify(CAMPAIGN[24]));
-    return { ...fallback, id: level.id, title: level.title, brief: level.brief };
-  }
-  for (let index = finish; parents[index] >= 0; index = parents[index]) level.solution.push(actions[moves[index]]);
-  level.solution.reverse();
-  level.par = level.solution.length;
-  // Count only lamps actually visited by the optimal witness. A lamp outside
-  // that route must not reduce the initial energy and make the witness fail.
-  let player = start;
-  const collectedLights = new Set();
-  let requiredBudget = 1;
-  level.solution.forEach((action, index) => {
-    const direction = actions.indexOf(action);
-    let next = direction === 4 ? player : adjacent(player, direction);
-    if (direction !== 4 && winds[next]) {
-      const pushed = adjacent(next, actions.indexOf(winds[next]));
-      if (floors.has(pushed)) next = pushed;
-    }
-    player = next;
-    if (lights.includes(player)) collectedLights.add(player);
-    const spent = index + 1 - collectedLights.size * 3;
-    requiredBudget = Math.max(requiredBudget, spent + (index + 1 < level.par ? 1 : 0));
-  });
-  level.budget = Math.max(requiredBudget, level.par - collectedLights.size * 3 + 1);
-  return level;
-}
-
-module.exports = { CAMPAIGN, getDaily, chapterNames, CONTENT_VERSION, PER_CHAPTER, parseLevel, reserveFor, undoFor, SPECS: specs.map(spec => spec[1]) };
+module.exports = { CAMPAIGN, chapterNames, CONTENT_VERSION, PER_CHAPTER, parseLevel, reserveFor, undoFor, SPECS: specs.map(spec => spec[1]) };

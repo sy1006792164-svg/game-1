@@ -25,7 +25,22 @@ for (const name of require('../src/sound').SOUND_TYPES) {
 bytes += fs.readdirSync(path.join(root, 'assets')).reduce((n, f) => n + fs.statSync(path.join(root, 'assets', f)).size, 0);
 const ignored = project.packOptions.ignore.filter(x => x.type === 'folder').map(x => x.value);
 check(['work', 'docs', 'tests', 'tools', 'preview'].every(x => ignored.includes(x)), 'Tooling and QA excluded from upload.');
-check(bytes < 1024 * 1024, 'Source/assets below 1 MiB: ' + bytes + ' bytes; final upload size subject to WeChat tools.');
+const { CAMPAIGN, chapterNames, PER_CHAPTER } = require('../src/levels');
+check(CAMPAIGN.length === 999 && chapterNames.length === Math.ceil(CAMPAIGN.length / PER_CHAPTER), '999 campaign routes across 167 chapters.');
+try {
+  const { summary } = require('./verify-levels').assertCampaignSolvable();
+  check(true, `${summary.passed} campaign routes win at three stars with original light and no revival (${summary.totalTurns} turns).`);
+} catch (error) { check(false, error.message); }
+const { isDevelopmentEnvironment } = require('../src/runtime-environment');
+const loopback = { protocol: 'http:', hostname: 'localhost' };
+check(['release', 'trial', undefined].every(envVersion => !isDevelopmentEnvironment({
+  getAccountInfoSync: () => ({ miniProgram: { envVersion } }), enableDebug: true,
+  getDeviceInfo: () => ({ platform: 'devtools' })
+}, loopback)) && !isDevelopmentEnvironment({}, loopback) &&
+  !isDevelopmentEnvironment(null, { protocol: 'https:', hostname: 'game.example.com', search: '?dev=1' }),
+'Developer selection stays disabled for release, trial, unknown SDKs and public web origins.');
+// The expanded offline campaign has a 2 MiB project budget, including audio.
+check(bytes < 2 * 1024 * 1024, 'Source/assets below project budget of 2 MiB: ' + bytes + ' bytes; final upload size subject to WeChat tools.');
 if (process.argv.includes('--release')) check(/^adunit-[a-zA-Z0-9]+$/.test(config.REWARDED_AD_UNIT_ID), 'Real rewarded-video adUnitId configured.');
 else if (!config.REWARDED_AD_UNIT_ID) console.log('PENDING Real adUnitId; real-ad acceptance remains pending.');
 if (errors) { console.error(errors + ' check(s) failed.'); process.exitCode = 1; }

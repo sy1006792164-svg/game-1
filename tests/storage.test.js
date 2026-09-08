@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
-const { createStore, PROFILE_KEY, RUN_KEY } = require('../src/storage');
+const { createStore, PROFILE_KEY, RUN_KEY, DEV_PROFILE_KEY, DEV_RUN_KEY } = require('../src/storage');
 
 function memory(initial) {
   const values = new Map(Object.entries(initial || {}));
@@ -15,6 +15,38 @@ function memory(initial) {
 }
 function run() { return { mode: 'campaign', levelId: '1', state: { tiles: [0, 1, 2], turns: 4 } }; }
 
+test('development profile, run and reset remain isolated from formal saves in the same adapter', () => {
+  const adapter = memory(), formal = createStore(adapter);
+  formal.recordWin(1, 3, 4, 'campaign'); formal.saveRun(run());
+  const original = JSON.stringify([adapter.get(PROFILE_KEY), adapter.get(RUN_KEY)]);
+  const dev = createStore(adapter, { development: true });
+  assert.deepEqual(dev.getProfile().completed, {});
+  dev.recordWin(999, 3, 81, 'campaign'); dev.saveRun({ ...run(), levelId: 998 });
+  assert.equal(JSON.stringify([adapter.get(PROFILE_KEY), adapter.get(RUN_KEY)]), original);
+  assert.equal(adapter.get(DEV_PROFILE_KEY).completed['999'].stars, 3);
+  assert.equal(createStore(adapter, { development: true }).loadRun().levelId, 998);
+  dev.reset();
+  assert.equal(JSON.stringify([adapter.get(PROFILE_KEY), adapter.get(RUN_KEY)]), original);
+  dev.saveRun({ ...run(), levelId: 900 }); formal.reset();
+  assert.equal(adapter.get(DEV_RUN_KEY).levelId, 900);
+});
+
+test('all 999 campaign scores and 1000 archived daily scores survive saving and reloading together', () => {
+  const completed = Object.fromEntries(Array.from({ length: 998 }, (_, i) => [i + 1, { stars: 3, bestTurns: 80 }]));
+  const daily = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [
+    new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10), { stars: 2, bestTurns: 30 }
+  ]));
+  const adapter = memory({ [PROFILE_KEY]: { version: 1, completed, daily, totalWins: 1998 } });
+  const store = createStore(adapter);
+  store.recordWin(999, 3, 90, 'campaign');
+  assert.equal(store.getStatus().persisted, true);
+  const reloaded = createStore(adapter).getProfile();
+  assert.equal(Object.keys(reloaded.completed).length, 999);
+  assert.equal(Object.keys(reloaded.daily).length, 1000);
+  assert.deepEqual(reloaded.completed['999'], { stars: 3, bestTurns: 90 });
+  assert.equal(reloaded.totalWins, 1999);
+});
+
 test('local progress is reloadable and duplicate wins only improve personal bests', () => {
   const adapter = memory();
   const store = createStore(adapter);
@@ -26,8 +58,8 @@ test('local progress is reloadable and duplicate wins only improve personal best
   store.recordWin('daily', 1, 18, 'daily', '2026-09-08');
   const loaded = createStore(adapter).getProfile();
   assert.deepEqual(loaded.completed['1'], { stars: 3, bestTurns: 8 });
-  assert.deepEqual(loaded.daily['2026-09-07'], { stars: 3, bestTurns: 12 });
-  assert.equal(loaded.totalWins, 3);
+  assert.deepEqual(loaded.daily, {}, 'retired daily mode rejects new scores');
+  assert.equal(loaded.totalWins, 1);
   assert.deepEqual(store.getStatus(), { persisted: true, message: '' });
 });
 
@@ -172,7 +204,7 @@ test('controller action-history saves survive reload and reject invalid revive i
   assert.equal(store.saveRun({ ...history, undosUsed: -1 }), false);
   assert.equal(store.saveRun({ ...history, undosUsed: 1.5 }), false);
   assert.equal(store.saveRun({ ...history, undosUsed: 100 }), false);
-  assert.equal(store.saveRun({ ...history, mode: 'daily', levelId: 'daily-2026-09-07' }), true);
+  assert.equal(store.saveRun({ ...history, mode: 'daily', levelId: 'daily-2026-09-07' }), false);
   assert.equal(store.saveRun({ ...history, mode: 'daily', dateKey: 'broken' }), false);
 });
 

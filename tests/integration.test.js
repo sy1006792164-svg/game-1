@@ -6,9 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
-const { CAMPAIGN, getDaily, undoFor } = require('../src/levels');
+const { CAMPAIGN, undoFor } = require('../src/levels');
 const { MOVE_MS } = require('../src/motion');
-const { RUN_KEY, PROFILE_KEY } = require('../src/storage');
+const { RUN_KEY, PROFILE_KEY, DEV_RUN_KEY, DEV_PROFILE_KEY } = require('../src/storage');
 
 const mainPath = path.join(__dirname, '../src/main.js');
 const source = fs.readFileSync(mainPath, 'utf8');
@@ -38,6 +38,7 @@ function harness(options = {}) {
   const data = options.data || new Map();
   const clock = options.clock || { date: '2026-09-07' };
   const callbacks = {};
+  const frameRates = [];
   const soundCalls = [];
   const audio = [];
   const { canvas, calls } = canvasMock();
@@ -50,6 +51,7 @@ function harness(options = {}) {
   };
   const metrics = options.metrics || { width: 390, height: 844, pixelRatio: 2, safeTop: 50, safeBottom: 34 };
   const platform = {
+    isDevelopment: options.development === true,
     kind: options.kind || 'wechat', wx: {
       createRewardedVideoAd: () => ad,
       createInnerAudioContext() {
@@ -63,7 +65,8 @@ function harness(options = {}) {
       },
     }, canvas,
     storage: { get: key => clone(data.get(key)), set: (key, value) => data.set(key, clone(value)), remove: key => data.delete(key) },
-    resize: () => metrics, now: () => now, raf: () => ++frame, cancelRaf: () => {}, vibrate: () => {},
+    resize: () => metrics, now: () => now, raf: callback => { callbacks.frame = callback; return ++frame; }, cancelRaf: () => {}, vibrate: () => {},
+    setFrameRate: fps => frameRates.push(fps),
     onResize: handler => { callbacks.resize = handler; }, onPointer: handler => { callbacks.pointer = handler; },
     onKey: handler => { callbacks.key = handler; }, onHide: handler => { callbacks.hide = handler; }, onShow: handler => { callbacks.show = handler; },
     onAudioInterruptionBegin: handler => { callbacks.audioBegin = handler; }, onAudioInterruptionEnd: handler => { callbacks.audioEnd = handler; },
@@ -85,7 +88,7 @@ function harness(options = {}) {
   const game = new module.exports.Game(platform);
   function draw() { calls.length = 0; now += 200; game.renderer.draw(game, now, metrics); }
   return {
-    game, data, clock, calls, callbacks, platform, draw, soundCalls, audio, ad,
+    game, data, clock, calls, callbacks, platform, draw, soundCalls, audio, ad, frameRates,
     get showCount() { return showCount; },
     advance(ms, runLoop = true) { now += ms; if (runLoop) game.loop(); },
     act(action) { now += 200; game.act(action); },
@@ -94,6 +97,47 @@ function harness(options = {}) {
     destroy() { game.ads.destroy(); game.sound.release(); }
   };
 }
+
+test('WeChat lists draw every RAF at 60 FPS and restore 30 FPS for modals and other pages', () => {
+  const h = harness();
+  const draw = h.game.renderer.draw.bind(h.game.renderer), drawnAt = [];
+  h.game.renderer.draw = (...args) => { drawnAt.push(h.platform.now()); draw(...args); };
+  const frame = ms => { h.advance(ms, false); h.callbacks.frame(); };
+  assert.equal(h.frameRates.at(-1), 30);
+  frame(1000 / 60);
+  assert.equal(drawnAt.length, 0, 'home still skips alternate 60 Hz callbacks');
+  frame(1000 / 60);
+  assert.equal(drawnAt.length, 1);
+
+  for (const page of ['levels', 'collection']) {
+    h.game.openPage(page);
+    const before = drawnAt.length;
+    for (const ms of [1000 / 60, 15, 17, 8]) frame(ms);
+    assert.equal(h.frameRates.at(-1), 60, page);
+    assert.equal(drawnAt.length, before + 4, page + ' draws every callback despite small RAF timing variation');
+  }
+
+  h.game.help();
+  let before = drawnAt.length;
+  frame(1000 / 60);
+  assert.equal(h.frameRates.at(-1), 30);
+  assert.equal(drawnAt.length, before, 'an open modal restores the scene drawing cadence');
+  frame(1000 / 60);
+  assert.equal(drawnAt.length, before + 1);
+  h.game.modal = null;
+  frame(15);
+  assert.equal(h.frameRates.at(-1), 60);
+  assert.equal(drawnAt.length, before + 2);
+
+  h.game.home();
+  before = drawnAt.length;
+  frame(1000 / 60);
+  assert.equal(h.frameRates.at(-1), 30);
+  assert.equal(drawnAt.length, before);
+  frame(1000 / 60);
+  assert.equal(drawnAt.length, before + 1, 'leaving a list restores 30 FPS rendering');
+  h.destroy();
+});
 
 test('native music stays enabled across navigation and full animations remain enabled', () => {
   const h = harness({ withAudio: true });
@@ -242,6 +286,69 @@ test('a complete first delivery records three stars, unlocks the next level and 
   h.destroy(); reloaded.destroy();
 });
 
+test('all 999 campaign routes clear with three stars through the real next-level flow without revives', t => {
+  assert.equal(CAMPAIGN.length, 999);
+  const h = harness({ configured: false });
+  t.after(() => h.destroy());
+  assert.equal(h.game.development, false);
+  assert.equal(h.game.completion(), 0);
+  h.game.primary();
+
+  for (const [index, level] of CAMPAIGN.entries()) {
+    const label = `level ${level.id}`;
+    assert.equal(h.game.page, 'game', label);
+    assert.equal(h.game.mode, 'campaign', label);
+    assert.equal(h.game.level, level, label + ' starts from the preceding result button');
+    assert.equal(h.game.modal, null, label);
+    assert.equal(h.game.state.energy, level.budget, label + ' uses its original budget');
+    assert.equal(h.game.unlocked(index), true, label);
+    if (index + 1 < CAMPAIGN.length) assert.equal(h.game.unlocked(index + 1), false, label + ' has not unlocked its successor early');
+
+    for (const [stepIndex, action] of level.solution.entries()) {
+      assert.equal(h.game.state.status, 'playing', `${label} before step ${stepIndex + 1}`);
+      h.act(action);
+      assert.equal(h.game.state.turn, stepIndex + 1, `${label} commits step ${stepIndex + 1}: ${action}`);
+    }
+
+    assert.equal(h.game.state.status, 'won', label);
+    assert.equal(h.game.state.player, level.exit, label);
+    assert.equal(h.game.state.letters.length + h.game.state.seals.length, 0, label + ' delivers every required collectible');
+    assert.equal(h.game.state.revived, false, label);
+    assert.equal(h.game.reviveAt, null, label);
+    assert.equal(h.game.undosUsed, 0, label);
+    assert.equal(h.showCount, 0, label + ' never requests a rewarded ad');
+    assert.equal(h.game.modal.kind, 'win', label);
+    assert.equal(h.game.modal.stars, 3, label);
+    assert.deepEqual(h.game.profile().completed[String(level.id)], { stars: 3, bestTurns: level.solution.length }, label);
+    assert.equal(h.game.completion(), index + 1, label);
+    assert.equal(h.game.store.loadRun(), null, label + ' clears the completed run');
+    assert.equal(h.data.has(RUN_KEY), false, label);
+
+    const next = h.game.modal.buttons[0];
+    if (index + 1 < CAMPAIGN.length) {
+      assert.equal(h.game.unlocked(index + 1), true, label + ' unlocks its successor');
+      assert.equal(h.game.nextLevel().id, CAMPAIGN[index + 1].id, label);
+      assert.equal(next.text, '下一封信', label);
+    } else {
+      assert.equal(next.text, '返回邮局', label);
+      assert.equal(h.game.modal.buttons.some(button => button.text === '下一封信'), false, label);
+    }
+    next.action();
+  }
+
+  assert.equal(h.game.page, 'home');
+  assert.equal(h.game.completion(), 999);
+  assert.equal(h.game.starCount(), 2997);
+  assert.equal(h.game.unlocked(999), false, 'there is no thousandth campaign level');
+  const reloaded = harness({ data: h.data, configured: false });
+  t.after(() => reloaded.destroy());
+  assert.equal(reloaded.game.completion(), 999);
+  assert.equal(reloaded.game.starCount(), 2997);
+  assert.equal(reloaded.game.profile().totalWins, 999);
+  assert.deepEqual(reloaded.game.profile().completed, h.game.profile().completed);
+  assert.equal(reloaded.game.store.loadRun(), null);
+});
+
 test('closing and relaunching reconstructs the exact active puzzle from saved actions', () => {
   const h = harness(); h.start();
   CAMPAIGN[0].solution.slice(0, 2).forEach(action => h.act(action));
@@ -301,26 +408,6 @@ test('an unconfigured real-WeChat ad never grants a preview reward', async () =>
   h.destroy();
 });
 
-test('yesterday\'s restored daily and its replay keep their original scoring date after midnight', () => {
-  const clock = { date: '2026-09-07' };
-  const level = getDaily(clock.date);
-  const h = harness({ clock }); h.start(level, 'daily');
-  level.solution.slice(0, 2).forEach(action => h.act(action));
-  clock.date = '2026-09-08';
-  const reloaded = harness({ data: h.data, clock });
-  assert.equal(reloaded.game.restore(), true);
-  reloaded.game.start(reloaded.game.level, 'daily');
-  assert.equal(reloaded.game.runDate, '2026-09-07');
-  reloaded.game.level.solution.forEach(action => reloaded.act(action));
-  assert.equal(reloaded.game.state.status, 'won');
-  assert.equal(reloaded.game.profile().daily['2026-09-07'].stars, 3);
-  assert.equal(reloaded.game.profile().daily['2026-09-08'], undefined);
-  assert.equal(reloaded.game.starCount(), 0, 'daily stars do not inflate campaign collection goals');
-  assert.equal(Object.keys(reloaded.game.profile().completed).length, 0);
-  reloaded.game.modal.buttons[1].action();
-  assert.equal(reloaded.game.runDate, '2026-09-07');
-  h.destroy(); reloaded.destroy();
-});
 
 test('an interrupted or invalid replay is discarded without erasing completed deliveries', () => {
   const h = harness(); h.start();
@@ -334,15 +421,15 @@ test('an interrupted or invalid replay is discarded without erasing completed de
   h.destroy(); reloaded.destroy();
 });
 
-test('every campaign and daily screen renders finite geometry on small phones and tablets', () => {
+test('every campaign screen renders finite geometry on small phones and tablets', () => {
   for (const metrics of [
     { width: 320, height: 568, pixelRatio: 2, safeTop: 70, safeBottom: 20 },
     { width: 390, height: 844, pixelRatio: 3, safeTop: 88, safeBottom: 34 },
     { width: 768, height: 1024, pixelRatio: 2, safeTop: 70, safeBottom: 20 }
   ]) {
     const h = harness({ metrics });
-    for (const level of [...CAMPAIGN, getDaily('2026-09-07')]) {
-      h.start(level, typeof level.id === 'string' ? 'daily' : 'campaign'); h.draw();
+    for (const level of CAMPAIGN) {
+      h.start(level, 'campaign'); h.draw();
       assert.ok(h.game.renderer.boardRect.w > 240);
       const controls = h.game.renderer.hits.filter(hit => hit.w === 165 && hit.h === 52);
       assert.equal(controls.length, 1, 'only wait is clickable before the first move');
@@ -352,7 +439,7 @@ test('every campaign and daily screen renders finite geometry on small phones an
       assert.equal(h.calls.some(call => call.method === 'fillText' && call.args[0] === '回声预告'), false);
       h.game.help(); h.draw();
     }
-    for (const page of ['home', 'levels', 'progress', 'collection']) { h.game.openPage(page); h.draw(); }
+    for (const page of ['home', 'levels', 'collection']) { h.game.openPage(page); h.draw(); }
     h.destroy();
   }
 });
@@ -472,113 +559,8 @@ test('a slower replay reports the personal best and does not downgrade stars or 
   h.destroy();
 });
 
-test('legacy growth links open collection and stored goals route to the matching chapter', () => {
-  const h = harness();
-  finishCampaign(h, 3);
-  h.game.openPage('progress');
-  assert.equal(h.game.page, 'collection');
-  assert.equal(h.game.progress().goals.some(goal => goal.action === 'expert'), false, 'the retired expert goal never appears');
-  const dailyGoal = h.game.progress().goals.find(goal => goal.action === 'daily');
-  h.game.goal(dailyGoal.action);
-  assert.equal(h.game.modal, null);
-  assert.equal(h.game.page, 'game');
-  assert.equal(h.game.mode, 'daily');
-  assert.equal(h.game.runDate, h.clock.date);
 
-  // Stored progress sets up a later chapter without making this navigation
-  // regression replay dozens of unrelated maps.
-  for (const level of CAMPAIGN.slice(0, 7)) h.game.store.recordWin(level.id, level.id === 7 ? 2 : 3, level.par, 'campaign');
-  const refineGoal = h.game.progress().goals.find(goal => goal.action === 'stars');
-  assert.ok(refineGoal);
-  h.game.goal(refineGoal.action);
-  assert.equal(h.game.page, 'levels');
-  assert.equal(h.game.chapter, 1);
-  h.game.openPage('levels');
-  assert.equal(h.game.chapter, 1, 'the level list opens on the chapter of the next undelivered route');
-  h.destroy();
-});
 
-test('the next-campaign growth goal cannot resume an unrelated daily save', () => {
-  const h = harness();
-  finishCampaign(h, 3);
-  h.start(getDaily(h.clock.date), 'daily');
-  h.act(h.game.level.solution[0]);
-  h.game.openPage('progress');
-  const goal = h.game.progress().goals.find(item => item.action === 'campaign');
-  assert.ok(goal);
-  h.game.goal(goal.action);
-  assert.equal(h.game.page, 'game');
-  assert.equal(h.game.mode, 'campaign', 'the campaign goal must not restore a daily run');
-  assert.equal(h.game.level.id, 4);
-  assert.equal(h.game.state.turn, 0);
-  h.destroy();
-});
-
-test('daily starts immediately and reopening after midnight starts and scores the new calendar date', () => {
-  const clock = { date: '2026-09-07' };
-  const h = harness({ clock });
-  h.game.daily();
-  assert.equal(h.game.modal, null);
-  assert.equal(h.game.page, 'game');
-  assert.equal(h.game.runDate, clock.date);
-  assert.equal(h.game.level.id, 'daily-2026-09-07');
-  h.act(h.game.level.solution[0]);
-  clock.date = '2026-09-08';
-  h.game.daily();
-  assert.equal(h.game.modal, null);
-  assert.equal(h.game.state.turn, 0);
-  assert.equal(h.game.dateKey, clock.date);
-  assert.equal(h.game.runDate, clock.date);
-  assert.equal(h.game.level.id, 'daily-2026-09-08');
-  assert.deepEqual(h.game.level, getDaily(clock.date));
-  h.game.level.solution.forEach(action => h.act(action));
-  assert.equal(h.game.state.status, 'won');
-  assert.equal(h.game.profile().daily['2026-09-07'], undefined);
-  assert.equal(h.game.profile().daily['2026-09-08'].stars, 3);
-  h.destroy();
-});
-
-test('idle home and collection keep stored calendar progress current after midnight', () => {
-  for (const page of ['home', 'collection']) {
-    const clock = { date: '2026-09-13' };
-    const h = harness({ clock });
-    h.game.store.recordWin('daily-' + clock.date, 3, 20, 'daily', clock.date);
-    h.game.openPage(page);
-    h.draw();
-    assert.equal(h.game.progress().weekly.count, 1);
-    assert.equal(h.game.progress().goals.find(goal => goal.action === 'daily').complete, true);
-    clock.date = '2026-09-14';
-    h.game.dateCheckedAt = 0;
-    h.game.loop();
-    h.draw();
-    assert.equal(h.game.page, page);
-    assert.equal(h.game.dateKey, clock.date);
-    assert.equal(h.game.progress().weekly.count, 0, 'Sunday wins do not count toward the new week');
-    assert.equal(h.game.progress().goals.find(goal => goal.action === 'daily').complete, false);
-    assert.equal(h.game.progress().weekly.days.find(day => day.today).dateKey, clock.date);
-    if (page === 'home') assert.equal(h.calls.some(call => call.method === 'fillText' && /今日风笺|成长|本周/.test(call.args[0])), false);
-    h.destroy();
-  }
-});
-
-test('calendar refresh during an active daily preserves that route and its original scoring date', () => {
-  const clock = { date: '2026-09-07' };
-  const h = harness({ clock });
-  h.start(getDaily(clock.date), 'daily');
-  h.game.level.solution.slice(0, 2).forEach(action => h.act(action));
-  const before = clone(h.game.state);
-  clock.date = '2026-09-08';
-  h.game.dateCheckedAt = 0;
-  h.game.loop();
-  assert.equal(h.game.dateKey, clock.date);
-  assert.equal(h.game.runDate, '2026-09-07');
-  assert.equal(h.game.level.id, 'daily-2026-09-07');
-  assert.deepEqual(h.game.state, before);
-  h.game.level.solution.slice(2).forEach(action => h.act(action));
-  assert.equal(h.game.profile().daily['2026-09-07'].stars, 3);
-  assert.equal(h.game.profile().daily['2026-09-08'], undefined);
-  h.destroy();
-});
 
 test('a legacy state-only save renders the home screen and falls back without losing earned progress', () => {
   const h = harness();
@@ -722,7 +704,7 @@ test('the game screen retains undo and wait while removing duplicate controls an
   h.game.undo();
   h.draw();
   assert.ok(texts().includes('撤回（1）'));
-  h.game.openPage('levels'); h.game.chapter = 2; h.draw();
+  h.game.openPage('levels'); h.game.levelScroll.offset = require('../src/level-view').levelProgressOffset(CAMPAIGN[12], h.game.renderer.H); h.draw();
   assert.ok(h.game.renderer.hits.length > 0);
   h.destroy();
 });
@@ -752,10 +734,6 @@ function postOfficePoint(h, part) {
   const p = h.game.renderer.boardGeometry.projection;
   const [x, y] = p.point(h.game.level.exit), size = p.halfW * 1.2 / 44;
   if (part === 'badge') return [x, y - p.halfW * 1.68];
-  if (part === 'top' || h.game.camera.tilt === 1) {
-    const angle = h.game.camera.rotation;
-    return [x + Math.sin(angle) * size * 8, y - Math.cos(angle) * size * 8];
-  }
   return part === 'door' ? [x - 7 * size, y - 2 - 10 * size] : [x, y - 2 - 32 * size];
 }
 
@@ -768,13 +746,10 @@ function tapBoardPoint(h, point) {
 test('post office roof, door and ready badge deliver from the screenshot state without changing the camera', () => {
   const views = [
     { name: 'default', camera: {} },
-    { name: 'rotated', camera: { rotation: Math.PI / 2 } },
-    { name: 'low tilt', camera: { rotation: Math.PI, tilt: .38 } },
-    { name: 'blended overhead', camera: { rotation: -Math.PI / 4, tilt: .9 } },
-    { name: 'overhead', camera: { rotation: Math.PI / 3, tilt: 1 } },
-    { name: 'zoom and pan', camera: { zoom: 1.4, panX: .08, panY: .04, rotation: -.6 } }
+    { name: 'zoomed out', camera: { zoom: .7 } },
+    { name: 'zoom and pan', camera: { zoom: 1.4, panX: .08, panY: .04 } }
   ];
-  for (const view of views) for (const part of view.camera.tilt > .82 ? ['roof', 'door', 'badge', 'top'] : ['roof', 'door', 'badge']) {
+  for (const view of views) for (const part of ['roof', 'door', 'badge']) {
     const h = readyPostOffice(view.camera), beforeCamera = clone(h.game.camera);
     const beforeTurn = h.game.state.turn, beforeActions = h.game.actions.length;
     tapBoardPoint(h, postOfficePoint(h, part));
@@ -812,14 +787,14 @@ test('post office taps preserve collection requirements and waiting on its own t
 });
 
 test('post office hit areas leave uncovered neighboring floors and empty roof corners reachable', () => {
-  for (const rotation of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) {
+  for (const zoom of [1, 1.4]) {
     for (const [cell, action] of [[7, 'right'], [6, 'wait']]) {
-      const h = readyPostOffice({ rotation });
+      const h = readyPostOffice({ zoom });
       const p = h.game.renderer.boardGeometry.projection, [x, y] = p.point(cell);
       // The neighboring tile's side remains visible beside both roof and badge.
       const [dx, dy] = cell === 7 ? p.floor(p.halfW * .8, 0) : [0, 0];
       tapBoardPoint(h, [x + dx, y + dy]);
-      assert.equal(h.game.state.player, cell, `rotation ${rotation}: floor ${cell} remains reachable`);
+      assert.equal(h.game.state.player, cell, `zoom ${zoom}: floor ${cell} remains reachable`);
       assert.equal(h.game.actions.at(-1), action);
       assert.equal(h.game.state.energy, 1);
       assert.equal(h.game.state.status, 'playing');
@@ -836,13 +811,13 @@ test('post office hit areas leave uncovered neighboring floors and empty roof co
 });
 
 test('dragging from the post office or tapping it from far away cannot spend a delivery turn', () => {
-  const h = readyPostOffice();
+  const h = readyPostOffice({ zoom: 1.4 });
   const before = clone(h.game.state), saved = clone(h.game.store.loadRun());
   const [x, y] = boardDevicePoint(h, postOfficePoint(h, 'roof'));
   h.game.pointerEvent(x, y, 'start');
   h.game.pointerEvent(x + 60, y, 'move');
   h.game.pointerEvent(x + 60, y, 'end');
-  assert.notEqual(h.game.camera.rotation, 0, 'the normal orbit gesture still works over the building');
+  assert.notEqual(h.game.camera.panX, 0, 'the normal pan gesture still works over the building');
   assert.deepEqual(h.game.state, before);
   assert.deepEqual(h.game.store.loadRun(), saved);
   h.start(CAMPAIGN[3]); h.advance(900, false); h.draw();
@@ -932,13 +907,13 @@ test('a save from an older content version restarts its route with notice and pr
   const h = harness(); finishCampaign(h, 3);
   const earned = clone(h.game.profile());
   h.start(CAMPAIGN[3]); h.act(CAMPAIGN[3].solution[0]);
-  h.data.set(RUN_KEY, { ...clone(h.game.store.loadRun()), revision: '3-intro2' });
+  h.data.set(RUN_KEY, { ...clone(h.game.store.loadRun()), revision: '4' });
   const reloaded = harness({ data: h.data });
   assert.equal(reloaded.game.restore(), true);
   assert.equal(reloaded.game.level.id, 4);
   assert.equal(reloaded.game.state.turn, 0);
   assert.deepEqual(reloaded.game.actions, []);
-  assert.equal(reloaded.game.store.loadRun().revision, '4');
+  assert.equal(reloaded.game.store.loadRun().revision, '5');
   assert.match(reloaded.game.toastText, /路线已升级/);
   assert.deepEqual(reloaded.game.profile(), earned);
   h.destroy(); reloaded.destroy();
@@ -949,7 +924,7 @@ test('a current-version save resumes its exact actions without an upgrade notice
   h.start(CAMPAIGN[2]);
   CAMPAIGN[2].solution.slice(0, 3).forEach(action => h.act(action));
   const before = clone(h.game.state), actions = clone(h.game.actions), earned = clone(h.game.profile());
-  assert.equal(h.game.store.loadRun().revision, '4');
+  assert.equal(h.game.store.loadRun().revision, '5');
   const reloaded = harness({ data: h.data });
   assert.equal(reloaded.game.restore(), true);
   assert.equal(reloaded.game.level.id, 3);
@@ -973,7 +948,7 @@ test('choosing each introductory route starts it directly without a launch or tu
   const h = harness();
   for (const level of CAMPAIGN.slice(0, 3)) {
     h.game.openPage('levels');
-    h.game.levelInfo(level, 'campaign');
+    h.game.start(level, 'campaign');
     assert.equal(h.game.page, 'game');
     assert.equal(h.game.level.id, level.id);
     assert.equal(h.game.state.turn, 0);
@@ -1015,3 +990,121 @@ function replayed(level, actions) {
   const { replay } = require('../src/engine');
   return replay(level, actions, null);
 }
+
+test('development can enter and resume level 999 without unlocking or changing formal progress', () => {
+  const profile = { version: 1, completed: { 1: { stars: 3, bestTurns: 4 } }, daily: {}, totalWins: 1 };
+  const formalRun = { mode: 'campaign', levelId: 2, revision: CAMPAIGN[1].revision, actions: [], reviveAt: null, undosUsed: 0 };
+  const data = new Map([[PROFILE_KEY, clone(profile)], [RUN_KEY, clone(formalRun)]]);
+  const dev = harness({ data, development: true });
+  assert.equal(dev.game.savedRun(), null, 'developer session does not resume formal run');
+  assert.equal(dev.game.selectLevel(999), true);
+  assert.equal(dev.game.level.id, 999);
+  CAMPAIGN[998].solution.slice(0, 4).forEach(action => dev.act(action));
+  const state = clone(dev.game.state);
+  const reloaded = harness({ data, development: true });
+  assert.equal(reloaded.game.restore(), true);
+  assert.deepEqual(reloaded.game.state, state);
+  CAMPAIGN[998].solution.slice(4).forEach(action => reloaded.act(action));
+  assert.equal(reloaded.game.state.status, 'won');
+  assert.equal(data.get(DEV_PROFILE_KEY).completed['999'].stars, 3);
+  assert.equal(data.has(DEV_RUN_KEY), false);
+  assert.deepEqual(data.get(PROFILE_KEY), profile);
+  assert.deepEqual(data.get(RUN_KEY), formalRun);
+  const formal = harness({ data });
+  assert.equal(formal.game.unlocked(998), false);
+  assert.equal(formal.game.restore(), true);
+  assert.equal(formal.game.level.id, 2);
+  dev.destroy(); reloaded.destroy(); formal.destroy();
+});
+
+test('formal game refuses developer entry points and invalid level ids regardless of mutable flags', () => {
+  const h = harness(); h.game.openPage('levels');
+  h.platform.isDevelopment = true;
+  assert.throws(() => { h.game.development = true; }, TypeError);
+  assert.equal(h.game.openDevelopmentPicker(), false);
+  assert.equal(h.game.developmentKey('Enter'), false);
+  for (const id of [999, 0, -1, 1000, 1.5, '999', NaN]) assert.equal(h.game.selectLevel(id), false);
+  assert.equal(h.game.page, 'levels');
+  assert.equal(h.game.store.loadRun(), null);
+  assert.equal(h.game.selectLevel(1), true);
+  h.destroy();
+});
+
+test('retired daily runs return to the campaign without losing existing campaign or archived scores', () => {
+  const completed = { 1: { stars: 3, bestTurns: 4 } }, daily = { '2026-09-08': { stars: 2, bestTurns: 30 } };
+  const data = new Map([
+    [PROFILE_KEY, { version: 1, completed, daily, totalWins: 2 }],
+    [RUN_KEY, { mode: 'daily', levelId: 'daily-2026-09-08', dateKey: '2026-09-08', revision: '5', actions: ['up'], reviveAt: null }],
+  ]);
+  const h = harness({ data });
+  assert.equal(h.game.savedRun(), null);
+  assert.deepEqual(h.game.profile().completed, completed);
+  assert.deepEqual(h.game.profile().daily, daily);
+  assert.equal(h.game.album().stars, 3);
+  assert.equal(h.game.album().stamps.length, 23);
+  h.game.primary();
+  assert.equal(h.game.mode, 'campaign');
+  assert.equal(h.game.level.id, 2);
+  h.game.start(CAMPAIGN[0], 'daily');
+  assert.equal(h.game.level.id, 2, 'retired mode cannot be started programmatically');
+  h.destroy();
+});
+
+test('the 999th route resumes after undo, saves the final score and returns home without an extra level', () => {
+  assert.equal(CAMPAIGN.length, 999);
+  const completed = Object.fromEntries(CAMPAIGN.slice(0, 998).map(level => [level.id, { stars: 3, bestTurns: level.par }]));
+  const data = new Map([[PROFILE_KEY, { version: 1, completed, daily: {}, totalWins: 998 }]]);
+  const h = harness({ data }), last = CAMPAIGN[998];
+  assert.equal(h.game.nextLevel().id, 999);
+  h.game.openPage('levels');
+  assert.equal(h.game.levelScroll.offset, h.game.levelScroll.max);
+  assert.equal(h.game.unlocked(998), true);
+  h.start(last);
+  last.solution.slice(0, 5).forEach(action => h.act(action));
+  h.game.undo();
+  const state = clone(h.game.state);
+  const reloaded = harness({ data });
+  assert.equal(reloaded.game.restore(), true);
+  assert.deepEqual(reloaded.game.state, state);
+  assert.equal(reloaded.game.undoLeft(), 0);
+  last.solution.slice(4).forEach(action => reloaded.act(action));
+  assert.equal(reloaded.game.state.status, 'won');
+  assert.equal(reloaded.game.completion(), 999);
+  assert.equal(reloaded.game.starCount(), 2997);
+  assert.equal(reloaded.game.store.loadRun(), null);
+  assert.equal(reloaded.game.modal.buttons[0].text, '返回邮局');
+  assert.equal(reloaded.game.modal.buttons.some(button => button.text === '下一封信'), false);
+  reloaded.game.modal.buttons[0].action();
+  assert.equal(reloaded.game.page, 'home');
+  const finished = harness({ data });
+  assert.deepEqual(finished.game.profile().completed['999'], { stars: 3, bestTurns: last.par });
+  assert.equal(finished.game.completion(), 999);
+  h.destroy(); reloaded.destroy(); finished.destroy();
+});
+
+test('large campaign boards render and accept adjacent moves at phone sizes', () => {
+  for (const metrics of [
+    { width: 320, height: 568, pixelRatio: 1, safeTop: 0, safeBottom: 0 },
+    { width: 390, height: 844, pixelRatio: 2, safeTop: 50, safeBottom: 34 },
+  ]) {
+    const h = harness({ metrics });
+    for (const id of [121, 301, 361, 481, 601, 781, 999]) {
+      h.start(CAMPAIGN[id - 1]); h.advance(1000); h.draw();
+      if (id >= 301) assert.match(h.game.playHint(h.platform.now()), /没有富余拍数/);
+      for (const hit of h.game.renderer.hits) {
+        for (const value of [hit.x, hit.y, hit.w, hit.h]) assert.ok(Number.isFinite(value), `${id}: invalid hit region`);
+      }
+      const action = h.game.level.solution[0];
+      const expected = replayed(h.game.level, [action]);
+      const { neighbor } = require('../src/engine');
+      const entered = action === 'wait' ? h.game.state.player : neighbor(h.game.level, h.game.state.player, action, h.game.state);
+      tapBoardPoint(h, h.game.renderer.boardGeometry.projection.point(entered));
+      h.draw();
+      assert.equal(h.game.state.player, expected.player);
+      assert.equal(h.game.state.energy, expected.energy);
+      assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '撤回（1）'));
+      assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '等一拍'));
+    }
+    h.destroy();
+  }
+});

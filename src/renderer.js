@@ -5,6 +5,7 @@ const { drawGame } = require('./game-view');
 const { drawLevels } = require('./level-view');
 const { drawCollection } = require('./collection-view');
 const { drawModal } = require('./modal-view');
+const { drawDeveloperPicker } = require('./developer-view');
 const { drawBackdrop } = require('./scene');
 const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑': 'arrow-up', '↓': 'arrow-down', '↗': 'arrow-ne', '↘': 'arrow-se', '↙': 'arrow-sw', '↖': 'arrow-nw', '✓': 'check' });
 const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2, ne: -Math.PI / 4, se: Math.PI / 4, sw: Math.PI * .75, nw: -Math.PI * .75 });
@@ -13,7 +14,7 @@ class Renderer {
   clearCaches() {
     if (this.wrapCache) this.wrapCache.clear();
     this.boardGeometry = null; this.motionEffects = null;
-    this.hits = []; this.boardProjection = null; this.boardRect = null;
+    this.hits = []; this.boardProjection = null; this.boardRect = null; this.collectionRect = null; this.levelRect = null;
   }
   toLogical(x, y) { return { x: (x - this.ox) / this.scale, y: (y - this.oy) / this.scale }; }
   font(size, weight) { this.ctx.font = (weight || '400') + ' ' + size + 'px "PingFang SC","Microsoft YaHei",sans-serif'; }
@@ -216,7 +217,7 @@ class Renderer {
     this.H = available / this.scale; this.ox = (metrics.width - 390 * this.scale) / 2; this.oy = safeTop;
     c.setTransform(ratio, 0, 0, ratio, 0, 0); c.fillStyle = C.paper; c.fillRect(0, 0, metrics.width, metrics.height);
     c.translate(this.ox, this.oy); c.scale(this.scale, this.scale);
-    this.hits = []; this.boardRect = null; this.boardProjection = null; this.pointer = game.modal ? null : game.pointer;
+    this.hits = []; this.boardRect = null; this.boardProjection = null; this.collectionRect = null; this.levelRect = null; this.pointer = game.modal ? null : game.pointer;
     this.now = now;
     this.reducedMotion = false;
     c.save();
@@ -235,7 +236,10 @@ class Renderer {
       this.pointer = game.pointer;
       const result = (game.modal.kind === 'win' || game.modal.kind === 'fail') &&
         (game.moveEvents || []).some(event => event.type === 'win' || event.type === 'fail');
-      if (!result || this.reducedMotion || now - game.transitionAt >= 400) modalBounds = this.modal(game.modal, now);
+      if (game.modal.kind === 'developer-level') {
+        if (game.development) modalBounds = drawDeveloperPicker(this, game);
+      }
+      else if (!result || this.reducedMotion || now - game.transitionAt >= 400) modalBounds = this.modal(game.modal, now);
       else this.modalAt = now;
     }
     if (game.toastUntil > now) {

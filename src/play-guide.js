@@ -76,7 +76,7 @@ function guideStep(game, now) {
   lesson.visual = guideVisual(l, s, lesson, pending);
   lesson.tip = game.blockedAt != null && now - game.blockedAt < 1400 ? '这边不通，点相邻的亮格试试。'
     : s.energy <= 3 ? '只剩 ' + s.energy + ' 拍，移动和等待都会消耗灯火。'
-    : '拖动调整视角；双指或滚轮缩放。';
+    : '双指捏合可放大棋盘；电脑滚轮缩放。';
   return lesson;
 }
 
@@ -99,6 +99,9 @@ function playHint(game, now) {
   if (lowLight) return lowLight + '移动和等待都会耗灯；留好回邮局的路。';
   if (s.turn === 0) {
     if (l.id <= 3) return '点亮起的相邻地砖移动，先走过蓝票。';
+    if (game.mode === 'campaign' && l.id >= 301) return l.lights.length
+      ? '没有富余拍数，纸桥离开就碎，先排好路线。'
+      : '没有灯火补给，也没有富余拍数。先排好整条邮路。';
     if ((l.bridges || []).length) return '纸桥离开后就会碎，先想好哪一段只走一次。';
     if (l.lights.length) return '沿路的风灯可以补 3 拍，收信时顺路点亮。';
     if (Object.keys(l.winds).length) return '箭头会再推你一格，留意实际落点。';

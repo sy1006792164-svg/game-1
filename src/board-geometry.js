@@ -6,8 +6,7 @@ const { createProjection, insideRect } = require('./board-projection');
 function matches(cache, level, rect, view) {
   return cache && cache.level === level &&
     cache.rect.x === rect.x && cache.rect.y === rect.y && cache.rect.w === rect.w && cache.rect.h === rect.h &&
-    cache.view.scale === view.scale && cache.view.panX === view.panX && cache.view.panY === view.panY &&
-    cache.view.rotation === view.rotation && cache.view.tilt === view.tilt;
+    cache.view.scale === view.scale && cache.view.panX === view.panX && cache.view.panY === view.panY;
 }
 
 // Keep only the current board: switching levels or moving the camera releases

@@ -9,7 +9,6 @@ const OFFICE = {
   frontTrim: [[-23, -27], [8, -19], [8, -15], [-23, -23]],
   sideTrim: [[8, -19], [27, -36], [27, -32], [8, -15]],
   step: [[8, 2], [-18, -4], [-21, -1], [6, 6], [13, 2]],
-  top: [[0, -19], [19, 0], [0, 19], [-19, 0]],
 };
 
 function officeFlag(now) {
@@ -28,17 +27,11 @@ function containsPolygon(points, x, y) {
   return inside;
 }
 
-function hitPostOffice(r, { x, y, size, now, blend, rotation }, action) {
+function hitPostOffice(r, { x, y, size, now }, action) {
   if (!action) return;
-  const scale = size / 44, shapes = [];
-  if (blend < 1) {
-    [OFFICE.front, OFFICE.side, OFFICE.roof, OFFICE.frontTrim, OFFICE.sideTrim, OFFICE.step, officeFlag(now)]
-      .forEach(points => shapes.push(points.map(([dx, dy]) => [x + dx * scale, y + OFFICE.sideOffset + dy * scale])));
-  }
-  if (blend > 0) {
-    const cosine = Math.cos(rotation), sine = Math.sin(rotation);
-    shapes.push(OFFICE.top.map(([dx, dy]) => [x + (cosine * dx - sine * dy) * scale, y + (sine * dx + cosine * dy) * scale]));
-  }
+  const scale = size / 44;
+  const shapes = [OFFICE.front, OFFICE.side, OFFICE.roof, OFFICE.frontTrim, OFFICE.sideTrim, OFFICE.step, officeFlag(now)]
+    .map(points => points.map(([dx, dy]) => [x + dx * scale, y + OFFICE.sideOffset + dy * scale]));
   const points = shapes.flat(), xs = points.map(point => point[0]), ys = points.map(point => point[1]);
   const left = Math.min(...xs), top = Math.min(...ys);
   r.hit(left, top, Math.max(...xs) - left, Math.max(...ys) - top, action,

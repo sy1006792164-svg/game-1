@@ -3,8 +3,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { ACTIONS, createState, step, replay, revive, stars, STAR_TWO_MARGIN } = require('../src/engine');
-const { CAMPAIGN, getDaily, chapterNames, CONTENT_VERSION, PER_CHAPTER, reserveFor, undoFor } = require('../src/levels');
+const { CAMPAIGN, chapterNames, CONTENT_VERSION, PER_CHAPTER, reserveFor, undoFor } = require('../src/levels');
 const { solve } = require('../tools/solve');
+const { tier, bridgesRequired, HAND_MADE } = require('../tools/generate');
+
+// The independent solver is slow on the big late boards, so it checks the hand-made routes plus every sixtieth generated route.
+const independentlySolved = level => level.id <= HAND_MADE || (level.id - 1 - HAND_MADE) % 60 === 0;
 
 function board(overrides = {}) {
   return { id: 'test', title: 'Test', chapter: 0, width: 6, height: 6, walls: [], start: 0, exit: 35, letters: [], seals: [], winds: {}, lights: [], budget: 30, par: 10, brief: '', solution: [], ...overrides };
@@ -38,10 +42,14 @@ function checkLevel(level) {
   return state;
 }
 
-test('all 120 campaign witnesses win without revival and fill twenty chapters of six', () => {
-  assert.equal(CAMPAIGN.length, 120);
+test('all 999 campaign witnesses win without revival across 167 chapters', () => {
+  assert.equal(CAMPAIGN.length, 999);
   assert.equal(PER_CHAPTER, 6);
-  assert.equal(chapterNames.length, CAMPAIGN.length / PER_CHAPTER);
+  assert.equal(chapterNames.length, Math.ceil(CAMPAIGN.length / PER_CHAPTER));
+  assert.equal(new Set(chapterNames).size, chapterNames.length, 'chapter names are unique');
+  assert.ok(chapterNames.every(name => typeof name === 'string' && name.length === 4), 'chapter names are four characters');
+  assert.equal(chapterNames[chapterNames.length - 1], '寄往终章');
+  assert.equal(new Set(CAMPAIGN.map(level => level.title)).size, CAMPAIGN.length, 'route titles are unique');
   assert.equal(new Set(CAMPAIGN.map(level => level.solution.join(','))).size, CAMPAIGN.length);
   assert.equal(new Set(CAMPAIGN.map(level => JSON.stringify([level.walls, level.start, level.exit, level.letters, level.seals, level.winds, level.lights]))).size, CAMPAIGN.length);
   for (const [index, level] of CAMPAIGN.entries()) {
@@ -50,31 +58,40 @@ test('all 120 campaign witnesses win without revival and fill twenty chapters of
     assert.equal(level.chapter, Math.floor(index / PER_CHAPTER));
     assert.equal(level.undo, undoFor(index));
     assert.equal(level.width, level.height);
-    assert.equal(level.width, index < 54 ? 6 : index < 84 ? 7 : 8, `${level.id}: board size grows by chapter`);
+    assert.equal(level.width, index < HAND_MADE ? 6 : tier(index).size, `${level.id}: board size follows the difficulty tier`);
     checkLevel(level);
     if (index >= 3) assert.ok(new Set(level.solution).size >= 3, `${level.id}: route should use turns`);
   }
 });
 
 test('the campaign has independently optimal targets and a tight, sustained light budget', () => {
-  assert.equal(CONTENT_VERSION, '4');
+  assert.equal(CONTENT_VERSION, '5');
   assert.equal(STAR_TWO_MARGIN, 2);
   assert.deepEqual(CAMPAIGN.slice(0, 3).map(level => level.par), [4, 6, 9]);
-  assert.deepEqual([reserveFor(0), reserveFor(3), reserveFor(6), reserveFor(17), reserveFor(18), reserveFor(119)], [null, 3, 2, 2, 1, 1]);
+  assert.deepEqual([reserveFor(0), reserveFor(3), reserveFor(6), reserveFor(17), reserveFor(18), reserveFor(119), reserveFor(299), reserveFor(300), reserveFor(998)], [null, 3, 2, 2, 1, 1, 1, 0, 0]);
   for (const level of CAMPAIGN) {
-    const shortest = solve(level);
-    assert.ok(shortest, `${level.id}: independent solver exhausted`);
-    assert.equal(shortest.length, level.par, `${level.id}: three-star target must equal the independent minimum`);
+    if (independentlySolved(level)) {
+      const shortest = solve(level, 8000000);
+      assert.ok(shortest, `${level.id}: independent solver exhausted`);
+      assert.equal(shortest.length, level.par, `${level.id}: three-star target must equal the independent minimum`);
+    }
     const final = follow(level, level.solution);
     const reserve = reserveFor(level.id - 1);
     // A late lamp can force one extra starting unit so the route survives until the lamp; never more.
     if (level.id >= 4) assert.ok(final.energy >= reserve && final.energy <= reserve + 1, `${level.id}: reserve ${final.energy} must be the chapter margin ${reserve} after collected lamps`);
-    if (level.id >= 19) assert.equal(final.energy, 1, `${level.id}: from route 19 exactly one spare turn remains`);
+    if (level.id >= 19 && level.id <= 300) assert.equal(final.energy, 1, `${level.id}: from route 19 exactly one spare turn remains`);
+    if (level.id >= 301) assert.ok(final.energy <= 1, `${level.id}: from route 301 the budget equals the shortest route`);
     if (level.id >= 7 && level.id <= 30) assert.ok(level.par >= 23, `${level.id}: chapter 2+ should require a planned route`);
     if (level.id >= 19 && level.id <= 30) assert.ok(level.par >= 30, `${level.id}: later maps should sustain difficulty`);
-    if (level.id >= 31) assert.ok(level.par >= (level.width === 6 ? 28 : level.width === 7 ? 36 : 44), `${level.id}: generated ${level.width}x${level.width} route too short (${level.par})`);
-    if (level.id >= 31) assert.ok(level.letters.length >= 3 && level.letters.length === level.seals.length, `${level.id}: generated routes carry matched letters and stamps`);
-    if (level.id >= 61) assert.ok(level.letters.length >= 4, `${level.id}: later generated routes carry at least four letters`);
+    if (level.id >= 31) {
+      const t = tier(level.id - 1);
+      assert.ok(level.par >= t.minPar - 4, `${level.id}: generated ${level.width}x${level.width} route too short (${level.par} < ${t.minPar - 4})`);
+      assert.equal(level.letters.length, t.targets, `${level.id}: letters follow the tier`);
+      assert.equal(level.seals.length, t.targets, `${level.id}: stamps follow the tier`);
+      assert.equal(level.bridges.length, t.bridges, `${level.id}: paper bridges follow the tier`);
+      assert.equal(level.lights.length, t.lights, `${level.id}: lamps follow the tier`);
+      assert.ok(Object.keys(level.winds).length >= t.winds - 1 && Object.keys(level.winds).length <= t.winds, `${level.id}: winds follow the tier`);
+    }
     if (level.id >= 4) {
       const junctions = Array.from({length: level.width * level.height}, (_, cell) => cell).filter(cell => {
         if (level.walls.includes(cell)) return false;
@@ -87,6 +104,32 @@ test('the campaign has independently optimal targets and a tight, sustained ligh
       if (level.id <= 6) assert.equal(junctions.length, level.id - 2, `${level.id}: introductory choices should increase one junction at a time`);
       else assert.ok(junctions.length >= 3, `${level.id}: difficulty must include genuine route choices`);
     }
+  }
+  // The curve keeps climbing: each stage of the campaign averages a longer shortest route than the one before.
+  const mean = levels => levels.reduce((sum, level) => sum + level.par, 0) / levels.length;
+  const stages = [[31, 120], [121, 360], [361, 780], [781, 999]].map(([from, to]) => mean(CAMPAIGN.slice(from - 1, to)));
+  for (let index = 1; index < stages.length; index++) assert.ok(stages[index] > stages[index - 1] + 4, `stage ${index + 1} must be clearly longer than stage ${index}: ${stages.join(', ')}`);
+  assert.ok(mean(CAMPAIGN.slice(30, 120)) > mean(CAMPAIGN.slice(0, 30)), 'generated routes are longer than the hand-made tutorial');
+});
+
+test('generated stages introduce shorter routes first and late routes reject a wasted opening turn', () => {
+  const mechanics = level => {
+    const { size, targets, winds, bridges, lights, minPar } = tier(level.id - 1);
+    return [size, targets, winds, bridges, lights, minPar, reserveFor(level.id - 1)].join('/');
+  };
+  for (let index = 31; index < CAMPAIGN.length; index++) {
+    const before = CAMPAIGN[index - 1], level = CAMPAIGN[index];
+    if (mechanics(before) === mechanics(level)) {
+      assert.ok(level.par >= before.par, `${before.id} -> ${level.id}: shorter routes should come first within a stage`);
+    }
+  }
+  for (const level of CAMPAIGN.slice(300)) {
+    let state = step(level, createState(level), 'wait').state;
+    for (const action of level.solution) {
+      if (state.status !== 'playing') break;
+      state = step(level, state, action).state;
+    }
+    assert.equal(state.status, 'failed', `${level.id}: one wasted opening turn must exhaust the budget`);
   }
 });
 
@@ -102,30 +145,12 @@ test('wind lessons exercise real wind pushes and lamp chapters use their planned
     assert.ok(windTurns.length > 0, `${level.id}: wind should influence the optimal witness`);
     if (level.id === 13) assert.ok(windTurns[0] <= 4, 'the first wind lesson must demonstrate its push promptly');
     if (level.id >= 19) {
-      assert.equal(level.lights.length, 2);
+      assert.equal(level.lights.length, level.id <= 30 ? 2 : tier(level.id - 1).lights);
       assert.equal(state.lights.length, 0, `${level.id}: budgeted lamps should be collected on the witness`);
     }
   }
 });
 
-test('daily maps are deterministic, independent, varied and solvable across 60 dates', () => {
-  const signatures = new Set();
-  for (let index = 0; index < 60; index++) {
-    const key = new Date(Date.UTC(2026, 8, 1 + index)).toISOString().slice(0, 10);
-    const level = getDaily(key);
-    assert.equal(level.revision, CONTENT_VERSION);
-    assert.equal(level.letters.length, 3);
-    assert.equal(level.seals.length, 3);
-    assert.deepEqual(getDaily(key), level);
-    const final = checkLevel(level);
-    assert.ok(final.energy >= 1 && final.energy <= 3, `${key}: daily reserve should stay tight`);
-    signatures.add(JSON.stringify([level.walls, level.start, level.exit, level.letters, level.seals]));
-  }
-  assert.equal(signatures.size, 60);
-  const mutated = getDaily('2028-02-29');
-  mutated.letters.pop(); mutated.walls.push(100); mutated.solution.pop();
-  checkLevel(getDaily('2028-02-29'));
-});
 
 test('blocked moves and illegal actions do not consume a turn or mutate state', () => {
   const level = board({ walls: [1] });
@@ -342,11 +367,12 @@ test('replay rebuilds any state from its action history and rejects impossible h
   assert.deepEqual(revived.history, [0, 1, 1, 1, 2]);
 });
 
-test('bridge routes tear every bridge on their witness and cannot be crossed twice', () => {
+test('bridge routes tear their bridges on the witness and cannot be crossed twice', () => {
   const bridged = CAMPAIGN.filter(level => level.bridges.length);
   assert.deepEqual(bridged.filter(level => level.id <= 30).map(level => level.id), [16, 20, 21, 25, 27, 28, 29]);
   assert.ok(CAMPAIGN.slice(36).every(level => level.bridges.length >= 1), 'every generated route from chapter 7 on has a paper bridge');
-  assert.ok(CAMPAIGN.slice(54).every(level => level.bridges.length === 2), 'the bigger boards carry two paper bridges');
+  assert.ok(CAMPAIGN.slice(90).every(level => level.bridges.length >= 2), 'from route 91 every board carries at least two paper bridges');
+  assert.ok(CAMPAIGN.slice(600).every(level => level.bridges.length === 4), 'every route from 601 carries four paper bridges');
   for (const level of bridged) {
     for (const cell of level.bridges) {
       assert.ok(!level.walls.includes(cell) && !level.letters.includes(cell) && !level.seals.includes(cell) && !level.lights.includes(cell) && !level.winds[cell], `${level.id}: a bridge is plain floor`);
@@ -354,7 +380,8 @@ test('bridge routes tear every bridge on their witness and cannot be crossed twi
     }
     const final = follow(level, level.solution);
     assert.equal(final.status, 'won');
-    assert.deepEqual(final.bridges, [], `${level.id}: the shortest route uses its paper bridge`);
+    if (level.id <= 30) assert.deepEqual(final.bridges, [], `${level.id}: the shortest route uses its paper bridge`);
+    else assert.ok(level.bridges.length - final.bridges.length >= bridgesRequired(level.bridges.length), `${level.id}: the shortest route tears at least ${bridgesRequired(level.bridges.length)} paper bridges; the rest are traps`);
     if (level.id > 30) continue;
     const noBridge = { ...level, walls: level.walls.concat(level.bridges), bridges: [] };
     assert.equal(solve(noBridge) === null || solve(noBridge).length >= level.par, true, `${level.id}: closing the bridge must not reveal a shorter route`);

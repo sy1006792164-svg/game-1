@@ -3,10 +3,11 @@ const { createPlatform } = require('./platform');
 const { createStore } = require('./storage');
 const { createAds } = require('./ads');
 const { ACTIONS, DIRECTIONS, createState, step, replay, revive, stars } = require('./engine');
-const { CAMPAIGN, getDaily } = require('./levels');
-const { getProgress } = require('./progression');
+const { CAMPAIGN } = require('./levels');
 const { getAlbum } = require('./stamp-album');
-const stampActions = require('./stamp-actions');
+const { ListScroll } = require('./list-scroll');
+const { levelListLayout, levelProgressOffset } = require('./level-view');
+const { developmentLevelNumber } = require('./developer-view');
 const { Renderer } = require('./renderer');
 const { MOVE_MS } = require('./motion');
 const { SceneCamera } = require('./camera');
@@ -19,15 +20,11 @@ const config = require('./config');
 // Undos per run come from the route itself (levels.undoFor): three on the first chapter, one from route 19 on.
 const DEFAULT_UNDO = 3;
 
-function localDate() {
-  const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-}
-
 class Game {
   constructor(platform) {
     this.platform = platform;
-    this.store = createStore(platform.storage);
+    Object.defineProperty(this, 'development', { value: platform.isDevelopment === true });
+    this.store = createStore(platform.storage, { development: this.development });
     this.sound = createSound(platform);
     this.ads = createAds(platform, config, active => {
       if (active) this.sound.suspend('ad');
@@ -37,18 +34,24 @@ class Game {
     this.renderer = new Renderer(platform.canvas);
     this.camera = new SceneCamera();
     this.cameraMovedAt = -Infinity;
-    this.page = 'home'; this.chapter = 0; this.modal = null; this.reviewing = false;
-    this.selectedStamp = null; this.missionStampId = null;
+    this.page = 'home'; this.collectionScroll = new ListScroll(); this.levelScroll = new ListScroll(); this.modal = null; this.reviewing = false;
     this.guideEnabled = false;
     this.level = null; this.state = null; this.actions = []; this.reviveAt = null; this.undosUsed = 0;
-    this.mode = 'campaign'; this.dateKey = localDate(); this.session = 0;
+    this.mode = 'campaign'; this.session = 0;
     this.toastText = ''; this.toastUntil = 0; this.transitionAt = 0; this.motionPath = null;
     this.busy = false; this.hidden = false; this.lastFrame = 0; this.pointer = null; this.pendingAction = null; this.blockedAt = null;
     this.metrics = platform.resize();
-    platform.onResize(() => { this.pointer = null; this.metrics = platform.resize(); this.lastFrame = -Infinity; });
-    platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor, pan) => this.zoomScene(x, y, factor, pan));
+    platform.onResize(() => { this.stopListScrolling(); this.pointer = null; this.metrics = platform.resize(); this.lastFrame = -Infinity; });
+    platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor, pan) => this.zoomScene(x, y, factor, pan), (x, y, delta) => this.scrollList(x, y, delta));
     platform.onKey(key => {
       this.unlockAudio();
+      if (this.development && this.modal && this.modal.kind === 'developer-level') { this.developmentKey(key); return; }
+      const scroll = this.listScroll();
+      if (scroll && !this.modal && !this.busy) {
+        const delta = { ArrowUp: -100, ArrowDown: 100, PageUp: -340, PageDown: 340, ' ': 340 }[key];
+        if (key === 'Home' || key === 'End') { this.pointer = null; scroll.stop(); scroll.offset = key === 'Home' ? 0 : scroll.max; return; }
+        if (delta) { this.pointer = null; scroll.wheel(delta, this.platform.now()); return; }
+      }
       if (key === 'Escape') { if (!this.busy && this.page === 'game') this.pause(); return; }
       let action = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right', ' ': 'wait', Space: 'wait' }[key];
       if (action && action !== 'wait' && this.page === 'game' && this.renderer.boardProjection) {
@@ -58,7 +61,7 @@ class Game {
       else if (key === 'z' || key === 'Backspace') this.undo();
     });
     platform.onHide(() => {
-      this.hidden = true; this.pointer = null; this.pendingAction = null; this.persist();
+      this.hidden = true; this.stopListScrolling(); this.pointer = null; this.pendingAction = null; this.persist();
       this.sound.suspend('hidden'); this.syncMusic();
       if (this.frameId != null) platform.cancelRaf(this.frameId);
       this.frameId = null;
@@ -66,15 +69,16 @@ class Game {
       if (this.page === 'game' && this.state.status === 'playing' && !this.modal && !this.busy) this.pause();
     });
     platform.onShow(() => {
-      this.hidden = false; this.pointer = null; this.dateKey = localDate(); this.metrics = platform.resize(); this.lastFrame = -Infinity;
+      this.hidden = false; this.pointer = null; this.metrics = platform.resize(); this.lastFrame = -Infinity;
       this.syncMusic(); this.sound.resume('hidden');
       if (this.frameId == null) this.loop();
     });
     if (platform.onMemoryWarning) platform.onMemoryWarning(() => {
+      this.stopListScrolling();
       this.pointer = null; this.pendingAction = null;
       this.renderer.clearCaches(); this.sound.release();
       this.musicActive = false;
-      this.profileCache = null; this.runCache = null;
+      this.profileCache = null; this.runCache = null; this.albumCache = null;
       this.metrics = platform.reduceMemory(); this.lastFrame = -Infinity;
     });
     this.loop();
@@ -90,18 +94,11 @@ class Game {
     if (!this.runCache || this.runCache.revision !== revision) this.runCache = { revision, value: this.store.loadRun() };
     return this.runCache.value;
   }
-  progress() { return getProgress(this.profile(), this.dateKey); }
   album() {
     const revision = this.store.revision();
-    if (!this.albumCache || this.albumCache.revision !== revision || this.albumCache.dateKey !== this.dateKey) {
-      this.albumCache = { revision, dateKey: this.dateKey, value: getAlbum(this.profile(), this.dateKey) };
-    }
+    if (!this.albumCache || this.albumCache.revision !== revision) this.albumCache = { revision, value: getAlbum(this.profile()) };
     return this.albumCache.value;
   }
-  openStamp(id) { stampActions.openStamp(this, id); }
-  closeStamp() { this.selectedStamp = null; this.toastUntil = 0; }
-  equipStamp(id) { stampActions.equipStamp(this, id); }
-  stampMission(id) { stampActions.startMission(this, id); }
   playHint() { return playHint(this, this.platform.now()); }
   guideStep() { return guideStep(this, this.platform.now()); }
   dismissGuide() {
@@ -117,11 +114,42 @@ class Game {
   }
   record(level, mode) {
     const p = this.profile();
-    return mode === 'daily' ? p.daily[this.runDate] : p.completed[String(level.id)];
+    return p.completed[String(level.id)];
   }
   completion() { return Object.keys(this.profile().completed).length; }
   starCount() { return Object.values(this.profile().completed).reduce((n, c) => n + c.stars, 0); }
-  unlocked(index) { return index === 0 || !!this.profile().completed[String(CAMPAIGN[index - 1].id)]; }
+  unlocked(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= CAMPAIGN.length) return false;
+    return this.development || index === 0 || !!this.profile().completed[String(CAMPAIGN[index - 1].id)];
+  }
+  selectLevel(id) {
+    if (this.hidden || this.busy || !Number.isInteger(id) || !this.unlocked(id - 1)) return false;
+    if (this.modal && this.modal.kind !== 'developer-level') return false;
+    this.start(CAMPAIGN[id - 1], 'campaign');
+    return true;
+  }
+  openDevelopmentPicker() {
+    if (!this.development || this.page !== 'levels' || this.busy || this.hidden || this.modal) return false;
+    this.pointer = null; this.stopListScrolling(); this.toastUntil = 0;
+    this.modal = { kind: 'developer-level', digits: '', error: '' }; this.syncMusic();
+    return true;
+  }
+  developmentKey(key) {
+    if (!this.development || !this.modal || this.modal.kind !== 'developer-level' || this.hidden || this.busy) return false;
+    const modal = this.modal;
+    if (typeof key === 'string' && /^\d$/.test(key)) {
+      if (modal.digits.length < 4) modal.digits += key;
+      modal.error = modal.digits.length > 3 ? '关卡编号不能超过 ' + CAMPAIGN.length : '';
+    } else if (key === 'Backspace') { modal.digits = modal.digits.slice(0, -1); modal.error = ''; }
+    else if (key === 'Delete') { modal.digits = ''; modal.error = ''; }
+    else if (key === 'Escape') { this.modal = null; this.syncMusic(); }
+    else if (key === 'Enter') {
+      const id = developmentLevelNumber(modal.digits);
+      if (id === null) { modal.error = '请输入 1–' + CAMPAIGN.length + ' 的整数'; return false; }
+      return this.selectLevel(id);
+    }
+    return true;
+  }
   nextLevel() {
     const completed = this.profile().completed;
     return CAMPAIGN.find((l, i) => (i === 0 || !!completed[String(CAMPAIGN[i - 1].id)]) && !completed[String(l.id)]) || CAMPAIGN[CAMPAIGN.length - 1];
@@ -140,8 +168,7 @@ class Game {
     if (force || enabled !== this.musicActive) { this.musicActive = enabled; this.sound.ambience(enabled); }
   }
   persist() {
-    if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', dateKey: this.runDate, actions: this.actions.slice(), reviveAt: this.reviveAt, undosUsed: this.undosUsed,
-      ...(this.missionStampId ? { stampId: this.missionStampId } : {}) });
+    if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', actions: this.actions.slice(), reviveAt: this.reviveAt, undosUsed: this.undosUsed });
   }
   restore() {
     this.pendingAction = null; this.blockedAt = null;
@@ -149,14 +176,12 @@ class Game {
     if (!run) return false;
     try {
       if (!Array.isArray(run.actions) || run.actions.length > 4096) throw new Error('invalid history');
-      if (!['daily', 'campaign'].includes(run.mode)) throw new Error('invalid mode');
-      const level = run.mode === 'daily' ? getDaily(run.dateKey) : CAMPAIGN.find(l => l.id === run.levelId);
+      if (run.mode !== 'campaign') throw new Error('invalid mode');
+      const level = CAMPAIGN.find(l => l.id === run.levelId);
       if (!level || (run.mode === 'campaign' && !this.unlocked(CAMPAIGN.indexOf(level)))) throw new Error('invalid level');
       if ((run.revision || '1') !== (level.revision || '1')) {
         this.store.clearRun();
         this.start(level, run.mode);
-        this.missionStampId = stampActions.validMission(this, run.stampId, level, run.mode);
-        this.persist();
         this.toast('路线已升级，已重新出发；通关成绩保留');
         return true;
       }
@@ -167,8 +192,7 @@ class Game {
       this.level = level; this.state = state; this.previousState = null; this.moveEvents = []; this.motionPath = null;
       this.transitionAt = this.platform.now() - MOVE_MS;
       this.actions = run.actions.slice(); this.reviveAt = run.reviveAt; this.undosUsed = undosUsed;
-      this.mode = run.mode; this.runDate = run.dateKey; this.page = 'game'; this.session++;
-      this.missionStampId = stampActions.validMission(this, run.stampId, level, run.mode);
+      this.mode = run.mode; this.page = 'game'; this.session++;
       this.guideEnabled = autoGuide(this.profile(), level, this.mode);
       this.pointer = null; this.camera.enter(this.platform.now());
       this.modal = null; this.reviewing = false;
@@ -177,14 +201,12 @@ class Game {
       return true;
     } catch (_) { this.store.clearRun(); this.toast('旧进度无法恢复，已保留通关记录'); return false; }
   }
-  start(level, mode) {
-    if (this.busy) return;
+  start(level, mode = 'campaign') {
+    if (this.busy || mode !== 'campaign') return;
+    this.stopListScrolling(); this.pointer = null;
     this.pendingAction = null; this.blockedAt = null;
-    const sameRoute = this.level && this.level.id === level.id && this.mode === (mode || 'campaign');
-    this.missionStampId = sameRoute ? stampActions.validMission(this, this.missionStampId, level, mode || 'campaign') : null;
     this.level = level; this.mode = mode || 'campaign';
     this.guideEnabled = autoGuide(this.profile(), level, this.mode);
-    this.runDate = this.mode === 'daily' && /^daily-\d{4}-\d{2}-\d{2}$/.test(String(level.id)) ? String(level.id).slice(6) : localDate();
     this.state = createState(level); this.previousState = null; this.moveEvents = []; this.motionPath = null; this.actions = []; this.reviveAt = null; this.undosUsed = 0;
     this.page = 'game'; this.modal = null; this.reviewing = false; this.session++; this.transitionAt = this.platform.now() - MOVE_MS; this.toastUntil = 0;
     this.pointer = null; this.camera.enter(this.platform.now());
@@ -242,7 +264,7 @@ class Game {
     this.pendingAction = null; this.toastUntil = 0;
     const albumBefore = this.album();
     const rating = stars(this.level, this.state), before = this.record(this.level, this.mode);
-    this.store.recordWin(this.level.id, rating, this.state.turn, this.mode, this.runDate);
+    this.store.recordWin(this.level.id, rating, this.state.turn, this.mode);
     this.store.clearRun();
     const index = CAMPAIGN.findIndex(l => l.id === this.level.id);
     const candidate = index >= 0 ? CAMPAIGN[index + 1] : null;
@@ -252,20 +274,15 @@ class Game {
     const bestLine = !before ? saveLine : this.state.turn < before.bestTurns ? '刷新纪录，比上次少走 ' + (before.bestTurns - this.state.turn) + ' 拍。' : this.state.turn === before.bestTurns ? '追平个人最佳 · ' + before.bestTurns + ' 拍' : '个人最佳 ' + before.bestTurns + ' 拍 · 本次多走 ' + (this.state.turn - before.bestTurns) + ' 拍';
     const lines = [this.state.turn + ' 拍完成' + (this.state.revived ? ' · 续灯最高二星' : ''), bestLine];
     if (before && !saved) lines.push(saveLine);
-    const album = this.album(), reward = stampActions.albumRewards(albumBefore, album);
-    const stampId = this.missionStampId || (reward && reward.id);
-    if (reward) lines.push(reward.text);
-    else if (this.missionStampId) {
-      const mission = album.stamps.find(stamp => stamp.id === this.missionStampId);
-      lines.push(mission && mission.mastered ? '回信已珍藏，金色邮戳继续保留' : '委托需要三星，可重新规划路线');
-    }
+    const rewards = this.album().stamps.filter(stamp => stamp.owned && !albumBefore.stamps[stamp.index].owned);
+    if (rewards.length) lines.push(rewards.length > 1 ? '收到 ' + rewards.length + ' 枚新邮票' : '收到新邮票「' + rewards[0].name + '」');
     this.modal = {
-      kind: 'win', title: '信已送达', stars: rating, stamp: album.equipped,
+      kind: 'win', title: '信已送达', stars: rating,
       lines,
       buttons: [
         { text: next ? '下一封信' : '返回邮局', primary: true, action: () => next ? this.start(next, this.mode) : this.home() },
         { text: '再走一次', textOnly: true, action: () => this.start(this.level, this.mode) },
-        ...(stampId ? [{ text: this.missionStampId ? '查看委托回信' : '拆阅新邮票', textOnly: true, action: () => this.openStamp(stampId) }] : [])
+        ...(rewards.length ? [{ text: '看看邮票册', textOnly: true, action: () => this.openPage('collection') }] : [])
       ]
     };
   }
@@ -345,33 +362,39 @@ class Game {
     this.pendingAction = null;
     const old = this.modal, l = this.page === 'game' ? this.level : null;
     const lines = ['点相邻亮格移动，点脚下格或“等一拍”等待。', '你收橙色信笺，晚三拍的回声收蓝色邮票。', '全部收齐后，走到邮局即可过关。'];
-    if (l) lines.push('单指左右拖动转向，上下拖动调整俯视角度。', '双指捏合缩放、拖动平移；电脑滚轮缩放。');
+    if (l) lines.push('双指捏合放大棋盘，放大后可拖动查看；电脑滚轮缩放。');
     if (l && Object.keys(l.winds).length) lines.push('箭头会再推一格，等待不会触发风。');
     if (l && l.lights.length) lines.push('每盏风灯只补一次，共 3 拍。');
     if (l && (l.bridges || []).length) lines.push('纸桥离开后就碎，回声可以通过。');
     this.modal = { kind: 'help', title: '和回声一起送信', lines,
       buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
   }
-  home() { if (this.busy) return; this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.dateKey = localDate(); this.session++; }
+  home() { if (this.busy) return; this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
   openPage(page) {
-    if (this.busy || !['home', 'levels', 'collection', 'progress'].includes(page)) return;
-    this.pendingAction = null; this.persist(); this.page = page === 'progress' ? 'collection' : page; this.modal = null; this.reviewing = false; this.dateKey = localDate();
-    this.selectedStamp = null;
-    if (page === 'levels') this.chapter = this.nextLevel().chapter;
+    if (this.busy || !['home', 'levels', 'collection'].includes(page)) return;
+    this.pendingAction = null; this.persist(); this.page = page; this.modal = null; this.reviewing = false; this.pointer = null; this.stopListScrolling();
+    if (page === 'levels') this.scrollToProgress();
+    if (page === 'collection') this.collectionScroll.reset(this.platform.now());
     this.cue('tap');
   }
-  goal(action) {
-    if (action === 'daily') { this.daily(); return; }
-    if (action === 'campaign') { this.start(this.nextLevel(), 'campaign'); return; }
-    this.openPage('levels');
-    const p = this.profile();
-    const target = CAMPAIGN.find(l => p.completed[String(l.id)] && p.completed[String(l.id)].stars < 3);
-    if (target) this.chapter = target.chapter;
+  listScroll() { return this.page === 'collection' ? this.collectionScroll : this.page === 'levels' ? this.levelScroll : null; }
+  listRect() { return this.page === 'collection' ? this.renderer.collectionRect : this.page === 'levels' ? this.renderer.levelRect : null; }
+  stopListScrolling() { this.collectionScroll.stop(); this.levelScroll.stop(); }
+  scrollToProgress() {
+    if (this.page !== 'levels') return;
+    const now = this.platform.now(), scroll = this.levelScroll;
+    this.pointer = null; scroll.reset(now);
+    scroll.setBounds(levelListLayout(this.renderer.H).maxScroll);
+    scroll.offset = levelProgressOffset(this.nextLevel(), this.renderer.H);
+    scroll.activeAt = now;
   }
-  levelInfo(level, mode) { this.start(level, mode); }
-  daily() {
-    this.dateKey = localDate();
-    this.start(getDaily(this.dateKey), 'daily');
+  scrollList(x, y, delta) {
+    const scroll = this.listScroll();
+    if (!scroll || this.modal || this.busy || this.hidden) return false;
+    const p = this.renderer.toLogical(x, y), rect = this.listRect();
+    if (!rect || !insideRect(rect, p.x, p.y)) return false;
+    this.pointer = null; scroll.wheel(delta / this.renderer.scale, this.platform.now());
+    return true;
   }
   zoomScene(x, y, factor, pan = { dx: 0, dy: 0 }) {
     if (this.page !== 'game' || this.modal || this.busy || this.hidden) return;
@@ -388,17 +411,28 @@ class Game {
     if (type === 'start') {
       this.unlockAudio();
       const b = this.renderer.boardRect;
-      this.pointer = { ...p, lastX: p.x, lastY: p.y, time: this.platform.now(), dragging: false,
+      const rect = this.listRect(), scroll = this.listScroll();
+      const list = scroll && !this.modal && !this.busy && rect && insideRect(rect, p.x, p.y) ? this.page : null;
+      if (list) scroll.begin(p.y, this.platform.now());
+      this.pointer = { ...p, list, lastX: p.x, lastY: p.y, time: this.platform.now(), dragging: false,
         scene: this.page === 'game' && !this.modal && !this.busy && !this.hidden && b && insideRect(b, p.x, p.y) };
       return;
     }
-    if (type === 'cancel') { this.pointer = null; return; }
+    if (type === 'cancel') { this.pointer = null; this.stopListScrolling(); return; }
+    if (this.pointer && this.pointer.list && (type === 'move' || type === 'end')) {
+      if (this.page !== this.pointer.list || this.modal || this.busy) { this.pointer = null; this.stopListScrolling(); return; }
+      const scroll = this.listScroll();
+      scroll.move(p.y, this.platform.now(), Math.abs(p.x - this.pointer.x) > 6);
+      this.pointer.dragging = scroll.dragged;
+      if (type === 'move') return;
+      if (scroll.end(this.platform.now())) { this.pointer = null; return; }
+    }
     if (this.pointer && this.pointer.scene && (type === 'move' || type === 'end')) {
       const origin = this.pointer, b = this.renderer.boardRect;
       if (!b || this.modal || this.busy || this.hidden || this.page !== 'game') { this.pointer = null; return; }
       if (origin.dragging || Math.hypot(p.x - origin.x, p.y - origin.y) > 8) {
         origin.dragging = true;
-        this.camera.orbit((p.x - origin.lastX) / b.w, (p.y - origin.lastY) / b.h);
+        this.camera.pan((p.x - origin.lastX) / b.w, (p.y - origin.lastY) / b.h);
         this.cameraMovedAt = this.platform.now();
         origin.lastX = p.x; origin.lastY = p.y;
         if (type === 'end') this.pointer = null;
@@ -426,8 +460,10 @@ class Game {
       const pending = this.pendingAction; this.pendingAction = null;
       if (now - pending.at <= 500) this.act(pending.action);
     }
-    if (!this.dateCheckedAt || now - this.dateCheckedAt > 1000) { this.dateKey = localDate(); this.dateCheckedAt = now; }
-    const frameInterval = this.platform.kind === 'wechat' ? 1000 / 30 : 16;
+    const smoothList = !!this.listScroll() && !this.modal;
+    if (this.platform.setFrameRate) this.platform.setFrameRate(smoothList ? 60 : 30);
+    // Every native list RAF is visible, including frames arriving slightly before 16 ms.
+    const frameInterval = this.platform.kind === 'wechat' ? smoothList ? 0 : 1000 / 30 : 16;
     if (now - this.lastFrame >= frameInterval - .5) { this.renderer.draw(this, now, this.metrics); this.lastFrame = now; }
     this.frameId = this.platform.raf(() => this.loop());
   }

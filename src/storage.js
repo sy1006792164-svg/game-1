@@ -1,9 +1,9 @@
 'use strict';
 
-const { getAlbum } = require('./stamp-album');
-
 const PROFILE_KEY = 'minigame.local.profile.v1';
 const RUN_KEY = 'minigame.local.run.v1';
+const DEV_PROFILE_KEY = 'minigame.development.profile.v1';
+const DEV_RUN_KEY = 'minigame.development.run.v1';
 const MAX_BYTES = 192 * 1024;
 const BAD_KEYS = ['__proto__', 'prototype', 'constructor'];
 const NATIVE_OBJECT_SOURCE = Function.prototype.toString.call(Object);
@@ -37,12 +37,6 @@ function defaults() {
   return { version: 1, completed: {}, daily: {}, totalWins: 0 };
 }
 
-function ownsStamp(profile, id) {
-  return typeof id === 'string' && getAlbum(profile).stamps.some(function (stamp) {
-    return stamp.id === id && stamp.owned;
-  });
-}
-
 function score(value) {
   if (!plain(value) || !Number.isInteger(value.stars) || value.stars < 1 || value.stars > 3 ||
       !Number.isInteger(value.bestTurns) || value.bestTurns < 0 || value.bestTurns > 100000) return null;
@@ -53,6 +47,7 @@ function profileFrom(value) {
   const next = defaults();
   if (!plain(value) || value.version !== 1) return next;
   if (value.guideDismissed === true) next.guideDismissed = true;
+  // Retain historical daily scores only for save compatibility; no active mode writes them.
   [['completed', safeId], ['daily', dateId]].forEach(function (pair) {
     const name = pair[0], valid = pair[1];
     if (!plain(value[name])) return;
@@ -63,7 +58,6 @@ function profileFrom(value) {
     });
   });
   next.totalWins = Object.keys(next.completed).length + Object.keys(next.daily).length;
-  if (ownsStamp(next, value.equippedStamp)) next.equippedStamp = value.equippedStamp;
   return next;
 }
 
@@ -106,12 +100,14 @@ function runFrom(value) {
       (run.reviveAt == null || (Number.isInteger(run.reviveAt) && run.reviveAt >= 0 && run.reviveAt <= run.actions.length));
     if (run.undosUsed != null && !(Number.isInteger(run.undosUsed) && run.undosUsed >= 0 && run.undosUsed <= 99)) return null;
     if (!plain(run.state) && !hasHistory) return null;
-    if (run.mode === 'daily' && !dateId(run.dateKey)) return null;
+    if (run.mode !== 'campaign') return null;
     return run;
   } catch (_) { return null; }
 }
 
-function createStore(adapter) {
+function createStore(adapter, options = {}) {
+  const profileKey = options.development === true ? DEV_PROFILE_KEY : PROFILE_KEY;
+  const runKey = options.development === true ? DEV_RUN_KEY : RUN_KEY;
   let profile = defaults(), run = null;
   let status = { persisted: true, message: '' };
   // Bumped on every write so callers can cache snapshots between frames.
@@ -145,26 +141,26 @@ function createStore(adapter) {
     }
   }
   try {
-    const stored = adapter.get(PROFILE_KEY);
+    const stored = adapter.get(profileKey);
     if (stored != null && stored !== '') {
       let clean;
       try { clean = cleanJson(stored); } catch (_) { clean = null; }
       profile = profileFrom(clean);
-      if (JSON.stringify(profile) !== JSON.stringify(clean)) save(PROFILE_KEY, profile);
+      if (JSON.stringify(profile) !== JSON.stringify(clean)) save(profileKey, profile);
     }
   } catch (_) {
     // JSON decode errors and denied storage both arrive here. A successful
     // replacement repairs corrupt bytes; a rejected write keeps memory usable.
-    save(PROFILE_KEY, profile);
+    save(profileKey, profile);
   }
   try {
-    const stored = adapter.get(RUN_KEY);
+    const stored = adapter.get(runKey);
     if (stored != null && stored !== '') {
       run = runFrom(stored);
-      if (!run) remove(RUN_KEY);
+      if (!run) remove(runKey);
     }
   } catch (_) {
-    remove(RUN_KEY);
+    remove(runKey);
   }
   function snapshot() { return cleanJson(profile); }
   return {
@@ -175,20 +171,13 @@ function createStore(adapter) {
       if (typeof dismissed !== 'boolean') return false;
       if (dismissed) profile.guideDismissed = true;
       else delete profile.guideDismissed;
-      return save(PROFILE_KEY, profile);
+      return save(profileKey, profile);
     },
-    equipStamp: function (id) {
-      if (id !== null && !ownsStamp(profile, id)) return false;
-      if (id === null) delete profile.equippedStamp;
-      else profile.equippedStamp = id;
-      return save(PROFILE_KEY, profile);
-    },
-    recordWin: function (levelId, stars, turns, mode, dateKey) {
-      const daily = mode === 'daily';
-      const id = daily ? dateKey : (typeof levelId === 'number' ? String(levelId) : levelId);
-      if (!(daily ? dateId(id) : safeId(id)) || !Number.isInteger(stars) || stars < 1 || stars > 3 ||
+    recordWin: function (levelId, stars, turns, mode = 'campaign') {
+      const id = typeof levelId === 'number' ? String(levelId) : levelId;
+      if (mode !== 'campaign' || !safeId(id) || !Number.isInteger(stars) || stars < 1 || stars > 3 ||
           !Number.isInteger(turns) || turns < 0 || turns > 100000) return snapshot();
-      const map = daily ? profile.daily : profile.completed;
+      const map = profile.completed;
       const before = own(map, id) ? map[id] : null;
       if (!before && Object.keys(map).length >= 1000) return snapshot();
       map[id] = {
@@ -196,24 +185,24 @@ function createStore(adapter) {
         bestTurns: Math.min(before ? before.bestTurns : Infinity, turns),
       };
       if (!before) profile.totalWins += 1;
-      save(PROFILE_KEY, profile);
+      save(profileKey, profile);
       return snapshot();
     },
     saveRun: function (value) {
       const next = runFrom(value);
       if (!next) return false;
       run = next;
-      return save(RUN_KEY, run);
+      return save(runKey, run);
     },
     loadRun: function () { return run ? cleanJson(run) : null; },
-    clearRun: function () { run = null; return remove(RUN_KEY); },
+    clearRun: function () { run = null; return remove(runKey); },
     reset: function () {
       profile = defaults(); run = null;
-      const removed = remove(RUN_KEY);
-      const saved = save(PROFILE_KEY, profile);
+      const removed = remove(runKey);
+      const saved = save(profileKey, profile);
       return removed && saved;
     },
   };
 }
 
-module.exports = { createStore, PROFILE_KEY, RUN_KEY };
+module.exports = { createStore, PROFILE_KEY, RUN_KEY, DEV_PROFILE_KEY, DEV_RUN_KEY };

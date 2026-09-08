@@ -26,6 +26,20 @@ function browser() {
   return { canvas, doc, win, saved, rect, platform: createPlatform({ window: win, document: doc }) };
 }
 
+test('wheel events route to collection scrolling before board zoom and preserve line/page units', () => {
+  const { platform, canvas } = browser(); platform.resize();
+  const scrolled = [], zoomed = [];
+  let collection = true;
+  platform.onPointer(() => {}, (...args) => zoomed.push(args), (x, y, delta) => { if (!collection) return false; scrolled.push([x, y, delta]); return true; });
+  const event = { clientX: 120, clientY: 310, deltaY: 2, deltaMode: 1, preventDefault() {} };
+  canvas.emit('wheel', event);
+  canvas.emit('wheel', { ...event, deltaY: 1, deltaMode: 2 });
+  assert.deepEqual(scrolled, [[100, 300, 32], [100, 300, 800]]);
+  assert.equal(zoomed.length, 0);
+  collection = false; canvas.emit('wheel', event);
+  assert.equal(zoomed.length, 1);
+});
+
 test('browser canvas uses CSS dimensions, bounded DPR and relative pointer coordinates', () => {
   const { platform, canvas } = browser();
   assert.equal(platform.kind, 'browser');
@@ -44,6 +58,21 @@ test('browser canvas uses CSS dimensions, bounded DPR and relative pointer coord
   off();
   canvas.emit('pointerdown', event);
   assert.equal(points.length, 3);
+});
+
+test('platform exposes native channel or browser origin development detection', () => {
+  const canvas = {};
+  for (const envVersion of ['develop', 'trial', 'release', undefined]) {
+    const platform = createPlatform({ wx: { createCanvas: () => canvas, getAccountInfoSync: () => ({ miniProgram: { envVersion } }) },
+      window: { location: { protocol: 'http:', hostname: 'localhost' } } });
+    assert.equal(platform.isDevelopment, envVersion === 'develop');
+  }
+  const { canvas: browserCanvas, win, doc } = browser();
+  win.location = { protocol: 'http:', hostname: 'localhost' };
+  assert.equal(createPlatform({ window: win, document: doc }).isDevelopment, true);
+  win.location = { protocol: 'https:', hostname: 'game.example.com', search: '?dev=1' };
+  assert.equal(createPlatform({ window: win, document: doc }).isDevelopment, false);
+  assert.ok(browserCanvas);
 });
 
 test('browser storage roundtrips objects and surfaces corrupt/quota errors to the store', () => {
@@ -116,6 +145,30 @@ test('older WeChat versions use system info and animation callbacks are cancella
   const callback = () => {};
   assert.equal(platform.raf(callback), 9); assert.equal(called, callback);
   platform.cancelRaf(9); assert.equal(cancelled, 9);
+});
+
+test('native frame rate switches between lists and scenes without repeated SDK calls', () => {
+  const requests = [];
+  const platform = createPlatform({ wx: {
+    createCanvas: () => ({}), setPreferredFramesPerSecond: fps => requests.push(fps),
+  } });
+  platform.setFrameRate(30);
+  for (let frame = 0; frame < 120; frame++) platform.setFrameRate(60);
+  for (let frame = 0; frame < 60; frame++) platform.setFrameRate(30);
+  assert.deepEqual(requests, [30, 60, 30]);
+});
+
+test('native frame rate requests tolerate missing or throwing SDK APIs', () => {
+  let attempts = 0;
+  for (const setter of [undefined, () => { attempts++; throw new Error('unsupported'); }]) {
+    const platform = createPlatform({ wx: { createCanvas: () => ({}), setPreferredFramesPerSecond: setter } });
+    assert.doesNotThrow(() => {
+      for (let frame = 0; frame < 10; frame++) platform.setFrameRate(60);
+      for (let frame = 0; frame < 10; frame++) platform.setFrameRate(30);
+    });
+  }
+  assert.equal(attempts, 3, 'unsupported SDK requests are retried only when the requested rate changes');
+  assert.doesNotThrow(() => browser().platform.setFrameRate(60));
 });
 
 test('coordinate-free pointer cancellation clears the gesture without activating a release', () => {

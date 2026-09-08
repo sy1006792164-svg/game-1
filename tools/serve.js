@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 require('./build');
 const root = path.resolve(__dirname, '..');
-const port = Number(process.env.PORT) || 8765;
+const port = Number(process.argv[2]) || Number(process.env.PORT) || 8765;
 http.createServer((req, res) => {
   const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
   const file = pathname === '/' ? path.join(root, 'preview/index.html') : path.resolve(root, '.' + pathname);

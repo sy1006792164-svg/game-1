@@ -1,6 +1,7 @@
 'use strict';
 
 const { createPinchGesture } = require('./pointer-zoom');
+const { isDevelopmentEnvironment } = require('./runtime-environment');
 
 // A small platform boundary; game rules never depend on wx or the DOM.
 function defaultEnvironment() {
@@ -28,10 +29,19 @@ function createPlatform(environment) {
   if (!canvas) throw new Error('Game canvas is unavailable.');
   let dimensions = { width: 390, height: 844, pixelRatio: 1, safeTop: 0, safeBottom: 0 };
   let lowMemory = false;
-  // This turn-based game does not need the native runtime's default 60 FPS.
-  if (api && typeof api.setPreferredFramesPerSecond === 'function') {
-    try { api.setPreferredFramesPerSecond(30); } catch (_) { /* The game loop also limits drawing. */ }
+  let preferredFrameRate = null;
+  function setFrameRate(fps) {
+    if (!api) return;
+    const next = fps === 60 ? 60 : 30;
+    if (preferredFrameRate === next) return;
+    // Remember unsupported requests too, so an older SDK is not retried every frame.
+    preferredFrameRate = next;
+    if (typeof api.setPreferredFramesPerSecond === 'function') {
+      try { api.setPreferredFramesPerSecond(next); } catch (_) { /* Drawing still follows the available RAF cadence. */ }
+    }
   }
+  // Lists opt into 60 FPS; the turn-based scenes keep their lower native frame rate.
+  setFrameRate(30);
 
   function resize() {
     let width, height, pixelRatio, safeTop = 0, safeBottom = 0;
@@ -87,7 +97,7 @@ function createPlatform(environment) {
   }
 
   // Zoom receives canvas coordinates, a relative scale, and optional center motion.
-  function onPointer(listener, onZoom) {
+  function onPointer(listener, onZoom, onScroll) {
     if (typeof listener !== 'function') return function () {};
     let activeId = null;
     let last = null;
@@ -124,16 +134,17 @@ function createPlatform(environment) {
     }
     function finitePoint(point) { return point && Number.isFinite(point.x) && Number.isFinite(point.y); }
     function listenWheel() {
-      if (!pinch) return;
+      if (!pinch && typeof onScroll !== 'function') return;
       listen(canvas, 'wheel', function (event) {
-        if (pinch.isActive() || !Number.isFinite(event.deltaY) || event.deltaY === 0) return;
+        if ((pinch && pinch.isActive()) || !Number.isFinite(event.deltaY) || event.deltaY === 0) return;
         const point = canvasPoint(event);
         if (!finitePoint(point)) return;
         if (event.preventDefault) event.preventDefault();
         cancel();
         const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? dimensions.height : 1;
+        if (typeof onScroll === 'function' && onScroll(point.x, point.y, event.deltaY * unit)) return;
         const exponent = Math.max(-0.35, Math.min(0.35, -event.deltaY * unit * 0.002));
-        onZoom(point.x, point.y, Math.exp(exponent));
+        if (typeof onZoom === 'function') onZoom(point.x, point.y, Math.exp(exponent));
       });
     }
 
@@ -276,7 +287,7 @@ function createPlatform(environment) {
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
       const tag = event.target && event.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (event.target && event.target.isContentEditable)) return;
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].indexOf(event.key) !== -1) event.preventDefault();
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].indexOf(event.key) !== -1) event.preventDefault();
       listener(event.key);
     };
     win.addEventListener('keydown', handler);
@@ -337,7 +348,8 @@ function createPlatform(environment) {
   const requestFrame = env.requestAnimationFrame || (win && win.requestAnimationFrame) || canvas.requestAnimationFrame;
   const cancelFrame = env.cancelAnimationFrame || (win && win.cancelAnimationFrame) || canvas.cancelAnimationFrame;
   return {
-    kind: api ? 'wechat' : 'browser', wx: api, canvas, resize, onPointer, onKey, onResize, storage,
+    kind: api ? 'wechat' : 'browser', wx: api, canvas, resize, onPointer, onKey, onResize, storage, setFrameRate,
+    isDevelopment: isDevelopmentEnvironment(api, win && win.location),
     onMemoryWarning: function (listener) {
       if (!api || typeof api.onMemoryWarning !== 'function') return function () {};
       try { api.onMemoryWarning(listener); } catch (_) { return function () {}; }

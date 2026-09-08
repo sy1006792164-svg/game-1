@@ -2,6 +2,8 @@
 
 const { DIRECTIONS } = require('./engine');
 
+const TILT = .62;
+
 function boardBounds(level) {
   const walls = new Set(level.walls);
   const playable = Array.from({ length: level.width * level.height }, (_, cell) => cell).filter(cell => !walls.has(cell));
@@ -21,28 +23,19 @@ function insideRect(rect, x, y) {
 function createProjection(level, rect, view) {
   const { width, height } = level, bounds = boardBounds(level);
   const { minCol, maxCol, minRow, maxRow } = bounds;
-  const rotation = Number.isFinite(view.rotation) ? view.rotation : 0;
-  const tilt = Math.max(.38, Math.min(1, Number.isFinite(view.tilt) ? view.tilt : .62));
-  const cosine = Math.cos(rotation), sine = Math.sin(rotation);
-  // The greatest extent across every angle keeps the scale steady while orbiting.
-  const span = Math.hypot(maxCol - minCol + 1, maxRow - minRow + 1) * Math.SQRT2;
+  const span = maxCol - minCol + 1 + maxRow - minRow + 1;
   const centerCol = (minCol + maxCol + 1) / 2, centerRow = (minRow + maxRow + 1) / 2;
-  const halfW = Math.min((rect.w - 22) / span, (rect.h - 104) / (span * tilt));
-  const halfH = halfW * tilt;
+  const halfW = Math.min((rect.w - 22) / span, (rect.h - 104) / (span * TILT));
+  const halfH = halfW * TILT;
   const centerX = rect.x + rect.w / 2, centerY = rect.y + rect.h / 2 + 4;
-  const floor = (dx, dy) => [
-    cosine * dx - sine * dy * halfW / halfH,
-    sine * dx * halfH / halfW + cosine * dy,
-  ];
+  const floor = (dx, dy) => [dx, dy];
   const gridDelta = (dx, dy) => {
-    const u = cosine * dx / halfW + sine * dy / halfH;
-    const v = -sine * dx / halfW + cosine * dy / halfH;
+    const u = dx / halfW, v = dy / halfH;
     return [(u + v) / 2, (v - u) / 2];
   };
   const corner = (col, row) => {
     const dc = col - centerCol, dr = row - centerRow;
-    const [x, y] = floor((dc - dr) * halfW, (dc + dr) * halfH);
-    return [centerX + x, centerY + y];
+    return [centerX + (dc - dr) * halfW, centerY + (dc + dr) * halfH];
   };
   const point = cell => corner(cell % width + .5, Math.floor(cell / width) + .5);
   const toScreen = (x, y) => [centerX + (x - centerX) * view.scale + view.panX * rect.w, centerY + (y - centerY) * view.scale + view.panY * rect.h];
@@ -62,23 +55,17 @@ function createProjection(level, rect, view) {
   };
   const vector = name => {
     const [col, row] = DIRECTIONS[name];
-    return floor((col - row) * halfW, (col + row) * halfH);
+    return [(col - row) * halfW, (col + row) * halfH];
   };
+  // Screen arrows map to the grid axis they lean towards; exact diagonals keep their own axis.
   const direction = (dx, dy) => {
     const [col, row] = gridDelta(dx, dy);
     const difference = Math.abs(col) - Math.abs(row);
-    // At diagonal ties, keep horizontal and vertical keys on distinct axes.
     const alongCol = Math.abs(difference) < 1e-8 ? Math.abs(dx) >= Math.abs(dy) : difference > 0;
     return alongCol ? col > 0 ? 'right' : 'left' : row > 0 ? 'down' : 'up';
   };
   const corners = [corner(minCol, minRow), corner(maxCol + 1, minRow), corner(maxCol + 1, maxRow + 1), corner(minCol, maxRow + 1)];
-  const rear = cell => {
-    const col = cell % width, row = Math.floor(cell / width);
-    const colDepth = sine + cosine, rowDepth = cosine - sine;
-    return (colDepth > 1e-8 && col === minCol) || (colDepth < -1e-8 && col === maxCol) ||
-      (rowDepth > 1e-8 && row === minRow) || (rowDepth < -1e-8 && row === maxRow);
-  };
-  return { halfW, halfH, bounds, centerX, centerY, floor, corner, point, visible, contains, cellAt, direction, vector, rear, corners, toScreen, toWorld };
+  return { halfW, halfH, bounds, centerX, centerY, floor, corner, point, visible, contains, cellAt, direction, vector, corners, toScreen, toWorld };
 }
 
 module.exports = { createProjection, insideRect };

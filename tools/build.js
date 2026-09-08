@@ -2,6 +2,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
+// Refuse to replace the preview bundle if any shipped level lacks a legal win.
+require('./verify-levels').assertCampaignSolvable();
 const modules = {};
 function add(filename) {
   const id = path.relative(root, filename).replace(/\\/g, '/');

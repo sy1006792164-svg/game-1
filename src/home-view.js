@@ -3,7 +3,6 @@
 const { CAMPAIGN } = require('./levels');
 const { C } = require('./theme');
 const { drawVignette } = require('./scene');
-const { drawHomeStamp } = require('./stamp-badge');
 
 function layout(height) {
   const top = Math.max(0, (height - 780) / 2);
@@ -16,11 +15,10 @@ function layout(height) {
 function departure(next, saved, completed) {
   if (!saved) return {
     title: completed ? '继续送信' : '开始送信',
-    detail: '第 ' + String(CAMPAIGN.indexOf(next) + 1).padStart(2, '0') + ' 封 · ' + next.title
+    detail: '第 ' + String(CAMPAIGN.indexOf(next) + 1).padStart(3, '0') + ' 封 · ' + next.title
   };
-  if (saved.mode === 'daily') return { title: '继续每日风笺', detail: '每日风笺 · ' + saved.dateKey };
   const level = CAMPAIGN.find(item => item.id === saved.levelId);
-  return { title: '继续送信', detail: level ? '第 ' + String(level.id).padStart(2, '0') + ' 封 · ' + level.title : '上次的路线' };
+  return { title: '继续送信', detail: level ? '第 ' + String(level.id).padStart(3, '0') + ' 封 · ' + level.title : '上次的路线' };
 }
 
 function drawBrand(r, top) {
@@ -46,7 +44,6 @@ function drawHome(r, game, now) {
   drawVignette(r, now, { x: -30, y: ui.heroY, w: 450, h: ui.heroH }, { reducedMotion: r.reducedMotion });
   r.label(route.detail, 195, ui.routeY, 324, 11, C.muted, 'center');
   r.button(route.title, 30, ui.buttonY, 330, 56, () => game.primary(), 'primary');
-  drawHomeStamp(r, game, ui.buttonY + 65);
   drawLinks(r, game, ui.linksY);
 }
 
