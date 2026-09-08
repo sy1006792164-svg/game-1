@@ -2,7 +2,7 @@
 
 日期：2026-09-07  
 项目：`C:\Users\10067\WeChatProjects\minigame-1`  
-AppID：`wx224cd457271e1ace`
+AppID：`wxee6289f904a5d625`
 
 ## 当前结论
 

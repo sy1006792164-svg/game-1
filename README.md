@@ -4,13 +4,13 @@
 
 项目路径：`E:\work\game-1`
 
-微信 AppID：`wx224cd457271e1ace`
+微信 AppID：`wxee6289f904a5d625`
 
 ## 微信版直接运行
 
 在微信开发者工具打开本目录 `E:\work\game-1`，项目类型为“小游戏”，点击“编译”。原微信项目直接使用本目录即可。`game.js` 直接加载 `src/main.js`，不需要 npm 安装、不需要构建、不需要数据库。
 
-原飞机大战示例的 js/、images/、audio/ 仍保留，旧入口和配置备份在 work/starter-backup/。这些目录已从上传包排除，新游戏只引用 src/ 和 assets/。原 project.private.config.json 保留。
+原飞机大战示例的 js/、images/、audio/ 已删除，新游戏只引用 src/ 和 assets/。原 project.private.config.json 保留。
 
 ## 浏览器验收
 

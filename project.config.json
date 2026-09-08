@@ -26,7 +26,7 @@
   },
   "compileType": "game",
   "libVersion": "latest",
-  "appid": "wx224cd457271e1ace",
+  "appid": "wxee6289f904a5d625",
   "projectname": "wind-letter",
   "condition": {
     "search": {
@@ -67,18 +67,6 @@
       },
       {
         "value": "preview",
-        "type": "folder"
-      },
-      {
-        "value": "js",
-        "type": "folder"
-      },
-      {
-        "value": "images",
-        "type": "folder"
-      },
-      {
-        "value": "audio",
         "type": "folder"
       },
       {
