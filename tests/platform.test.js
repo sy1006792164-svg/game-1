@@ -169,7 +169,6 @@ test('WeChat JSON storage boundary retains run and profile across platform recre
   const first = createStore(createPlatform({ wx }).storage);
   const history = { mode: 'campaign', levelId: 2, dateKey: '2026-09-07', actions: ['up', 'wait'], reviveAt: null };
   first.recordWin('1', 3, 8, 'campaign');
-  first.updateSettings({ sound: false });
   assert.equal(first.saveRun(history), true);
   assert.equal(typeof data.get(PROFILE_KEY), 'string');
   assert.equal(typeof data.get(RUN_KEY), 'string');

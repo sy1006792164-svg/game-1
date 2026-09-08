@@ -1,48 +1,156 @@
 'use strict';
-function createSound(platform) {
-  const voices = {};
-  const types = ['move', 'collect', 'start', 'win'];
 
-  function stopVoice(audio) {
-    try { if (audio.stop) audio.stop(); else audio.pause(); } catch (_) {}
-  }
-  function releaseVoice(audio) {
-    stopVoice(audio);
-    try { if (audio.destroy) audio.destroy(); } catch (_) {}
-  }
-  function voice(type) {
-    const key = types.indexOf(type) >= 0 ? type : 'move';
-    if (voices[key]) return voices[key];
-    let audio;
+// Quiet, short cues can overlap without building an unlimited native audio pool.
+const CUES = {
+  move: { volume: .17, gap: 90, duration: .16, priority: 0 },
+  collect: { volume: .29, gap: 150, duration: .58, priority: 2 },
+  start: { volume: .25, gap: 400, duration: .72, priority: 2 },
+  win: { volume: .3, gap: 700, duration: 1.12, priority: 3 },
+  letter: { volume: .29, gap: 150, duration: .66, priority: 2 },
+  seal: { volume: .26, gap: 150, duration: .54, priority: 2 },
+  light: { volume: .26, gap: 180, duration: .72, priority: 2 },
+  wind: { volume: .24, gap: 220, duration: .58, priority: 1 },
+  bridge: { volume: .24, gap: 180, duration: .48, priority: 1 },
+  wait: { volume: .18, gap: 120, duration: .28, priority: 0 },
+  blocked: { volume: .2, gap: 180, duration: .26, priority: 1 },
+  undo: { volume: .23, gap: 150, duration: .4, priority: 1 },
+  tap: { volume: .17, gap: 90, duration: .13, priority: 0 },
+  echo: { volume: .22, gap: 260, duration: .78, priority: 1 },
+  fail: { volume: .26, gap: 700, duration: .86, priority: 3 },
+  low: { volume: .2, gap: 1800, duration: .62, priority: 2 },
+};
+
+function createSound(platform) {
+  const voices = [];
+  const recent = Object.create(null);
+  const suspended = new Set();
+  let background = null;
+  let backgroundEnabled = false;
+  let unlocked = platform.kind === 'wechat';
+
+  function retire(voice) {
+    if (!voice || voice.released) return;
+    voice.released = true;
+    clearTimeout(voice.timer);
+    const index = voices.indexOf(voice);
+    if (index !== -1) voices.splice(index, 1);
+    if (background === voice) background = null;
+    const audio = voice.audio;
+    if (!audio) return;
     try {
-      if (platform.kind === 'wechat' && platform.wx.createInnerAudioContext) {
-        audio = platform.wx.createInnerAudioContext();
-        audio.onError(() => {});
-        audio.src = 'assets/' + key + '.wav'; audio.volume = key === 'move' ? .16 : .32;
-      } else if (typeof Audio !== 'undefined') {
-        audio = new Audio('/assets/' + key + '.wav'); audio.volume = key === 'move' ? .16 : .32;
+      if (audio.offEnded) audio.offEnded(voice.finish);
+      if (audio.offError) audio.offError(voice.finish);
+      if (audio.removeEventListener) {
+        audio.removeEventListener('ended', voice.finish);
+        audio.removeEventListener('error', voice.finish);
       }
-      if (audio) voices[key] = audio;
-      return audio;
+    } catch (_) { /* Some native SDK versions omit event removal. */ }
+    try { if (audio.stop) audio.stop(); else audio.pause(); } catch (_) {}
+    try {
+      if (audio.destroy) audio.destroy();
+      else {
+        audio.removeAttribute('src');
+        audio.load();
+      }
+    } catch (_) { /* A detached browser element may already be disposed. */ }
+  }
+
+  function createVoice(type, cue, loop) {
+    const voice = { audio: null, priority: cue.priority || 0, released: false, timer: null };
+    voice.finish = function () { retire(voice); };
+    try {
+      const native = platform.kind === 'wechat' && platform.wx && platform.wx.createInnerAudioContext;
+      if (native) voice.audio = platform.wx.createInnerAudioContext();
+      else if (typeof Audio !== 'undefined') voice.audio = new Audio();
+      if (!voice.audio) return null;
+      const audio = voice.audio;
+      audio.volume = cue.volume;
+      audio.loop = Boolean(loop);
+      if (audio.onEnded) audio.onEnded(voice.finish);
+      if (audio.onError) audio.onError(voice.finish);
+      if (audio.addEventListener) {
+        audio.addEventListener('ended', voice.finish);
+        audio.addEventListener('error', voice.finish);
+      }
+      audio.src = (native ? 'assets/' : '/assets/') + type + '.wav';
+      if (voice.released) return null;
+      if (loop) background = voice;
+      else voices.push(voice);
+      // onEnded is unreliable on a few native runtimes; bound their lifetime too.
+      if (!loop) voice.timer = setTimeout(voice.finish, cue.duration * 1000 + 1000);
+      const promise = audio.play();
+      if (promise && promise.catch) promise.catch(voice.finish);
+      return voice.released ? null : voice;
     } catch (_) {
-      // A partially initialized native context still owns resources.
-      if (audio) releaseVoice(audio);
+      retire(voice);
       return null;
     }
   }
+
+  function startBackground() {
+    if (unlocked && !suspended.size && backgroundEnabled && !background) createVoice('ambience', { volume: .28 }, true);
+  }
+
+  function stopEffects() {
+    voices.slice().forEach(retire);
+    Object.keys(recent).forEach(type => { delete recent[type]; });
+  }
+
+  function stop() {
+    backgroundEnabled = false;
+    retire(background);
+    stopEffects();
+  }
+
+  // Reasons are independent: returning from an ad must not unmute a hidden
+  // game or override a phone call that still owns the device's audio.
+  function suspend(reason) {
+    suspended.add(reason);
+    if (reason === 'hidden' && platform.kind !== 'wechat') unlocked = false;
+    retire(background);
+    stopEffects();
+  }
+
+  function resume(reason) {
+    if (suspended.delete(reason)) startBackground();
+  }
+
+  if (platform.onAudioInterruptionBegin && platform.onAudioInterruptionEnd) {
+    platform.onAudioInterruptionBegin(() => suspend('interruption'));
+    platform.onAudioInterruptionEnd(() => resume('interruption'));
+  }
+
   return {
     play(type) {
-      const audio = voice(type);
-      if (!audio) return;
-      try {
-        if (audio.stop) { audio.stop(); audio.seek(0); } else audio.currentTime = 0;
-        const promise = audio.play(); if (promise && promise.catch) promise.catch(() => {});
-      } catch (_) { /* The host may require an initial user gesture. */ }
+      if (suspended.size || !unlocked || !Object.prototype.hasOwnProperty.call(CUES, type)) return;
+      // A new user gesture can recover from the browser's autoplay restriction.
+      startBackground();
+      const cue = CUES[type];
+      const now = Date.now();
+      if (recent[type] !== undefined && now - recent[type] < cue.gap) return;
+      if (voices.length >= 3) {
+        const quietest = voices.reduce((selected, voice) => voice.priority < selected.priority ? voice : selected);
+        if (quietest.priority > cue.priority) return;
+        retire(quietest);
+      }
+      recent[type] = now;
+      createVoice(type, cue, false);
     },
-    stop() { Object.values(voices).forEach(stopVoice); },
-    release() {
-      Object.keys(voices).forEach(type => { releaseVoice(voices[type]); delete voices[type]; });
-    }
+    ambience(enabled) {
+      backgroundEnabled = Boolean(enabled);
+      if (backgroundEnabled) startBackground();
+      else retire(background);
+    },
+    unlock() {
+      if (suspended.size) return;
+      unlocked = true;
+      startBackground();
+    },
+    suspend,
+    resume,
+    stop,
+    release() { stop(); unlocked = platform.kind === 'wechat'; },
   };
 }
-module.exports = { createSound };
+
+module.exports = { createSound, SOUND_TYPES: Object.freeze(Object.keys(CUES).concat('ambience')) };

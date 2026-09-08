@@ -41,22 +41,30 @@ function modalLayout(r, modal) {
 
 function drawStars(r, stars, y, age) {
   for (let i = 0; i < 3; i++) {
-    const reveal = Math.min(1, Math.max(.35, (age - i * 90) / 250));
-    r.icon('star', 150 + i * 45, y, (i === 1 ? 36 : 29) * reveal, i < stars ? C.yellow : C.line);
-  }
-  if (age >= 1100) return;
-  const c = r.ctx;
-  for (let i = 0; i < 18; i++) {
-    const t = age / 1100, angle = i * 2.4, spread = 30 + t * 100;
-    c.save(); c.globalAlpha *= 1 - t;
-    r.circle(195 + Math.cos(angle) * spread, y + Math.sin(angle) * spread * .6 + t * t * 35, 1.5 + i % 2, i % 2 ? C.gold : C.blue);
-    c.restore();
+    const x = 150 + i * 45, size = i === 1 ? 36 : 29;
+    r.icon('star', x, y, size, C.line);
+    if (i >= stars) continue;
+    const progress = r.reducedMotion ? 1 : Math.min(1, Math.max(0, (age - 120 - i * 180) / 300));
+    if (!progress) continue;
+    const eased = 1 - Math.pow(1 - progress, 3);
+    r.ctx.save(); r.ctx.globalAlpha *= eased;
+    r.icon('star', x, y, size * (.65 + eased * .35), C.yellow);
+    r.ctx.restore();
+    if (progress === 1) continue;
+    r.ctx.save(); r.ctx.globalAlpha *= Math.sin(progress * Math.PI) * .65;
+    // Keep the celebration inside the star row, clear of the result and actions.
+    for (let side = -1; side <= 1; side += 2) {
+      const sparkX = x + side * (14 + progress * 7), sparkY = y - 12 - progress * 5;
+      r.line([[sparkX - 2, sparkY], [sparkX + 2, sparkY]], C.gold, 1);
+      r.line([[sparkX, sparkY - 2], [sparkX, sparkY + 2]], C.gold, 1);
+    }
+    r.ctx.restore();
   }
 }
 
 function drawModal(r, modal, now) {
   const c = r.ctx, age = Math.max(0, now - r.modalAt), ui = modalLayout(r, modal);
-  c.save(); c.globalAlpha *= Math.min(1, .18 + age / 180);
+  c.save(); c.globalAlpha *= r.reducedMotion ? 1 : Math.min(1, .18 + age / 180);
   c.fillStyle = '#071d25c7';
   c.fillRect(-r.ox / r.scale, -r.oy / r.scale, 390 + r.ox * 2 / r.scale, r.H + r.oy / r.scale + r.safeBottom / r.scale);
   r.round(ui.x, ui.y + 5, ui.w, ui.h, 24, '#071c24');

@@ -13,8 +13,8 @@ class SceneCamera {
 
   enter(now) { this.reset(); this.enteredAt = now; }
 
-  frame(now) {
-    const progress = clamp((now - this.enteredAt) / INTRO_MS, 0, 1);
+  frame(now, reducedMotion = false) {
+    const progress = reducedMotion ? 1 : clamp((now - this.enteredAt) / INTRO_MS, 0, 1);
     const entrance = .36 + .64 * (1 - Math.pow(1 - progress, 3));
     return { scale: this.zoom * entrance, panX: this.panX, panY: this.panY, rotation: this.rotation, tilt: this.tilt };
   }
@@ -36,4 +36,4 @@ class SceneCamera {
   }
 }
 
-module.exports = { SceneCamera, MIN_ZOOM, MAX_ZOOM };
+module.exports = { SceneCamera, MIN_ZOOM, MAX_ZOOM, INTRO_MS };

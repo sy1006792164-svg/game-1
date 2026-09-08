@@ -1,5 +1,7 @@
 'use strict';
 
+const { OFFICE } = require('./post-office-geometry');
+
 function polygon(r, points, fill) {
   const c = r.ctx; c.beginPath();
   points.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y));
@@ -31,7 +33,7 @@ function officeTop(r, x, y, size, now, ready, rotation) {
     r.circle(0, 0, 22, '#efb45d'); c.restore();
   }
   polygon(r, [[1, -18], [20, 1], [1, 20], [-18, 1]], '#143d3445');
-  polygon(r, [[0, -19], [19, 0], [0, 19], [-19, 0]], '#dfcda6');
+  polygon(r, OFFICE.top, '#dfcda6');
   polygon(r, [[0, -17], [17, 0], [0, 17], [-17, 0]], '#2b574e');
   polygon(r, [[0, -17], [17, 0], [0, 0], [-17, 0]], '#466f61');
   r.line([[-17, 0], [17, 0]], '#85a48b', 1.4);

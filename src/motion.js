@@ -45,12 +45,13 @@ function movementPath(game, from, to, ghost) {
   return path;
 }
 
-function actorFrame(game, now, point, ghost = false) {
+function actorFrame(game, now, point, ghost = false, options = {}) {
   const state = game && game.state, previous = game && game.previousState;
   const key = ghost ? 'echo' : 'player';
   const time = finite(now) ? now : 0;
   const age = game && finite(game.transitionAt) ? Math.max(0, time - game.transitionAt) : MOVE_MS;
-  const progress = clamp(age / MOVE_MS), eased = smooth(progress);
+  const reduced = !!options.reducedMotion;
+  const progress = reduced ? 1 : clamp(age / MOVE_MS), eased = smooth(progress);
   const target = state && state[key], from = previous && previous[key];
   const disappearing = ghost && !validCell(target) && validCell(from) && progress < 1;
   if (!validCell(target) && !disappearing) return { x: 0, y: 0, lift: 0, stride: 0, alpha: 0, moving: false, facing: 1 };
@@ -60,7 +61,7 @@ function actorFrame(game, now, point, ghost = false) {
   const [x0, y0] = position(point, path[segment]);
   const [x1, y1] = position(point, path[Math.min(segment + 1, path.length - 1)]);
   const moving = path.length > 1 && progress < 1;
-  const breathing = Math.sin(time / (ghost ? 390 : 610) + (ghost ? 1.7 : 0));
+  const breathing = reduced ? 0 : Math.sin(time / (ghost ? 390 : 610) + (ghost ? 1.7 : 0));
   const stride = moving ? Math.sin(progress * TAU) : 0;
   const lift = ghost ? 4 + breathing * 1.7 + (moving ? Math.sin(progress * Math.PI) * 3 : 0) : .6 + breathing * .6 + (moving ? Math.sin(progress * Math.PI) * 4 : 0);
   const alpha = !ghost ? 1 : disappearing ? 1 - eased : !validCell(from) ? eased : 1;
@@ -93,14 +94,20 @@ function burst(renderer, x, y, unit, progress, color, seed, paper) {
   }
 }
 
-function drawEffectBatch(renderer, batch, now, point, scale) {
+function drawEffectBatch(renderer, batch, now, point, scale, showLabels) {
   const c = renderer.ctx, age = now - batch.at, events = batch.events;
   events.forEach((event, index) => {
     if (!event || !validCell(event.cell)) return;
     const [x, y] = position(point, event.cell);
     const seed = event.cell * 193 + index * 997;
     c.save();
-    if (['letter', 'seal', 'light', 'bridge'].includes(event.type)) {
+    if (event.type === 'move' && age >= MOVE_MS * .7 && age < 540) {
+      const progress = (age - MOVE_MS * .7) / (540 - MOVE_MS * .7);
+      c.globalAlpha *= (1 - progress) * .48;
+      c.beginPath(); c.ellipse(x, y + 2, scale * (.12 + progress * .23), scale * (.04 + progress * .1), 0, 0, TAU);
+      c.strokeStyle = COLORS.gold; c.lineWidth = 1.2; c.stroke();
+      [-1, 1].forEach(side => renderer.line([[x + side * scale * .055, y], [x + side * scale * .055, y + scale * .05]], COLORS.paper, 2));
+    } else if (['letter', 'seal', 'light', 'bridge'].includes(event.type)) {
       const paper = event.type === 'bridge';
       const delay = paper ? 25 : MOVE_MS * .6;
       const progress = (age - delay) / (paper ? 700 : 650);
@@ -109,7 +116,7 @@ function drawEffectBatch(renderer, batch, now, point, scale) {
         c.globalAlpha *= 1 - progress;
         renderer.circle(x, y - scale * .08, scale * (.15 + progress * .48), null, color);
         burst(renderer, x, y - scale * .18, scale, progress, color, seed, paper);
-        renderer.text(event.type === 'light' ? '+3 拍' : paper ? '纸桥碎了' : '+1', x, y - scale * .52 - progress * 20, paper ? 10 : 14, color, 'center', '600');
+        if (showLabels) renderer.text(event.type === 'light' ? '+3 拍' : paper ? '纸桥碎了' : '+1', x, y - scale * .52 - progress * 20, paper ? 10 : 14, color, 'center', '600');
       }
     } else if (event.type === 'wind' && age < 600) {
       const progress = age / 600;
@@ -126,13 +133,61 @@ function drawEffectBatch(renderer, batch, now, point, scale) {
       c.globalAlpha *= (1 - progress) * .75;
       renderer.circle(x, y, scale * (.13 + progress * .42), null, COLORS.cyan);
       renderer.circle(x, y, scale * (.07 + progress * .29), null, COLORS.gold);
-      renderer.text('等一拍', x, y - scale * .6 - progress * 12, 10, COLORS.cyan, 'center');
+      if (showLabels) renderer.text('等一拍', x, y - scale * .6 - progress * 12, 10, COLORS.cyan, 'center');
+    } else if (event.type === 'echo-born' && age < 780) {
+      const progress = age / 780;
+      c.globalAlpha *= 1 - progress;
+      renderer.circle(x, y - scale * .2, scale * (.1 + progress * .45), null, COLORS.cyan);
+      renderer.icon('echo', x, y - scale * (.64 + progress * .15), scale * .25, COLORS.cyan);
+    } else if (event.type === 'undo' && age < 650) {
+      const progress = age / 650;
+      c.globalAlpha *= 1 - progress;
+      for (let ring = 0; ring < 2; ring++) {
+        const radius = scale * (.22 + (1 - progress) * (.28 + ring * .12));
+        c.beginPath(); c.ellipse(x, y, radius, radius * .47, -progress * .35, .2 + ring * Math.PI, Math.PI * 1.6 + ring * Math.PI);
+        c.strokeStyle = COLORS.cyan; c.lineWidth = 1.4; c.stroke();
+      }
+      renderer.icon('undo', x, y - scale * .65, scale * .28, COLORS.cyan);
+    } else if (['ready', 'win', 'fail'].includes(event.type) && age < 950) {
+      const progress = age / 950, won = event.type === 'win', failed = event.type === 'fail';
+      const color = failed ? '#f1b189' : COLORS.gold;
+      c.globalAlpha *= 1 - progress;
+      c.beginPath(); c.ellipse(x, y, scale * (.25 + progress * .75), scale * (.1 + progress * .34), 0, 0, TAU);
+      c.strokeStyle = color; c.lineWidth = won ? 2 : 1.3; c.stroke();
+      if (!failed) burst(renderer, x, y - scale * .5, scale * (won ? 1.5 : .85), progress, color, seed, true);
+      // The destination badge owns the ready/delivered label; these effects stay visual.
+      if (showLabels && failed) renderer.text('灯火熄灭', x, y - scale * .9 - progress * 12, 11, color, 'center', '600');
     }
     c.restore();
   });
 }
 
-function drawEffects(renderer, game, now, point, unit) {
+function drawStaticFeedback(renderer, events, age, point, scale) {
+  if (age < 0 || age > 700) return;
+  const labels = { letter: '信笺 +1', seal: '印记 +1', light: '+3 拍', bridge: '纸桥已碎', wait: '等一拍', undo: '已撤回', fail: '灯火熄灭' };
+  const displayed = new Set();
+  events.slice().reverse().forEach(event => {
+    if (!event || !labels[event.type] || !validCell(event.cell) || displayed.has(event.cell)) return;
+    displayed.add(event.cell);
+    const [x, y] = position(point, event.cell);
+    renderer.text(labels[event.type], x, y - scale * .85, 11, event.type === 'undo' || event.type === 'seal' ? COLORS.cyan : COLORS.gold, 'center', '600');
+  });
+}
+
+function drawBlocked(renderer, game, now, point, scale, reduced) {
+  if (!finite(game.blockedAt) || !validCell(game.state && game.state.player)) return;
+  const age = now - game.blockedAt;
+  if (age < 0 || age > 650) return;
+  const [x, y] = position(point, game.state.player), c = renderer.ctx;
+  const progress = reduced ? 0 : age / 650;
+  c.save(); c.globalAlpha *= reduced ? .85 : 1 - progress;
+  c.beginPath(); c.ellipse(x, y + 1, scale * (.3 + progress * .09), scale * (.12 + progress * .04), 0, 0, TAU);
+  c.strokeStyle = '#f1b189'; c.lineWidth = 1.8; c.stroke();
+  renderer.text('这边不通', x, y - scale * .8, 10, '#f5c099', 'center', '600');
+  c.restore();
+}
+
+function drawEffects(renderer, game, now, point, unit, options = {}) {
   if (!renderer || !renderer.ctx || !game || !finite(now) || !finite(game.transitionAt) || typeof point !== 'function') return;
   let buffer = renderer.motionEffects;
   if (!buffer || buffer.game !== game || buffer.session !== game.session || buffer.level !== game.level) {
@@ -145,16 +200,27 @@ function drawEffects(renderer, game, now, point, unit) {
   const turn = game.state && game.state.turn;
   const backwards = (finite(turn) && finite(buffer.turn) && turn < buffer.turn) ||
     (finite(game.undosUsed) && finite(buffer.undosUsed) && game.undosUsed !== buffer.undosUsed);
-  if (game.reviewing || backwards) buffer.batches = [];
+  const reduced = !!options.reducedMotion;
+  if (game.reviewing || backwards || reduced) buffer.batches = [];
   const changed = buffer.at !== game.transitionAt || buffer.events !== game.moveEvents;
-  if (!game.reviewing && changed && Array.isArray(game.moveEvents) && game.moveEvents.length) {
-    buffer.batches.push({ at: game.transitionAt, events: game.moveEvents.slice() });
+  if (!game.reviewing && !reduced && changed && Array.isArray(game.moveEvents) && game.moveEvents.length) {
+    const events = game.moveEvents.slice(), state = game.state, previous = game.previousState;
+    if (state && previous && validCell(state.echo) && !validCell(previous.echo)) events.push({ type: 'echo-born', cell: state.echo });
+    if (state && previous && state.status === 'playing' && !state.letters.length && !state.seals.length && (previous.letters.length || previous.seals.length)) events.push({ type: 'ready', cell: game.level.exit });
+    buffer.batches.push({ at: game.transitionAt, events });
   }
   buffer.at = game.transitionAt; buffer.events = game.moveEvents; buffer.turn = turn; buffer.undosUsed = game.undosUsed;
-  buffer.batches = buffer.batches.filter(batch => now >= batch.at && now - batch.at <= 800).slice(-12);
+  buffer.batches = buffer.batches.filter(batch => now >= batch.at && now - batch.at <= 950).slice(-8);
   if (game.reviewing) return;
   const scale = finite(unit) && unit > 0 ? unit : 40;
-  buffer.batches.forEach(batch => drawEffectBatch(renderer, batch, now, point, scale));
+  // On delivery, even older collection/wait batches must not write over the result badge.
+  const showLabels = game.state && game.state.status !== 'won';
+  if (showLabels) drawBlocked(renderer, game, now, point, scale, reduced);
+  if (reduced) {
+    if (showLabels) drawStaticFeedback(renderer, game.moveEvents || [], now - game.transitionAt, point, scale);
+    return;
+  }
+  buffer.batches.forEach(batch => drawEffectBatch(renderer, batch, now, point, scale, showLabels));
 }
 
 module.exports = { MOVE_MS, actorFrame, drawEffects };

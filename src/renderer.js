@@ -5,7 +5,6 @@ const { drawGame } = require('./game-view');
 const { drawLevels } = require('./level-view');
 const { drawCollection } = require('./collection-view');
 const { drawModal } = require('./modal-view');
-const { drawSettings } = require('./settings-view');
 const { drawBackdrop } = require('./scene');
 const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑': 'arrow-up', '↓': 'arrow-down', '↗': 'arrow-ne', '↘': 'arrow-se', '↙': 'arrow-sw', '↖': 'arrow-nw', '✓': 'check' });
 const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2, ne: -Math.PI / 4, se: Math.PI / 4, sw: Math.PI * .75, nw: -Math.PI * .75 });
@@ -66,7 +65,7 @@ class Renderer {
     const options = typeof style === 'object' && style ? style : { style };
     const primary = options.style === 'primary', quiet = options.style === 'quiet', disabled = !!options.disabled;
     const c = this.ctx, p = this.pointer, pressed = !disabled && p && p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h;
-    const top = y + (pressed && !quiet ? 2 : 0);
+    const top = y + (pressed && !quiet && !this.reducedMotion ? 2 : 0);
     c.save();
     if (disabled) c.globalAlpha *= .45;
     if (!quiet) {
@@ -219,15 +218,15 @@ class Renderer {
     c.translate(this.ox, this.oy); c.scale(this.scale, this.scale);
     this.hits = []; this.boardRect = null; this.boardProjection = null; this.pointer = game.modal ? null : game.pointer;
     this.now = now;
+    this.reducedMotion = false;
     c.save();
-    drawBackdrop(this, now, game.page === 'game' && game.level ? game.level.chapter || 0 : 0);
+    drawBackdrop(this, now, game.page === 'game' && game.level ? game.level.chapter || 0 : 0, { reducedMotion: this.reducedMotion });
     c.globalAlpha = game.page === 'game' ? .1 : game.page === 'home' ? .25 : .72;
     c.fillStyle = C.paper; c.fillRect(0, 0, 390, this.H);
     c.restore();
     if (game.page === 'game') this.game(game, now);
     else if (game.page === 'levels') this.levels(game);
     else if (game.page === 'collection') this.collection(game);
-    else if (game.page === 'settings') this.settings(game);
     else this.home(game, now);
     if (game.modal !== this.currentModal) { this.currentModal = game.modal; this.modalAt = now; }
     let modalBounds = null;
@@ -236,7 +235,7 @@ class Renderer {
       this.pointer = game.pointer;
       const result = (game.modal.kind === 'win' || game.modal.kind === 'fail') &&
         (game.moveEvents || []).some(event => event.type === 'win' || event.type === 'fail');
-      if (!result || now - game.transitionAt >= 400) modalBounds = this.modal(game.modal, now);
+      if (!result || this.reducedMotion || now - game.transitionAt >= 400) modalBounds = this.modal(game.modal, now);
       else this.modalAt = now;
     }
     if (game.toastUntil > now) {
@@ -254,7 +253,6 @@ class Renderer {
   home(game, now) { drawHome(this, game, now); }
   levels(game) { drawLevels(this, game); }
   collection(game) { drawCollection(this, game); }
-  settings(game) { drawSettings(this, game); }
   game(game, now) { drawGame(this, game, now); }
   modal(modal, now) { return drawModal(this, modal, now); }
 }

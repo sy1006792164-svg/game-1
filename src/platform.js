@@ -283,10 +283,15 @@ function createPlatform(environment) {
     return function () { win.removeEventListener('keydown', handler); };
   }
 
+  function nativeListener(name, listener) {
+    if (!api || typeof api['on' + name] !== 'function') return function () {};
+    try { api['on' + name](listener); } catch (_) { return function () {}; }
+    return function () { if (typeof api['off' + name] === 'function') api['off' + name](listener); };
+  }
+
   function lifecycle(name, listener) {
     if (api && typeof api['on' + name] === 'function') {
-      api['on' + name](listener);
-      return function () { if (typeof api['off' + name] === 'function') api['off' + name](listener); };
+      return nativeListener(name, listener);
     }
     if (!doc || typeof doc.addEventListener !== 'function') return function () {};
     const handler = function () {
@@ -348,6 +353,8 @@ function createPlatform(environment) {
     },
     onHide: function (listener) { return lifecycle('Hide', listener); },
     onShow: function (listener) { return lifecycle('Show', listener); },
+    onAudioInterruptionBegin: function (listener) { return nativeListener('AudioInterruptionBegin', listener); },
+    onAudioInterruptionEnd: function (listener) { return nativeListener('AudioInterruptionEnd', listener); },
     vibrate: function () {
       if (api && typeof api.vibrateShort === 'function') {
         try { api.vibrateShort({ type: 'light', fail: function () {} }); } catch (_) { /* Optional feedback. */ }

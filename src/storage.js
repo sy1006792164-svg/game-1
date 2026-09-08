@@ -32,7 +32,7 @@ function dateId(id) {
 }
 
 function defaults() {
-  return { version: 1, completed: {}, daily: {}, settings: { sound: true, haptics: true }, totalWins: 0 };
+  return { version: 1, completed: {}, daily: {}, totalWins: 0 };
 }
 
 function score(value) {
@@ -44,10 +44,7 @@ function score(value) {
 function profileFrom(value) {
   const next = defaults();
   if (!plain(value) || value.version !== 1) return next;
-  if (plain(value.settings)) {
-    if (typeof value.settings.sound === 'boolean') next.settings.sound = value.settings.sound;
-    if (typeof value.settings.haptics === 'boolean') next.settings.haptics = value.settings.haptics;
-  }
+  if (value.guideDismissed === true) next.guideDismissed = true;
   [['completed', safeId], ['daily', dateId]].forEach(function (pair) {
     const name = pair[0], valid = pair[1];
     if (!plain(value[name])) return;
@@ -165,14 +162,11 @@ function createStore(adapter) {
     getProfile: snapshot,
     revision: function () { return revision; },
     getStatus: function () { return Object.assign({}, status); },
-    updateSettings: function (partial) {
-      if (!plain(partial)) return snapshot();
-      ['sound', 'haptics'].forEach(function (key) {
-        const descriptor = Object.getOwnPropertyDescriptor(partial, key);
-        if (descriptor && own(descriptor, 'value') && typeof descriptor.value === 'boolean') profile.settings[key] = descriptor.value;
-      });
-      save(PROFILE_KEY, profile);
-      return snapshot();
+    setGuideDismissed: function (dismissed) {
+      if (typeof dismissed !== 'boolean') return false;
+      if (dismissed) profile.guideDismissed = true;
+      else delete profile.guideDismissed;
+      return save(PROFILE_KEY, profile);
     },
     recordWin: function (levelId, stars, turns, mode, dateKey) {
       const daily = mode === 'daily';

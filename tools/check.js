@@ -15,9 +15,12 @@ for (const file of fs.readdirSync(path.join(root, 'src')).filter(f => f.endsWith
   check(!/wx\.(request|connectSocket|cloud|login|getUserInfo|getLocation)\b/.test(source), file + ': no business backend or personal information API.');
   bytes += Buffer.byteLength(source);
 }
-for (const name of ['move', 'collect', 'start', 'win']) {
+for (const name of require('../src/sound').SOUND_TYPES) {
   const file = path.join(root, 'assets', name + '.wav');
-  check(fs.existsSync(file) && fs.readFileSync(file).subarray(0, 4).toString() === 'RIFF', 'Original ' + name + ' audio exists.');
+  const audio = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  check(audio && audio.length >= 44 && audio.subarray(0, 4).toString() === 'RIFF' &&
+    audio.subarray(8, 12).toString() === 'WAVE' && audio.readUInt32LE(40) === audio.length - 44,
+  'Original ' + name + ' audio exists with a complete WAV payload.');
 }
 bytes += fs.readdirSync(path.join(root, 'assets')).reduce((n, f) => n + fs.statSync(path.join(root, 'assets', f)).size, 0);
 const ignored = project.packOptions.ignore.filter(x => x.type === 'folder').map(x => x.value);

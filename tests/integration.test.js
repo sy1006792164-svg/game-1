@@ -38,6 +38,8 @@ function harness(options = {}) {
   const data = options.data || new Map();
   const clock = options.clock || { date: '2026-09-07' };
   const callbacks = {};
+  const soundCalls = [];
+  const audio = [];
   const { canvas, calls } = canvasMock();
   const closeListeners = new Set(); const errorListeners = new Set();
   let now = 1000; let frame = 0; let showCount = 0;
@@ -48,33 +50,180 @@ function harness(options = {}) {
   };
   const metrics = options.metrics || { width: 390, height: 844, pixelRatio: 2, safeTop: 50, safeBottom: 34 };
   const platform = {
-    kind: options.kind || 'wechat', wx: { createRewardedVideoAd: () => ad }, canvas,
+    kind: options.kind || 'wechat', wx: {
+      createRewardedVideoAd: () => ad,
+      createInnerAudioContext() {
+        const voice = {
+          playing: false, destroyed: false,
+          play() { this.playing = true; }, stop() { this.playing = false; },
+          destroy() { this.destroyed = true; this.playing = false; },
+          onEnded(fn) { this.ended = fn; }, offEnded() {}, onError(fn) { this.error = fn; }, offError() {},
+        };
+        audio.push(voice); return voice;
+      },
+    }, canvas,
     storage: { get: key => clone(data.get(key)), set: (key, value) => data.set(key, clone(value)), remove: key => data.delete(key) },
     resize: () => metrics, now: () => now, raf: () => ++frame, cancelRaf: () => {}, vibrate: () => {},
     onResize: handler => { callbacks.resize = handler; }, onPointer: handler => { callbacks.pointer = handler; },
-    onKey: handler => { callbacks.key = handler; }, onHide: handler => { callbacks.hide = handler; }, onShow: handler => { callbacks.show = handler; }
+    onKey: handler => { callbacks.key = handler; }, onHide: handler => { callbacks.hide = handler; }, onShow: handler => { callbacks.show = handler; },
+    onAudioInterruptionBegin: handler => { callbacks.audioBegin = handler; }, onAudioInterruptionEnd: handler => { callbacks.audioEnd = handler; },
   };
   class ClockDate extends Date {
     constructor(...args) { super(...(args.length ? args : [clock.date + 'T12:00:00'])); }
   }
   const module = { exports: {} };
   factory(specifier => {
-    if (specifier === './sound') return { createSound: () => ({ play() {}, stop() {}, release() {} }) };
+    if (specifier === './sound' && !options.withAudio) return { createSound: () => ({
+      play(type) { soundCalls.push(['play', type]); }, stop() { soundCalls.push(['stop']); },
+      release() { soundCalls.push(['release']); }, ambience(enabled) { soundCalls.push(['ambience', enabled]); },
+      unlock() { soundCalls.push(['unlock']); },
+      suspend(reason) { soundCalls.push(['suspend', reason]); }, resume(reason) { soundCalls.push(['resume', reason]); },
+    }) };
     if (specifier === './config') return { REWARDED_AD_UNIT_ID: options.configured === false ? '' : 'adunit-integrationtest' };
     return actualRequire(specifier);
   }, module, module.exports, ClockDate);
   const game = new module.exports.Game(platform);
   function draw() { calls.length = 0; now += 200; game.renderer.draw(game, now, metrics); }
   return {
-    game, data, clock, calls, callbacks, platform, draw,
+    game, data, clock, calls, callbacks, platform, draw, soundCalls, audio, ad,
     get showCount() { return showCount; },
     advance(ms, runLoop = true) { now += ms; if (runLoop) game.loop(); },
     act(action) { now += 200; game.act(action); },
     start(level = CAMPAIGN[0], mode = 'campaign') { game.start(level, mode); },
     closeAd(ended) { Array.from(closeListeners).forEach(handler => handler({ isEnded: ended })); },
-    destroy() { game.ads.destroy(); }
+    destroy() { game.ads.destroy(); game.sound.release(); }
   };
 }
+
+test('native music stays enabled across navigation and full animations remain enabled', () => {
+  const h = harness({ withAudio: true });
+  assert.equal(h.game.renderer.reducedMotion, false);
+  const background = h.audio[0];
+  assert.equal(background.loop, true);
+  assert.equal(background.playing, true);
+  h.game.cue('tap');
+  h.game.openPage('collection');
+  assert.equal(background.playing, true);
+  assert.equal(background.destroyed, false);
+  assert.equal(h.audio.filter(voice => voice.loop).length, 1);
+  assert.ok(h.audio.some(voice => !voice.loop && voice.playing));
+  h.callbacks.hide();
+  assert.ok(h.audio.every(voice => !voice.playing));
+  h.callbacks.show(); h.advance(500);
+  assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1);
+  h.game.home();
+  assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1);
+  h.destroy();
+});
+
+test('ads, backgrounding and system interruptions stay silent until every blocker ends', async () => {
+  for (const order of ['close-first', 'foreground-first', 'interruption-first']) {
+    const h = harness({ withAudio: true }); h.start();
+    for (let index = 0; index < CAMPAIGN[0].budget; index++) h.act('wait');
+    const pending = h.game.requestRevive();
+    await Promise.resolve();
+    h.callbacks.audioBegin(); h.callbacks.hide();
+    assert.ok(h.audio.every(voice => !voice.playing));
+    const count = h.audio.length;
+    h.game.unlockAudio(); h.game.cue('tap');
+    assert.equal(h.audio.length, count);
+    if (order === 'foreground-first') h.callbacks.show();
+    if (order === 'interruption-first') h.callbacks.audioEnd();
+    assert.ok(h.audio.every(voice => !voice.playing), 'an open ad always owns the audio');
+    h.closeAd(true); await pending;
+    assert.equal(h.game.state.revived, true);
+    assert.ok(h.audio.every(voice => !voice.playing), 'ad completion cannot clear another blocker');
+    if (order !== 'foreground-first') h.callbacks.show();
+    if (order !== 'interruption-first') h.callbacks.audioEnd();
+    h.callbacks.show(); h.callbacks.audioEnd(); h.game.unlockAudio();
+    assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1, order);
+    assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 0, 'old effects are never replayed');
+    h.destroy();
+  }
+});
+
+test('ad completion restores music immediately and cancelled or failed ads allow a clean retry', async () => {
+  for (const outcome of ['completed', 'cancelled', 'load-failed']) {
+    const h = harness({ withAudio: true }); h.start();
+    for (let index = 0; index < CAMPAIGN[0].budget; index++) h.act('wait');
+    if (outcome === 'load-failed') {
+      h.ad.show = () => Promise.reject(new Error('unavailable'));
+      h.ad.load = () => Promise.reject(new Error('no inventory'));
+    }
+    const pending = h.game.requestRevive();
+    assert.ok(h.audio.every(voice => !voice.playing));
+    await Promise.resolve();
+    h.game.unlockAudio(); h.game.cue('tap');
+    assert.ok(h.audio.every(voice => !voice.playing));
+    if (outcome !== 'load-failed') h.closeAd(outcome === 'completed');
+    await pending;
+    assert.equal(h.game.ads.isActive(), false);
+    assert.equal(h.game.busy, false);
+    if (outcome !== 'completed') {
+      assert.ok(h.audio.every(voice => !voice.playing), 'the failure dialog remains quiet');
+      h.start(); h.advance(200);
+    }
+    assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1, outcome);
+    h.destroy();
+  }
+});
+
+test('an ad timeout cannot unmute a video that has not closed or award a late revive', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness({ withAudio: true }); h.start();
+  for (let index = 0; index < CAMPAIGN[0].budget; index++) h.act('wait');
+  const pending = h.game.requestRevive();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  t.mock.timers.tick(15 * 60 * 1000 + 1);
+  await pending;
+  assert.equal(h.game.busy, false);
+  assert.equal(h.game.ads.isActive(), true);
+  h.game.home(); h.game.unlockAudio(); h.advance(200);
+  assert.ok(h.audio.every(voice => !voice.playing));
+  h.closeAd(true);
+  assert.equal(h.game.state.revived, false);
+  assert.equal(h.game.ads.isActive(), false);
+  assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1);
+  h.destroy();
+});
+
+test('removed audio settings cannot leave legacy players muted and progress survives migration', () => {
+  const completed = { 1: { stars: 3, bestTurns: 8 } };
+  const data = new Map([[PROFILE_KEY, { version: 1, completed, daily: {}, totalWins: 1,
+    settings: { music: false, sound: false, haptics: false, reducedMotion: true } }]]);
+  const h = harness({ withAudio: true, data });
+  assert.equal('settings' in h.game.profile(), false);
+  assert.equal(h.game.renderer.reducedMotion, false);
+  assert.deepEqual(h.game.profile().completed, completed);
+  assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1);
+  h.game.cue('tap');
+  assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 1);
+  h.callbacks.audioBegin(); h.callbacks.hide(); h.callbacks.show(); h.callbacks.audioEnd();
+  h.game.unlockAudio(); h.game.cue('tap');
+  assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1);
+  assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 1);
+  h.destroy();
+});
+
+test('real turn events select distinct sounds without replaying outcomes after undo or review', () => {
+  const h = harness(); h.start(); h.soundCalls.length = 0;
+  h.act('up');
+  assert.deepEqual(h.soundCalls.filter(call => call[0] === 'play'), [['play', 'blocked']]);
+  h.act('wait');
+  assert.equal(h.soundCalls.at(-1)[1], 'wait');
+  h.game.undo();
+  assert.equal(h.soundCalls.at(-1)[1], 'undo');
+  assert.deepEqual(h.game.moveEvents, [{ type: 'undo', cell: h.game.state.player }]);
+  h.start(); h.soundCalls.length = 0;
+  for (const action of CAMPAIGN[0].solution) h.act(action);
+  const sounds = h.soundCalls.filter(call => call[0] === 'play').map(call => call[1]);
+  assert.ok(sounds.includes('letter'));
+  assert.equal(sounds.at(-1), 'win', 'the last stamp shares a turn with delivery, so its result cue takes priority');
+  assert.equal(sounds.filter(type => type === 'win').length, 1);
+  const count = h.soundCalls.length;
+  h.game.victory();
+  assert.equal(h.soundCalls.length, count, 'opening the result does not replay its jingle');
+});
 
 test('a complete first delivery records three stars, unlocks the next level and clears its run', () => {
   const h = harness(); h.start();
@@ -116,6 +265,9 @@ test('cancelled ads cannot revive, completed ads revive once, and relaunch prese
   let pending = h.game.requestRevive();
   await Promise.resolve();
   assert.equal(h.game.busy, true);
+  const soundCount = h.soundCalls.length;
+  h.game.cue('tap');
+  assert.equal(h.soundCalls.length, soundCount, 'a button release cannot restart audio after the ad stops it');
   h.act('right');
   h.closeAd(false); await pending;
   assert.deepEqual(h.game.state, failed);
@@ -200,7 +352,7 @@ test('every campaign and daily screen renders finite geometry on small phones an
       assert.equal(h.calls.some(call => call.method === 'fillText' && call.args[0] === '回声预告'), false);
       h.game.help(); h.draw();
     }
-    for (const page of ['home', 'levels', 'progress', 'collection', 'settings']) { h.game.openPage(page); h.draw(); }
+    for (const page of ['home', 'levels', 'progress', 'collection']) { h.game.openPage(page); h.draw(); }
     h.destroy();
   }
 });
@@ -546,7 +698,7 @@ test('a torn paper bridge uses board effects without a duplicate toast and survi
   assert.ok(h.game.moveEvents.some(event => event.type === 'bridge' && event.cell === 34));
   assert.equal(h.game.toastUntil, 0, 'the board effect does not create a second toast');
   h.draw();
-  assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '纸桥碎了'), 'the board flashes the tear');
+  assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '纸桥碎了'), 'the default animation displays the bridge hint');
   const saved = clone(h.game.state);
   const reloaded = harness({ data: h.data });
   assert.equal(reloaded.game.restore(), true);
@@ -572,6 +724,131 @@ test('the game screen retains undo and wait while removing duplicate controls an
   assert.ok(texts().includes('撤回（1）'));
   h.game.openPage('levels'); h.game.chapter = 2; h.draw();
   assert.ok(h.game.renderer.hits.length > 0);
+  h.destroy();
+});
+
+function readyPostOffice(view = {}) {
+  const h = harness({ metrics: { width: 780, height: 1688, pixelRatio: 2, safeTop: 100, safeBottom: 68 } });
+  h.start(CAMPAIGN[3]);
+  h.game.level.solution.slice(0, -1).forEach(action => h.act(action));
+  h.act('wait'); h.act('wait');
+  Object.assign(h.game.camera, view);
+  h.draw();
+  assert.equal(h.game.state.player, 6);
+  assert.equal(h.game.state.echo, 7);
+  assert.equal(h.game.state.energy, 2);
+  assert.deepEqual(h.game.state.letters, []);
+  assert.deepEqual(h.game.state.seals, []);
+  return h;
+}
+
+function boardDevicePoint(h, point) {
+  const r = h.game.renderer;
+  const [x, y] = r.boardGeometry.projection.toScreen(...point);
+  return [x * r.scale + r.ox, y * r.scale + r.oy];
+}
+
+function postOfficePoint(h, part) {
+  const p = h.game.renderer.boardGeometry.projection;
+  const [x, y] = p.point(h.game.level.exit), size = p.halfW * 1.2 / 44;
+  if (part === 'badge') return [x, y - p.halfW * 1.68];
+  if (part === 'top' || h.game.camera.tilt === 1) {
+    const angle = h.game.camera.rotation;
+    return [x + Math.sin(angle) * size * 8, y - Math.cos(angle) * size * 8];
+  }
+  return part === 'door' ? [x - 7 * size, y - 2 - 10 * size] : [x, y - 2 - 32 * size];
+}
+
+function tapBoardPoint(h, point) {
+  const device = boardDevicePoint(h, point);
+  h.game.pointerEvent(...device, 'start');
+  h.game.pointerEvent(...device, 'end');
+}
+
+test('post office roof, door and ready badge deliver from the screenshot state without changing the camera', () => {
+  const views = [
+    { name: 'default', camera: {} },
+    { name: 'rotated', camera: { rotation: Math.PI / 2 } },
+    { name: 'low tilt', camera: { rotation: Math.PI, tilt: .38 } },
+    { name: 'blended overhead', camera: { rotation: -Math.PI / 4, tilt: .9 } },
+    { name: 'overhead', camera: { rotation: Math.PI / 3, tilt: 1 } },
+    { name: 'zoom and pan', camera: { zoom: 1.4, panX: .08, panY: .04, rotation: -.6 } }
+  ];
+  for (const view of views) for (const part of view.camera.tilt > .82 ? ['roof', 'door', 'badge', 'top'] : ['roof', 'door', 'badge']) {
+    const h = readyPostOffice(view.camera), beforeCamera = clone(h.game.camera);
+    const beforeTurn = h.game.state.turn, beforeActions = h.game.actions.length;
+    tapBoardPoint(h, postOfficePoint(h, part));
+    assert.equal(h.game.state.player, h.game.level.exit, `${view.name}: tapping ${part} enters the post office`);
+    assert.equal(h.game.state.status, 'won');
+    assert.equal(h.game.state.turn, beforeTurn + 1, 'a tap spends exactly one turn');
+    assert.equal(h.game.state.energy, 1);
+    assert.equal(h.game.actions.length, beforeActions + 1);
+    assert.equal(h.game.actions.at(-1), 'up');
+    assert.deepEqual(clone(h.game.camera), beforeCamera, 'delivery does not require a camera change');
+    h.destroy();
+  }
+});
+
+test('post office taps preserve collection requirements and waiting on its own tile', () => {
+  const h = harness(); h.start(CAMPAIGN[3]);
+  h.game.level.solution.slice(0, 7).forEach(action => h.act(action));
+  h.act('left'); h.draw();
+  assert.equal(h.game.state.player, 6);
+  const before = clone(h.game.state);
+  tapBoardPoint(h, postOfficePoint(h, 'roof'));
+  assert.equal(h.game.state.player, h.game.level.exit);
+  assert.equal(h.game.state.status, 'playing', 'the building does not bypass uncollected mail');
+  assert.deepEqual(h.game.state.letters, before.letters);
+  assert.deepEqual(h.game.state.seals, before.seals);
+  assert.equal(h.game.state.energy, before.energy - 1);
+  assert.equal(h.game.modal, null);
+  h.draw();
+  tapBoardPoint(h, postOfficePoint(h, 'roof'));
+  assert.equal(h.game.actions.at(-1), 'wait');
+  assert.equal(h.game.state.player, h.game.level.exit);
+  assert.equal(h.game.state.energy, before.energy - 2);
+  assert.equal(h.game.state.status, 'playing');
+  h.destroy();
+});
+
+test('post office hit areas leave uncovered neighboring floors and empty roof corners reachable', () => {
+  for (const rotation of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) {
+    for (const [cell, action] of [[7, 'right'], [6, 'wait']]) {
+      const h = readyPostOffice({ rotation });
+      const p = h.game.renderer.boardGeometry.projection, [x, y] = p.point(cell);
+      // The neighboring tile's side remains visible beside both roof and badge.
+      const [dx, dy] = cell === 7 ? p.floor(p.halfW * .8, 0) : [0, 0];
+      tapBoardPoint(h, [x + dx, y + dy]);
+      assert.equal(h.game.state.player, cell, `rotation ${rotation}: floor ${cell} remains reachable`);
+      assert.equal(h.game.actions.at(-1), action);
+      assert.equal(h.game.state.energy, 1);
+      assert.equal(h.game.state.status, 'playing');
+      h.destroy();
+    }
+  }
+  const h = readyPostOffice(), before = clone(h.game.state);
+  const p = h.game.renderer.boardGeometry.projection, [x, y] = p.point(h.game.level.exit);
+  const size = p.halfW * 1.2 / 44;
+  // This point is inside the roof's bounding box but above its sloping right edge.
+  tapBoardPoint(h, [x + 20 * size, y - 2 - 41 * size]);
+  assert.deepEqual(h.game.state, before, 'an empty bounding-box corner must not act like visible roof');
+  h.destroy();
+});
+
+test('dragging from the post office or tapping it from far away cannot spend a delivery turn', () => {
+  const h = readyPostOffice();
+  const before = clone(h.game.state), saved = clone(h.game.store.loadRun());
+  const [x, y] = boardDevicePoint(h, postOfficePoint(h, 'roof'));
+  h.game.pointerEvent(x, y, 'start');
+  h.game.pointerEvent(x + 60, y, 'move');
+  h.game.pointerEvent(x + 60, y, 'end');
+  assert.notEqual(h.game.camera.rotation, 0, 'the normal orbit gesture still works over the building');
+  assert.deepEqual(h.game.state, before);
+  assert.deepEqual(h.game.store.loadRun(), saved);
+  h.start(CAMPAIGN[3]); h.advance(900, false); h.draw();
+  const farState = clone(h.game.state);
+  tapBoardPoint(h, postOfficePoint(h, 'roof'));
+  assert.deepEqual(h.game.state, farState, 'the building does not add distant movement');
   h.destroy();
 });
 
@@ -616,7 +893,7 @@ test('pause, undo, route changes, backgrounding and navigation cancel pending in
     { name: 'background', leave: h => h.callbacks.hide(), resume: h => { h.callbacks.show(); h.game.modal.buttons[0].action(); } },
     { name: 'help', leave: h => h.game.help(), resume: h => h.game.modal.buttons[0].action() },
     { name: 'home', leave: h => h.game.home(), resume: h => h.game.primary() },
-    { name: 'settings', leave: h => h.game.openPage('settings'), resume: h => assert.equal(h.game.restore(), true) },
+    { name: 'collection', leave: h => h.game.openPage('collection'), resume: h => assert.equal(h.game.restore(), true) },
     { name: 'restore', leave: h => assert.equal(h.game.restore(), true) }
   ];
   for (const transition of transitions) {
@@ -683,12 +960,12 @@ test('a current-version save resumes its exact actions without an upgrade notice
   h.destroy(); reloaded.destroy();
 });
 
-test('the fresh home offers one delivery action and compact selection, stamp and settings links', () => {
+test('the fresh home offers one delivery action and only selection and stamp links', () => {
   const h = harness(); h.draw();
   const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
-  for (const label of ['开始送信', '选关', '邮票', '设置']) assert.ok(texts.includes(label));
-  assert.equal(texts.some(text => /每日|成长|LV\.|已走 0 拍|本周|下一小步/.test(text)), false);
-  assert.equal(h.game.renderer.hits.length, 4, 'duplicate home actions and tabs are removed');
+  for (const label of ['开始送信', '选关', '邮票']) assert.ok(texts.includes(label));
+  assert.equal(texts.some(text => /设置|每日|成长|LV\.|已走 0 拍|本周|下一小步/.test(text)), false);
+  assert.equal(h.game.renderer.hits.length, 3, 'only delivery, selection and stamps remain');
   h.destroy();
 });
 

@@ -18,7 +18,6 @@ function run() { return { mode: 'campaign', levelId: '1', state: { tiles: [0, 1,
 test('local progress is reloadable and duplicate wins only improve personal bests', () => {
   const adapter = memory();
   const store = createStore(adapter);
-  assert.deepEqual(store.getProfile().settings, { sound: true, haptics: true });
   store.recordWin('1', 2, 10, 'campaign');
   store.recordWin('1', 1, 12, 'campaign');
   store.recordWin('1', 3, 8, 'campaign');
@@ -38,7 +37,7 @@ test('untrusted records are sanitized and cannot inject prototype keys or bogus 
   const store = createStore(adapter);
   assert.deepEqual(store.getProfile(), {
     version: 1, completed: { 1: { stars: 2, bestTurns: 10 } }, daily: {},
-    settings: { sound: false, haptics: true }, totalWins: 1,
+    totalWins: 1,
   });
   assert.equal(Object.prototype.stars, undefined);
   assert.deepEqual(adapter.get(PROFILE_KEY), store.getProfile());
@@ -62,7 +61,7 @@ test('legacy profiles drop the retired expert table and recount unique wins from
     version: 1, completed: { 1: { stars: 2, bestTurns: 10 } },
     daily: { '2026-09-07': { stars: 3, bestTurns: 14 } },
     expert: { 1: { stars: 3, bestTurns: 8 }, '__proto__': { stars: 3, bestTurns: 0 } },
-    settings: { sound: false, haptics: true }, totalWins: 3,
+    settings: { sound: false, haptics: true, music: false, reducedMotion: true }, totalWins: 3,
   };
   const adapter = memory({ [PROFILE_KEY]: JSON.parse(JSON.stringify(legacy)) });
   const store = createStore(adapter);
@@ -71,7 +70,8 @@ test('legacy profiles drop the retired expert table and recount unique wins from
   assert.deepEqual(profile.completed, legacy.completed);
   assert.deepEqual(profile.daily, legacy.daily);
   assert.equal(profile.totalWins, 2, 'the unique-win total no longer counts expert entries');
-  assert.equal(profile.settings.sound, false);
+  assert.equal('settings' in profile, false);
+  assert.equal('settings' in adapter.get(PROFILE_KEY), false, 'retired settings are removed from storage');
   assert.equal('expert' in adapter.get(PROFILE_KEY), false, 'the repaired profile is written back without the old table');
   store.recordWin(1, 3, 8, 'campaign');
   assert.deepEqual(createStore(adapter).getProfile().completed, { 1: { stars: 3, bestTurns: 8 } });
@@ -89,7 +89,7 @@ test('quota failures retain playable memory, with persistence status until all d
   assert.deepEqual(store.loadRun(), run());
   assert.equal(store.getStatus().persisted, false);
   blocked = false;
-  store.updateSettings({ sound: false });
+  store.recordWin('1', 2, 5, 'campaign');
   assert.equal(store.getStatus().persisted, false, 'run remains unsaved');
   assert.equal(store.saveRun(run()), true);
   assert.equal(store.getStatus().persisted, true);
@@ -114,31 +114,50 @@ test('snapshots are isolated and run inputs reject cycles, accessors and oversiz
   for (let i = 0; i < 30; i += 1) { current.next = {}; current = current.next; }
   assert.equal(store.saveRun(tooDeep), false);
   assert.equal(store.loadRun().state.tiles[0], 0, 'a rejected save preserves the previous run');
-  const snapshot = store.getProfile(); snapshot.settings.sound = false;
-  assert.equal(store.getProfile().settings.sound, true);
+  store.recordWin('1', 2, 10, 'campaign');
+  const snapshot = store.getProfile(); snapshot.completed['1'].stars = 3;
+  assert.equal(store.getProfile().completed['1'].stars, 2);
 });
 
 test('reset removes only this game’s save keys and clears all in-memory progress', () => {
   const adapter = memory({ unrelated: 'keep' });
   const store = createStore(adapter);
   store.recordWin('1', 2, 10, 'campaign');
-  store.updateSettings({ sound: false, haptics: false });
   store.saveRun(run());
   assert.equal(store.reset(), true);
   assert.equal(store.getProfile().totalWins, 0);
-  assert.deepEqual(store.getProfile().settings, { sound: true, haptics: true });
+  assert.deepEqual(store.getProfile().completed, {});
+  assert.deepEqual(createStore(adapter).getProfile(), store.getProfile());
   assert.equal(store.loadRun(), null);
   assert.equal(adapter.values.has(RUN_KEY), false);
   assert.equal(adapter.values.get('unrelated'), 'keep');
 });
 
-test('invalid and future-version saves recover safely and invalid settings are ignored', () => {
+test('invalid and future-version saves recover safely', () => {
   const adapter = memory({ [PROFILE_KEY]: { version: 200, completed: { 1: { stars: 3, bestTurns: 0 } } }, [RUN_KEY]: { nope: true } });
   const store = createStore(adapter);
   assert.equal(store.getProfile().totalWins, 0);
   assert.equal(store.loadRun(), null);
-  store.updateSettings({ sound: 'false', haptics: 0, extra: true });
-  assert.deepEqual(store.getProfile().settings, { sound: true, haptics: true });
+});
+
+test('retired settings migrate without losing scores or the in-progress run', () => {
+  const progress = { mode: 'campaign', levelId: 2, actions: ['up', 'wait'], reviveAt: null };
+  const adapter = memory({
+    [PROFILE_KEY]: {
+      version: 1, completed: { 1: { stars: 3, bestTurns: 8 } }, daily: {},
+      settings: { sound: false, haptics: false, music: true, reducedMotion: true }, totalWins: 1,
+    },
+    [RUN_KEY]: progress,
+  });
+  const store = createStore(adapter);
+  assert.equal('settings' in store.getProfile(), false);
+  assert.equal('settings' in adapter.get(PROFILE_KEY), false);
+  assert.deepEqual(store.loadRun(), progress);
+  const reloaded = createStore(adapter);
+  assert.deepEqual(reloaded.getProfile(), {
+    version: 1, completed: { 1: { stars: 3, bestTurns: 8 } }, daily: {}, totalWins: 1,
+  });
+  assert.deepEqual(reloaded.loadRun(), progress);
 });
 
 test('controller action-history saves survive reload and reject invalid revive indexes', () => {
@@ -157,12 +176,11 @@ test('controller action-history saves survive reload and reject invalid revive i
   assert.equal(store.saveRun({ ...history, mode: 'daily', dateKey: 'broken' }), false);
 });
 
-test('WeChat-style cross-realm storage reads preserve saved run, progress and settings', () => {
+test('WeChat-style cross-realm storage reads preserve saved run and progress', () => {
   const adapter = memory();
   const first = createStore(adapter);
   first.recordWin('1', 3, 8, 'campaign');
   first.recordWin('daily', 2, 17, 'daily', '2026-09-07');
-  first.updateSettings({ sound: false, haptics: false });
   const history = { mode: 'campaign', levelId: 2, dateKey: '2026-09-07', actions: ['up', 'wait', 'right'], reviveAt: null };
   assert.equal(first.saveRun(history), true);
   const expectedProfile = first.getProfile();
@@ -194,9 +212,6 @@ test('cross-realm JSON state saves and null-prototype objects remain safe and is
   assert.equal(store.saveRun(foreign), true);
   foreign.state.tiles[0] = 99;
   assert.deepEqual(store.loadRun(), { mode: 'campaign', levelId: 1, state: { tiles: [0, 1, 2], turns: 4 } });
-  const settings = vm.runInNewContext('({sound: false, haptics: false})');
-  store.updateSettings(settings);
-  assert.deepEqual(store.getProfile().settings, { sound: false, haptics: false });
   const nullProto = Object.assign(Object.create(null), { mode: 'campaign', levelId: 2, state: Object.create(null) });
   assert.equal(store.saveRun(nullProto), true);
 });

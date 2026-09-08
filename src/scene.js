@@ -3,8 +3,11 @@
 const { actorFrame, drawEffects } = require('./motion');
 const { insideRect } = require('./board-projection');
 const { getBoardGeometry } = require('./board-geometry');
+const { OFFICE, officeFlag, hitPostOffice } = require('./post-office-geometry');
 const { treeTop, officeTop, courierTop } = require('./overhead-props');
 const { drawIslandSurface } = require('./island-surface');
+const { drawAtmosphere, drawActorTrails, drawDestination } = require('./scene-effects');
+const { drawGuideTargets } = require('./guide-view');
 
 const COLOR = {
   night: '#102d32', forest: '#173e40', fog: '#285557', teal: '#77cdd0',
@@ -52,11 +55,11 @@ function postOffice(r, x, y, size, now, ready) {
   const c = r.ctx; c.save(); c.translate(x, y); c.scale(size / 44, size / 44);
   ellipse(r, 2, 2, 23, 7, '#143d3445');
   if (ready) glow(r, 0, -11, 20, COLOR.gold, .065 + Math.sin(now / 550) * .012);
-  polygon(r, [[-18, -26], [8, -22], [8, 2], [-18, -4]], '#dfcda6');
-  polygon(r, [[8, -22], [22, -30], [22, -6], [8, 2]], '#adba94');
-  polygon(r, [[-23, -27], [-4, -43], [27, -36], [8, -19]], '#466f61');
-  polygon(r, [[-23, -27], [8, -19], [8, -15], [-23, -23]], '#2b574e');
-  polygon(r, [[8, -19], [27, -36], [27, -32], [8, -15]], '#264e49');
+  polygon(r, OFFICE.front, '#dfcda6');
+  polygon(r, OFFICE.side, '#adba94');
+  polygon(r, OFFICE.roof, '#466f61');
+  polygon(r, OFFICE.frontTrim, '#2b574e');
+  polygon(r, OFFICE.sideTrim, '#264e49');
   r.line([[-4, -42], [24, -35]], '#85a48b', 1.4);
   r.round(-12, -18, 10, 16, 3, '#426b5a');
   r.round(-10, -16, 6, 8, 2, ready ? '#ffe7a4' : '#a9c8b1');
@@ -65,10 +68,10 @@ function postOffice(r, x, y, size, now, ready) {
   r.line([[15, -19], [15, -12]], '#779779', .75);
   r.round(-14, -30, 20, 8, 2, COLOR.cream);
   r.icon('letter', -4, -26, 8, '#bf7f47');
-  polygon(r, [[8, 2], [-18, -4], [-21, -1], [6, 6], [13, 2]], '#bfbe99');
+  polygon(r, OFFICE.step, '#bfbe99');
   r.line([[22, -6], [22, -45], [34, -44]], '#385e51', 1.7);
   const flap = Math.sin(now / 370) * 2;
-  polygon(r, [[23, -44], [34, -44 + flap], [32, -37 + flap], [23, -38]], COLOR.gold);
+  polygon(r, officeFlag(now), COLOR.gold);
   r.icon('letter', 28, -41 + flap / 2, 5, '#fff3c9');
   c.restore();
 }
@@ -179,9 +182,11 @@ function floatingMail(r, x, y, size, now, cell, seal) {
   r.circle(x + Math.sin(cell) * size * .6, y - 8 - sparkle * size, .9, seal ? '#c1f6ef' : '#fff1c6'); c.restore();
 }
 
-function drawBoard(r, game, now, rect) {
-  const l = game.level, s = game.state, view = game.camera.frame(now);
-  const overheadBlend = Math.max(0, Math.min(1, (view.tilt - .82) / .18)), overhead = overheadBlend > .5;
+function drawBoard(r, game, now, rect, guide) {
+  const options = { reducedMotion: false };
+  const time = options.reducedMotion ? 0 : now;
+  const l = game.level, s = game.state, view = game.camera.frame(now, options.reducedMotion);
+  const overheadBlend = Math.max(0, Math.min(1, (view.tilt - .82) / .18));
   const elevation = Math.sqrt(1 - view.tilt * view.tilt) / Math.sqrt(1 - .62 * .62);
   const geometry = getBoardGeometry(r, l, s, rect, view);
   const p = geometry.projection, { halfW: hw, halfH: hh, point, corners } = p;
@@ -198,8 +203,17 @@ function drawBoard(r, game, now, rect) {
   c.translate(p.centerX + view.panX * rect.w, p.centerY + view.panY * rect.h);
   c.scale(view.scale, view.scale); c.translate(-p.centerX, -p.centerY);
   glow(r, rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w * .32, '#6aaba0', .018);
-  drawIslandSurface(r, corners, 26 * elevation, now);
+  drawIslandSurface(r, corners, 26 * elevation, time);
   const { walls, adjacent, ordered } = geometry;
+  const selectCell = cell => {
+    const player = game.state.player, dx = cell % l.width - player % l.width, dy = Math.floor(cell / l.width) - Math.floor(player / l.width);
+    if (!dx && !dy) game.act('wait');
+    else if (Math.abs(dx) + Math.abs(dy) === 1) game.act(dx ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'down' : 'up');
+    else if ((l.bridges || []).includes(cell) && !game.state.bridges.includes(cell)) game.toast('纸桥已碎，这里过不去了');
+    else game.toast('点相邻格移动，点脚下格原地等一拍');
+  };
+  const enterOffice = !game.reviewing && s.status === 'playing' && (adjacent.has(l.exit) || s.player === l.exit)
+    ? () => selectCell(l.exit) : null;
   const reach = Math.max(Math.abs(Math.cos(view.rotation)), Math.abs(Math.sin(view.rotation)));
   const reachX = hw * reach, reachY = hh * reach;
   const actors = [];
@@ -210,40 +224,38 @@ function drawBoard(r, game, now, rect) {
       if (cell % 3 === 0) actors.push({ y: y + 2, draw: () => {
         polygon(r, [[x - 8, y - 3], [x - 5, y - 10], [x + 2, y - 12], [x + 8, y - 5], [x + 4, y]], '#83a082');
         r.line([[x - 5, y - 10], [x + 2, y - 12], [x + 6, y - 7]], '#b1c296', 1);
-        grass(r, x - 8, y - 1, 5, now);
+        grass(r, x - 8, y - 1, 5, time);
       } });
       // Keep trees on their original cells as the camera moves around them.
       const onRim = Math.floor(cell / l.width) === p.bounds.minRow || cell % l.width === p.bounds.minCol;
       if (onRim && cell % 2 === 0) actors.push({ y, draw: () => {
         c.save(); if (!p.rear(cell)) c.globalAlpha *= .45;
-        viewProp(r, overheadBlend, () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), now, false), () => treeTop(r, x, y, hw * 1.15, now));
+        viewProp(r, overheadBlend, () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false), () => treeTop(r, x, y, hw * 1.15, time));
         c.restore();
       } });
-      else if (cell % 2) actors.push({ y, draw: () => grass(r, x + 5, y - 4, 6, now, '#b1c293') });
+      else if (cell % 2) actors.push({ y, draw: () => grass(r, x + 5, y - 4, 6, time, '#b1c293') });
     } else {
-      groundDetail(r, game, now, cell, p);
+      groundDetail(r, game, time, cell, p);
       if (cell === l.exit) {
         diamond(r, x, y, hw - 2, hh - 1.5, '#adc6a0', '#d1dfb2', 0, p);
         const ready = !s.letters.length && !s.seals.length;
-        actors.push({ y: y + 2, draw: () => viewProp(r, overheadBlend,
-          () => postOffice(r, x, y - 2, hw * 1.2, now, ready), () => officeTop(r, x, y, hw * 1.2, now, ready, view.rotation)) });
+        actors.push({ y: y + 2, draw: () => {
+          viewProp(r, overheadBlend,
+            () => postOffice(r, x, y + OFFICE.sideOffset, hw * 1.2, time, ready), () => officeTop(r, x, y, hw * 1.2, time, ready, view.rotation));
+          hitPostOffice(r, { x, y, size: hw * 1.2, now: time, blend: overheadBlend, rotation: view.rotation }, enterOffice);
+        } });
       }
       if (!game.reviewing && s.status === 'playing' && adjacent.has(cell)) {
         diamond(r, x, y, hw - 3, hh - 2, '#f8d68877', null, 0, p);
         floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#edb457', 1.7);
         ellipse(r, x, y + hh * .43, hw * .15, hh * .17, '#e5ae52');
       }
-      if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, now) });
-      if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, now, cell, false) });
-      if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, now, cell, true) });
+      if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, time) });
+      if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false) });
+      if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, time, cell, true) });
     }
-    r.hit(x - reachX, y - reachY, reachX * 2, reachY * 2, () => {
-      const player = game.state.player, dx = cell % l.width - player % l.width, dy = Math.floor(cell / l.width) - Math.floor(player / l.width);
-      if (!dx && !dy) game.act('wait');
-      else if (Math.abs(dx) + Math.abs(dy) === 1) game.act(dx ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'down' : 'up');
-      else if ((l.bridges || []).includes(cell) && !game.state.bridges.includes(cell)) game.toast('纸桥已碎，这里过不去了');
-      else game.toast('点相邻格移动，点送信员原地等一拍');
-    }, (hx, hy) => p.contains(cell, hx, hy));
+    // The courier remains visual only; uncovered floor tiles keep their normal actions.
+    r.hit(x - reachX, y - reachY, reachX * 2, reachY * 2, () => selectCell(cell), (hx, hy) => p.contains(cell, hx, hy));
   }
   if (game.reviewing) r.line((s.history || []).map(point), '#c8874eca', 2, [3, 4]);
   const forecast = (s.history || []).slice(-3); while (forecast.length < 3) forecast.unshift(null);
@@ -255,28 +267,27 @@ function drawBoard(r, game, now, rect) {
     c.beginPath(); c.ellipse(x, y, hw * .49, hh * .49, 0, 0, Math.PI * 2); c.strokeStyle = '#77d2d9'; c.lineWidth = 1.6; c.stroke();
     r.icon('echo', x - hw * .58, y - hh * .38, Math.max(10, hw * .34), '#69b9c2');
   }
+  drawActorTrails(r, game, now, point, hw * 1.7, options);
   [true, false].forEach(ghost => {
-    const frame = actorFrame(game, now, point, ghost), shared = ghost && s.echo === s.player;
+    const frame = actorFrame(game, now, point, ghost, options), shared = ghost && s.echo === s.player;
     if (!frame.alpha) return;
     if (shared) frame.x += hw * .28;
     actors.push({ y: frame.y + (ghost ? 2.5 : 3), draw: () => {
       if (!ghost) { ellipse(r, frame.x, frame.y + 2, hw * .46, hh * .28, '#344b3b40'); ellipse(r, frame.x, frame.y + 2, hw * .59, hh * .4, '#f5d89420'); }
-      const actorY = overhead ? frame.y : frame.y - frame.lift - hw * .38, size = hw * (shared ? .85 : 1.16);
+      const size = hw * (shared ? .85 : 1.16);
       viewProp(r, overheadBlend, () => r.courier(frame.x, frame.y - frame.lift - hw * .38, size, ghost, frame),
         () => courierTop(r, frame.x, frame.y, size, ghost, frame));
-      if (!ghost && !game.reviewing && s.status === 'playing') {
-        const rx = size * .34, ry = size * (overhead ? .34 : .575), centerY = overhead ? actorY : actorY - size * .175;
-        r.hit(frame.x - rx, centerY - ry, rx * 2, ry * 2, () => game.act('wait'), (hx, hy) =>
-          Math.pow((hx - frame.x) / rx, 2) + Math.pow((hy - centerY) / ry, 2) <= 1);
-      }
     } });
   });
   actors.sort((a, b) => a.y - b.y).forEach(actor => actor.draw());
-  drawEffects(target, game, now, point, hw * 1.7);
+  drawGuideTargets(r, guide, p, time);
+  drawDestination(r, game, time, p, options, enterOffice);
+  drawEffects(target, game, now, point, hw * 1.7, options);
   c.restore();
 }
 
-function drawBackdrop(r, now, chapter) {
+function drawBackdrop(r, now, chapter, options = {}) {
+  if (options.reducedMotion) now = 0;
   const H = r.H, c = r.ctx;
   c.fillStyle = COLOR.night; c.fillRect(0, 0, 390, H);
   glow(r, 296, H * .3, 152, chapter > 2 ? '#336a70' : '#366d64', .09);
@@ -286,16 +297,12 @@ function drawBackdrop(r, now, chapter) {
   polygon(r, [[0, H * .56], [0, H * .37], [54, H * .3], [104, H * .41], [199, H * .29], [262, H * .4], [339, H * .27], [390, H * .33], [390, H * .61]], '#1e4747');
   ellipse(r, 195 + drift, H * .48, 227, 39, '#84b3a208');
   [-12, 15, 378, 410].forEach((x, i) => tree(r, x, H * (.64 + i % 2 * .11), 132 + i % 3 * 24, now, true));
-  for (let i = 0; i < 22; i++) {
-    const x = (i * 83 + 17 + Math.sin(now / 6200 + i) * 9) % 390;
-    const y = (i * 127 + 53 - now / (110 + i * 3)) % H;
-    c.save(); c.globalAlpha = .12 + (Math.sin(now / 1600 + i * 1.7) + 1) * .17;
-    r.circle(x, (y + H) % H, i % 5 ? .9 : 1.5, i % 3 ? '#b6d2b8' : '#edc77d'); c.restore();
-  }
+  drawAtmosphere(r, now, { x: 0, y: 64, w: 390, h: H - 130 }, options);
   r.line([[0, H * .78], [70, H * .76], [174, H * .79], [265, H * .75], [390, H * .77]], '#7daf9c09', 16);
 }
 
-function drawVignette(r, now, rect) {
+function drawVignette(r, now, rect, options = {}) {
+  if (options.reducedMotion) now = 0;
   const c = r.ctx, scale = Math.min(rect.w / 350, rect.h / 250), x = rect.x + rect.w / 2, y = rect.y + rect.h * .38;
   c.save(); c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip(); c.translate(x, y); c.scale(scale, scale);
   glow(r, 25, -18, 82, COLOR.gold, .035);

@@ -2,7 +2,7 @@
 
 // Rewards are issued only by an explicit, complete WeChat close event.
 // Each attempt owns its listeners so late callbacks cannot reward a later attempt.
-function createAds(platform, config) {
+function createAds(platform, config, onActiveChange) {
   const options = config || {};
   const adUnitId = typeof options.REWARDED_AD_UNIT_ID === 'string' ? options.REWARDED_AD_UNIT_ID.trim() : '';
   const api = platform && platform.wx;
@@ -10,6 +10,13 @@ function createAds(platform, config) {
   let pending = null;
   let destroyed = false;
   let activeAd = null;
+  let activeAttempt = null;
+
+  function setActive(attempt, active) {
+    if (active ? activeAttempt === attempt : activeAttempt !== attempt) return;
+    activeAttempt = active ? attempt : null;
+    if (typeof onActiveChange === 'function') onActiveChange(active);
+  }
 
   function result(reason) { return { rewarded: reason === 'completed', reason }; }
   function isConfigured() {
@@ -18,7 +25,7 @@ function createAds(platform, config) {
 
   function showRevive() {
     if (destroyed) return Promise.resolve(result('destroyed'));
-    if (pending) return Promise.resolve(result('busy'));
+    if (pending || activeAttempt) return Promise.resolve(result('busy'));
     if (!platform || platform.kind !== 'wechat') return Promise.resolve(result('preview'));
     if (!configured) return Promise.resolve(result('unconfigured'));
     if (!api || typeof api.createRewardedVideoAd !== 'function') return Promise.resolve(result('unsupported'));
@@ -28,15 +35,23 @@ function createAds(platform, config) {
     const attempt = { resolve: resolvePromise, settled: false, started: false, timer: null, stage: 'starting', ad: null, close: null, error: null };
     pending = attempt;
 
-    function settle(reason) {
-      if (attempt.settled) return;
-      attempt.settled = true;
-      clearTimeout(attempt.timer);
+    function endDisplay() {
       const ad = attempt.ad;
       if (ad) {
         try { if (typeof ad.offClose === 'function') ad.offClose(attempt.close); } catch (_) { /* Cleanup only. */ }
         try { if (typeof ad.offError === 'function') ad.offError(attempt.error); } catch (_) { /* Cleanup only. */ }
       }
+      setActive(attempt, false);
+    }
+    attempt.endDisplay = endDisplay;
+
+    function settle(reason) {
+      // A watchdog cannot close a native video. Keep its audio lock and listeners
+      // until the SDK confirms closure/failure, even after denying the reward.
+      if (reason !== 'timeout' || !attempt.started) endDisplay();
+      if (attempt.settled) return;
+      attempt.settled = true;
+      clearTimeout(attempt.timer);
       if (pending === attempt) pending = null;
       attempt.resolve(result(reason));
     }
@@ -60,11 +75,14 @@ function createAds(platform, config) {
       }
       attempt.ad = activeAd;
       attempt.close = function (event) {
-        if (attempt.settled || pending !== attempt || !attempt.started) return;
+        if (!attempt.started) return;
+        if (attempt.settled) { endDisplay(); return; }
+        if (pending !== attempt) return;
         settle(event && event.isEnded === true ? 'completed' : 'cancelled');
       };
       attempt.error = function () {
-        if (attempt.settled || pending !== attempt) return;
+        if (attempt.settled) { endDisplay(); return; }
+        if (pending !== attempt) return;
         // The SDK may emit onError and reject show for the same failure. The
         // stage guard in retry ensures that pair starts only one load attempt.
         if (attempt.stage === 'starting') retry();
@@ -83,7 +101,9 @@ function createAds(platform, config) {
         armTimer(15 * 60 * 1000, 'timeout');
       }
       function retry() {
-        if (attempt.settled || attempt.stage !== 'starting') return;
+        if (attempt.stage !== 'starting') return;
+        if (attempt.settled) { endDisplay(); return; }
+        setActive(attempt, false);
         if (typeof attempt.ad.load !== 'function') { settle('load-failed'); return; }
         attempt.stage = 'retrying';
         attempt.started = false;
@@ -94,12 +114,12 @@ function createAds(platform, config) {
           if (attempt.settled) return;
           attempt.stage = 'showing';
           return Promise.resolve().then(function () {
-            if (!attempt.settled) { attempt.started = true; return attempt.ad.show(); }
+            if (!attempt.settled) { attempt.started = true; setActive(attempt, true); return attempt.ad.show(); }
           }).then(function () { if (attempt.stage === 'showing') showing(); }, function () { settle('show-failed'); });
         }, function () { settle('load-failed'); });
       }
       Promise.resolve().then(function () {
-        if (!attempt.settled && attempt.stage === 'starting') { attempt.started = true; return attempt.ad.show(); }
+        if (!attempt.settled && attempt.stage === 'starting') { attempt.started = true; setActive(attempt, true); return attempt.ad.show(); }
       }).then(function () { if (attempt.stage === 'starting') showing(); }, retry);
     } catch (_) { settle('error'); }
     return promise;
@@ -112,10 +132,11 @@ function createAds(platform, config) {
     if (activeAd && typeof activeAd.destroy === 'function') {
       try { activeAd.destroy(); } catch (_) { /* SDK destroy is optional. */ }
     }
+    if (activeAttempt) activeAttempt.endDisplay();
     activeAd = null;
   }
 
-  return { isConfigured, showRevive, destroy };
+  return { isConfigured, isActive: function () { return activeAttempt !== null; }, showRevive, destroy };
 }
 
 module.exports = { createAds };
