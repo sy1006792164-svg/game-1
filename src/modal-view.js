@@ -1,6 +1,7 @@
 'use strict';
 
 const { C } = require('./theme');
+const { drawStampSeal } = require('./stamp-badge');
 
 // Measure each block before drawing so titles, paragraphs and actions keep
 // their own space, including when a longer label wraps onto another line.
@@ -74,7 +75,10 @@ function drawModal(r, modal, now) {
   r.circle(195, ui.y + 52, 22, '#35554e');
   const help = modal.kind === 'help';
   const icon = modal.kind === 'win' ? 'letter' : modal.kind === 'fail' ? 'lamp' : help ? 'echo' : 'wind';
-  r.icon(icon, 195, ui.y + 52, 28, help ? C.blue : C.gold);
+  if (modal.stamp) {
+    drawStampSeal(r, modal.stamp, 195, ui.y + 52, 25);
+    r.label(modal.stamp.name + (modal.stamp.mastered ? ' · 金色邮戳' : ' · 投递邮戳'), 195, ui.y + 85, ui.width, 10, modal.stamp.mastered ? C.gold : C.green, 'center');
+  } else r.icon(icon, 195, ui.y + 52, 28, help ? C.blue : C.gold);
   if (modal.kicker) r.label(modal.kicker, 195, ui.y + ui.kickerY, ui.width, 10, C.muted, 'center');
   ui.title.forEach((line, i) => r.text(line, 195, ui.y + ui.titleY + i * ui.titleHeight, ui.titleSize, C.ink, 'center', '600'));
   if (ui.starsY != null) drawStars(r, modal.stars, ui.y + ui.starsY, age);

@@ -1,5 +1,7 @@
 'use strict';
 
+const { getAlbum } = require('./stamp-album');
+
 const PROFILE_KEY = 'minigame.local.profile.v1';
 const RUN_KEY = 'minigame.local.run.v1';
 const MAX_BYTES = 192 * 1024;
@@ -35,6 +37,12 @@ function defaults() {
   return { version: 1, completed: {}, daily: {}, totalWins: 0 };
 }
 
+function ownsStamp(profile, id) {
+  return typeof id === 'string' && getAlbum(profile).stamps.some(function (stamp) {
+    return stamp.id === id && stamp.owned;
+  });
+}
+
 function score(value) {
   if (!plain(value) || !Number.isInteger(value.stars) || value.stars < 1 || value.stars > 3 ||
       !Number.isInteger(value.bestTurns) || value.bestTurns < 0 || value.bestTurns > 100000) return null;
@@ -55,6 +63,7 @@ function profileFrom(value) {
     });
   });
   next.totalWins = Object.keys(next.completed).length + Object.keys(next.daily).length;
+  if (ownsStamp(next, value.equippedStamp)) next.equippedStamp = value.equippedStamp;
   return next;
 }
 
@@ -166,6 +175,12 @@ function createStore(adapter) {
       if (typeof dismissed !== 'boolean') return false;
       if (dismissed) profile.guideDismissed = true;
       else delete profile.guideDismissed;
+      return save(PROFILE_KEY, profile);
+    },
+    equipStamp: function (id) {
+      if (id !== null && !ownsStamp(profile, id)) return false;
+      if (id === null) delete profile.equippedStamp;
+      else profile.equippedStamp = id;
       return save(PROFILE_KEY, profile);
     },
     recordWin: function (levelId, stars, turns, mode, dateKey) {

@@ -5,6 +5,8 @@ const { createAds } = require('./ads');
 const { ACTIONS, DIRECTIONS, createState, step, replay, revive, stars } = require('./engine');
 const { CAMPAIGN, getDaily } = require('./levels');
 const { getProgress } = require('./progression');
+const { getAlbum } = require('./stamp-album');
+const stampActions = require('./stamp-actions');
 const { Renderer } = require('./renderer');
 const { MOVE_MS } = require('./motion');
 const { SceneCamera } = require('./camera');
@@ -36,6 +38,7 @@ class Game {
     this.camera = new SceneCamera();
     this.cameraMovedAt = -Infinity;
     this.page = 'home'; this.chapter = 0; this.modal = null; this.reviewing = false;
+    this.selectedStamp = null; this.missionStampId = null;
     this.guideEnabled = false;
     this.level = null; this.state = null; this.actions = []; this.reviveAt = null; this.undosUsed = 0;
     this.mode = 'campaign'; this.dateKey = localDate(); this.session = 0;
@@ -88,6 +91,17 @@ class Game {
     return this.runCache.value;
   }
   progress() { return getProgress(this.profile(), this.dateKey); }
+  album() {
+    const revision = this.store.revision();
+    if (!this.albumCache || this.albumCache.revision !== revision || this.albumCache.dateKey !== this.dateKey) {
+      this.albumCache = { revision, dateKey: this.dateKey, value: getAlbum(this.profile(), this.dateKey) };
+    }
+    return this.albumCache.value;
+  }
+  openStamp(id) { stampActions.openStamp(this, id); }
+  closeStamp() { this.selectedStamp = null; this.toastUntil = 0; }
+  equipStamp(id) { stampActions.equipStamp(this, id); }
+  stampMission(id) { stampActions.startMission(this, id); }
   playHint() { return playHint(this, this.platform.now()); }
   guideStep() { return guideStep(this, this.platform.now()); }
   dismissGuide() {
@@ -126,7 +140,8 @@ class Game {
     if (force || enabled !== this.musicActive) { this.musicActive = enabled; this.sound.ambience(enabled); }
   }
   persist() {
-    if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', dateKey: this.runDate, actions: this.actions.slice(), reviveAt: this.reviveAt, undosUsed: this.undosUsed });
+    if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', dateKey: this.runDate, actions: this.actions.slice(), reviveAt: this.reviveAt, undosUsed: this.undosUsed,
+      ...(this.missionStampId ? { stampId: this.missionStampId } : {}) });
   }
   restore() {
     this.pendingAction = null; this.blockedAt = null;
@@ -140,6 +155,8 @@ class Game {
       if ((run.revision || '1') !== (level.revision || '1')) {
         this.store.clearRun();
         this.start(level, run.mode);
+        this.missionStampId = stampActions.validMission(this, run.stampId, level, run.mode);
+        this.persist();
         this.toast('路线已升级，已重新出发；通关成绩保留');
         return true;
       }
@@ -151,6 +168,7 @@ class Game {
       this.transitionAt = this.platform.now() - MOVE_MS;
       this.actions = run.actions.slice(); this.reviveAt = run.reviveAt; this.undosUsed = undosUsed;
       this.mode = run.mode; this.runDate = run.dateKey; this.page = 'game'; this.session++;
+      this.missionStampId = stampActions.validMission(this, run.stampId, level, run.mode);
       this.guideEnabled = autoGuide(this.profile(), level, this.mode);
       this.pointer = null; this.camera.enter(this.platform.now());
       this.modal = null; this.reviewing = false;
@@ -162,6 +180,8 @@ class Game {
   start(level, mode) {
     if (this.busy) return;
     this.pendingAction = null; this.blockedAt = null;
+    const sameRoute = this.level && this.level.id === level.id && this.mode === (mode || 'campaign');
+    this.missionStampId = sameRoute ? stampActions.validMission(this, this.missionStampId, level, mode || 'campaign') : null;
     this.level = level; this.mode = mode || 'campaign';
     this.guideEnabled = autoGuide(this.profile(), level, this.mode);
     this.runDate = this.mode === 'daily' && /^daily-\d{4}-\d{2}-\d{2}$/.test(String(level.id)) ? String(level.id).slice(6) : localDate();
@@ -220,6 +240,7 @@ class Game {
   }
   victory() {
     this.pendingAction = null; this.toastUntil = 0;
+    const albumBefore = this.album();
     const rating = stars(this.level, this.state), before = this.record(this.level, this.mode);
     this.store.recordWin(this.level.id, rating, this.state.turn, this.mode, this.runDate);
     this.store.clearRun();
@@ -231,12 +252,20 @@ class Game {
     const bestLine = !before ? saveLine : this.state.turn < before.bestTurns ? '刷新纪录，比上次少走 ' + (before.bestTurns - this.state.turn) + ' 拍。' : this.state.turn === before.bestTurns ? '追平个人最佳 · ' + before.bestTurns + ' 拍' : '个人最佳 ' + before.bestTurns + ' 拍 · 本次多走 ' + (this.state.turn - before.bestTurns) + ' 拍';
     const lines = [this.state.turn + ' 拍完成' + (this.state.revived ? ' · 续灯最高二星' : ''), bestLine];
     if (before && !saved) lines.push(saveLine);
+    const album = this.album(), reward = stampActions.albumRewards(albumBefore, album);
+    const stampId = this.missionStampId || (reward && reward.id);
+    if (reward) lines.push(reward.text);
+    else if (this.missionStampId) {
+      const mission = album.stamps.find(stamp => stamp.id === this.missionStampId);
+      lines.push(mission && mission.mastered ? '回信已珍藏，金色邮戳继续保留' : '委托需要三星，可重新规划路线');
+    }
     this.modal = {
-      kind: 'win', title: '信已送达', stars: rating,
+      kind: 'win', title: '信已送达', stars: rating, stamp: album.equipped,
       lines,
       buttons: [
         { text: next ? '下一封信' : '返回邮局', primary: true, action: () => next ? this.start(next, this.mode) : this.home() },
-        { text: '再走一次', textOnly: true, action: () => this.start(this.level, this.mode) }
+        { text: '再走一次', textOnly: true, action: () => this.start(this.level, this.mode) },
+        ...(stampId ? [{ text: this.missionStampId ? '查看委托回信' : '拆阅新邮票', textOnly: true, action: () => this.openStamp(stampId) }] : [])
       ]
     };
   }
@@ -327,6 +356,7 @@ class Game {
   openPage(page) {
     if (this.busy || !['home', 'levels', 'collection', 'progress'].includes(page)) return;
     this.pendingAction = null; this.persist(); this.page = page === 'progress' ? 'collection' : page; this.modal = null; this.reviewing = false; this.dateKey = localDate();
+    this.selectedStamp = null;
     if (page === 'levels') this.chapter = this.nextLevel().chapter;
     this.cue('tap');
   }

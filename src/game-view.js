@@ -65,8 +65,10 @@ function drawControls(r, game, layout, now) {
 
 function drawGame(r, game, now) {
   const layout = controlLayout(r, game);
-  r.label(game.level.title, 24, game.reviewing ? 32 : 40, 254, 25, C.ink, 'left', '600');
+  r.label(game.level.title, 24, game.reviewing || game.missionStampId ? 32 : 40, 254, 25, C.ink, 'left', '600');
   if (game.reviewing) r.text('路线回顾 · 可拖动查看', 24, 60, 11, C.muted);
+  else if (game.missionStampId) r.label(game.state.revived ? '回信委托 · 续灯最高二星，需重试争取三星' :
+    '回信委托 · ' + game.level.par + ' 拍内送达获三星 · 已走 ' + game.state.turn + ' 拍', 24, 61, 254, 10, C.gold);
   r.button(game.reviewing ? '结果' : '暂停', 294, 18, 72, 44, () => game.pause(), {
     style: 'secondary', disabled: !!game.modal || game.busy || (!game.reviewing && game.state.status !== 'playing')
   });

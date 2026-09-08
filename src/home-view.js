@@ -3,6 +3,7 @@
 const { CAMPAIGN } = require('./levels');
 const { C } = require('./theme');
 const { drawVignette } = require('./scene');
+const { drawHomeStamp } = require('./stamp-badge');
 
 function layout(height) {
   const top = Math.max(0, (height - 780) / 2);
@@ -45,6 +46,7 @@ function drawHome(r, game, now) {
   drawVignette(r, now, { x: -30, y: ui.heroY, w: 450, h: ui.heroH }, { reducedMotion: r.reducedMotion });
   r.label(route.detail, 195, ui.routeY, 324, 11, C.muted, 'center');
   r.button(route.title, 30, ui.buttonY, 330, 56, () => game.primary(), 'primary');
+  drawHomeStamp(r, game, ui.buttonY + 65);
   drawLinks(r, game, ui.linksY);
 }
 
