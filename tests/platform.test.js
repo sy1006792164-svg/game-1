@@ -87,8 +87,8 @@ test('WeChat reserves capsule/safe area, uses native local storage and single-to
   const platform = createPlatform({ wx });
   assert.equal(platform.wx, wx);
   assert.equal(platform.kind, 'wechat');
-  assert.deepEqual(platform.resize(), { width: 393, height: 852, pixelRatio: 3, safeTop: 87, safeBottom: 34 });
-  assert.equal(canvas.width, 1179);
+  assert.deepEqual(platform.resize(), { width: 393, height: 852, pixelRatio: 2, safeTop: 87, safeBottom: 34 });
+  assert.equal(canvas.width, 786);
   const points = [];
   const off = platform.onPointer((...args) => points.push(args));
   callbacks.Start({ changedTouches: [{ identifier: 4, clientX: 12, clientY: 45 }] });

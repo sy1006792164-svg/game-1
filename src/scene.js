@@ -1,8 +1,8 @@
 'use strict';
 
-const { neighbor } = require('./engine');
 const { actorFrame, drawEffects } = require('./motion');
-const { createProjection, insideRect } = require('./board-projection');
+const { insideRect } = require('./board-projection');
+const { getBoardGeometry } = require('./board-geometry');
 const { treeTop, officeTop, courierTop } = require('./overhead-props');
 const { drawIslandSurface } = require('./island-surface');
 
@@ -183,11 +183,10 @@ function drawBoard(r, game, now, rect) {
   const l = game.level, s = game.state, view = game.camera.frame(now);
   const overheadBlend = Math.max(0, Math.min(1, (view.tilt - .82) / .18)), overhead = overheadBlend > .5;
   const elevation = Math.sqrt(1 - view.tilt * view.tilt) / Math.sqrt(1 - .62 * .62);
-  const p = createProjection(l, rect, view), { halfW: hw, halfH: hh, point, corners } = p;
+  const geometry = getBoardGeometry(r, l, s, rect, view);
+  const p = geometry.projection, { halfW: hw, halfH: hh, point, corners } = p;
   r.boardRect = rect;
-  r.boardProjection = { ...p, halfW: hw * view.scale, halfH: hh * view.scale,
-    point: cell => p.toScreen(...point(cell)),
-    contains: (cell, x, y) => insideRect(rect, x, y) && p.contains(cell, ...p.toWorld(x, y)) };
+  r.boardProjection = geometry.screenProjection;
   const target = r, c = r.ctx;
   r = Object.create(target);
   r.hit = (x, y, w, h, action, contains) => {
@@ -200,8 +199,9 @@ function drawBoard(r, game, now, rect) {
   c.scale(view.scale, view.scale); c.translate(-p.centerX, -p.centerY);
   glow(r, rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w * .32, '#6aaba0', .018);
   drawIslandSurface(r, corners, 26 * elevation, now);
-  const walls = new Set(l.walls), adjacent = new Set(['up', 'down', 'left', 'right'].map(d => neighbor(l, s.player, d, s)).filter(cell => cell !== null));
-  const ordered = Array.from({ length: l.width * l.height }, (_, cell) => cell).filter(p.visible).sort((a, b) => point(a)[1] - point(b)[1]);
+  const { walls, adjacent, ordered } = geometry;
+  const reach = Math.max(Math.abs(Math.cos(view.rotation)), Math.abs(Math.sin(view.rotation)));
+  const reachX = hw * reach, reachY = hh * reach;
   const actors = [];
   for (const cell of ordered) {
     const [x, y] = point(cell), wall = walls.has(cell);
@@ -237,8 +237,6 @@ function drawBoard(r, game, now, rect) {
       if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, now, cell, false) });
       if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, now, cell, true) });
     }
-    const reachX = hw * Math.max(Math.abs(Math.cos(view.rotation)), Math.abs(Math.sin(view.rotation)));
-    const reachY = hh * Math.max(Math.abs(Math.cos(view.rotation)), Math.abs(Math.sin(view.rotation)));
     r.hit(x - reachX, y - reachY, reachX * 2, reachY * 2, () => {
       const player = game.state.player, dx = cell % l.width - player % l.width, dy = Math.floor(cell / l.width) - Math.floor(player / l.width);
       if (!dx && !dy) game.act('wait');

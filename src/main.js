@@ -35,7 +35,7 @@ class Game {
     this.toastText = ''; this.toastUntil = 0; this.transitionAt = 0; this.motionPath = null;
     this.busy = false; this.hidden = false; this.lastFrame = 0; this.pointer = null; this.pendingAction = null; this.blockedAt = null;
     this.metrics = platform.resize();
-    platform.onResize(() => { this.pointer = null; this.metrics = platform.resize(); this.renderer.draw(this, platform.now(), this.metrics); });
+    platform.onResize(() => { this.pointer = null; this.metrics = platform.resize(); this.lastFrame = -Infinity; });
     platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor, pan) => this.zoomScene(x, y, factor, pan));
     platform.onKey(key => {
       if (key === 'Escape') { if (!this.busy && this.page === 'game') this.pause(); return; }
@@ -47,18 +47,35 @@ class Game {
       else if (key === 'z' || key === 'Backspace') this.undo();
     });
     platform.onHide(() => {
-      this.hidden = true; this.pointer = null; this.pendingAction = null; this.persist(); this.sound.stop();
+      this.hidden = true; this.pointer = null; this.pendingAction = null; this.persist(); this.sound.release();
       if (this.frameId != null) platform.cancelRaf(this.frameId);
       this.frameId = null;
+      this.renderer.clearCaches();
       if (this.page === 'game' && this.state.status === 'playing' && !this.modal && !this.busy) this.pause();
     });
     platform.onShow(() => {
-      this.hidden = false; this.pointer = null; this.dateKey = localDate(); this.metrics = platform.resize();
+      this.hidden = false; this.pointer = null; this.dateKey = localDate(); this.metrics = platform.resize(); this.lastFrame = -Infinity;
       if (this.frameId == null) this.loop();
+    });
+    if (platform.onMemoryWarning) platform.onMemoryWarning(() => {
+      this.pointer = null; this.pendingAction = null;
+      this.renderer.clearCaches(); this.sound.release();
+      this.profileCache = null; this.runCache = null;
+      this.metrics = platform.reduceMemory(); this.lastFrame = -Infinity;
     });
     this.loop();
   }
-  profile() { return this.store.getProfile(); }
+  /** Snapshots are cloned by the store; reuse one per store revision so a frame never clones the save hundreds of times. */
+  profile() {
+    const revision = this.store.revision();
+    if (!this.profileCache || this.profileCache.revision !== revision) this.profileCache = { revision, value: this.store.getProfile() };
+    return this.profileCache.value;
+  }
+  savedRun() {
+    const revision = this.store.revision();
+    if (!this.runCache || this.runCache.revision !== revision) this.runCache = { revision, value: this.store.loadRun() };
+    return this.runCache.value;
+  }
   progress() { return getProgress(this.profile(), this.dateKey); }
   playHint() { return playHint(this, this.platform.now()); }
   record(level, mode) {
@@ -68,9 +85,12 @@ class Game {
   completion() { return Object.keys(this.profile().completed).length; }
   starCount() { return Object.values(this.profile().completed).reduce((n, c) => n + c.stars, 0); }
   unlocked(index) { return index === 0 || !!this.profile().completed[String(CAMPAIGN[index - 1].id)]; }
-  nextLevel() { return CAMPAIGN.find((l, i) => this.unlocked(i) && !this.profile().completed[String(l.id)]) || CAMPAIGN[CAMPAIGN.length - 1]; }
+  nextLevel() {
+    const completed = this.profile().completed;
+    return CAMPAIGN.find((l, i) => (i === 0 || !!completed[String(CAMPAIGN[i - 1].id)]) && !completed[String(l.id)]) || CAMPAIGN[CAMPAIGN.length - 1];
+  }
   toast(message) { this.toastText = message; this.toastUntil = this.platform.now() + 2600; }
-  cue(type) { if (this.profile().settings.sound) this.sound.play(type); }
+  cue(type) { if (!this.hidden && this.profile().settings.sound) this.sound.play(type); }
   persist() {
     if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', dateKey: this.runDate, actions: this.actions.slice(), reviveAt: this.reviveAt, undosUsed: this.undosUsed });
   }
@@ -293,7 +313,6 @@ class Game {
     this.pointer = null;
     const dx = pan.dx / this.renderer.scale / b.w, dy = pan.dy / this.renderer.scale / b.h;
     this.camera.zoomAt(factor, (p.x - b.x - b.w / 2) / b.w - dx, (p.y - b.y - b.h / 2 - 4) / b.h - dy, dx, dy);
-    this.renderer.draw(this, this.platform.now(), this.metrics);
   }
   pointerEvent(x, y, type) {
     const p = this.renderer.toLogical(x, y);
@@ -311,7 +330,6 @@ class Game {
         origin.dragging = true;
         this.camera.orbit((p.x - origin.lastX) / b.w, (p.y - origin.lastY) / b.h);
         origin.lastX = p.x; origin.lastY = p.y;
-        this.renderer.draw(this, this.platform.now(), this.metrics);
         if (type === 'end') this.pointer = null;
         return;
       }
@@ -332,7 +350,8 @@ class Game {
       if (now - pending.at <= 500) this.act(pending.action);
     }
     if (!this.dateCheckedAt || now - this.dateCheckedAt > 1000) { this.dateKey = localDate(); this.dateCheckedAt = now; }
-    if (now - this.lastFrame >= 16) { this.renderer.draw(this, now, this.metrics); this.lastFrame = now; }
+    const frameInterval = this.platform.kind === 'wechat' ? 1000 / 30 : 16;
+    if (now - this.lastFrame >= frameInterval - .5) { this.renderer.draw(this, now, this.metrics); this.lastFrame = now; }
     this.frameId = this.platform.raf(() => this.loop());
   }
 }

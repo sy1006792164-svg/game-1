@@ -59,7 +59,7 @@ function harness(options = {}) {
   }
   const module = { exports: {} };
   factory(specifier => {
-    if (specifier === './sound') return { createSound: () => ({ play() {}, stop() {} }) };
+    if (specifier === './sound') return { createSound: () => ({ play() {}, stop() {}, release() {} }) };
     if (specifier === './config') return { REWARDED_AD_UNIT_ID: options.configured === false ? '' : 'adunit-integrationtest' };
     return actualRequire(specifier);
   }, module, module.exports, ClockDate);

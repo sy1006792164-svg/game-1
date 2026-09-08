@@ -11,6 +11,11 @@ const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑'
 const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2, ne: -Math.PI / 4, se: Math.PI / 4, sw: Math.PI * .75, nw: -Math.PI * .75 });
 class Renderer {
   constructor(canvas) { this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.hits = []; this.scale = 1; this.ox = 0; this.oy = 0; this.H = 844; this.safeBottom = 0; }
+  clearCaches() {
+    if (this.wrapCache) this.wrapCache.clear();
+    this.boardGeometry = null; this.motionEffects = null;
+    this.hits = []; this.boardProjection = null; this.boardRect = null;
+  }
   toLogical(x, y) { return { x: (x - this.ox) / this.scale, y: (y - this.oy) / this.scale }; }
   font(size, weight) { this.ctx.font = (weight || '400') + ' ' + size + 'px "PingFang SC","Microsoft YaHei",sans-serif'; }
   round(x, y, w, h, r, fill, stroke) {
@@ -87,8 +92,13 @@ class Renderer {
     return lines.length;
   }
   wrapLines(text, width, size, weight) {
-    const lines = [];
+    // Callers rely on the font being set afterwards; keep that even on a cache hit.
     this.font(size, weight);
+    const key = this.ctx.font + '|' + width + '|' + text;
+    const cache = this.wrapCache || (this.wrapCache = new Map());
+    const cached = cache.get(key);
+    if (cached) return cached.slice();
+    const lines = [];
     for (const paragraph of String(text).split(/\r?\n/)) {
       let line = '';
       for (const char of paragraph) {
@@ -97,7 +107,9 @@ class Renderer {
       }
       lines.push(line);
     }
-    return lines;
+    if (cache.size >= 256) cache.clear();
+    cache.set(key, lines);
+    return lines.slice();
   }
   icon(type, x, y, size, color) {
     const c = this.ctx; c.save(); c.translate(x, y); c.scale(size / 24, size / 24); color = color || C.green;

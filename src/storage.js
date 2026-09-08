@@ -108,9 +108,12 @@ function runFrom(value) {
 function createStore(adapter) {
   let profile = defaults(), run = null;
   let status = { persisted: true, message: '' };
+  // Bumped on every write so callers can cache snapshots between frames.
+  let revision = 0;
   const dirty = new Set();
   function failure(message) { status = { persisted: false, message }; }
   function save(key, value) {
+    revision += 1;
     dirty.add(key);
     try {
       adapter.set(key, cleanJson(value));
@@ -123,6 +126,7 @@ function createStore(adapter) {
     }
   }
   function remove(key) {
+    revision += 1;
     dirty.add(key);
     try {
       adapter.remove(key);
@@ -159,6 +163,7 @@ function createStore(adapter) {
   function snapshot() { return cleanJson(profile); }
   return {
     getProfile: snapshot,
+    revision: function () { return revision; },
     getStatus: function () { return Object.assign({}, status); },
     updateSettings: function (partial) {
       if (!plain(partial)) return snapshot();

@@ -27,6 +27,11 @@ function createPlatform(environment) {
   if (api && typeof GameGlobal !== 'undefined') GameGlobal.canvas = canvas;
   if (!canvas) throw new Error('Game canvas is unavailable.');
   let dimensions = { width: 390, height: 844, pixelRatio: 1, safeTop: 0, safeBottom: 0 };
+  let lowMemory = false;
+  // This turn-based game does not need the native runtime's default 60 FPS.
+  if (api && typeof api.setPreferredFramesPerSecond === 'function') {
+    try { api.setPreferredFramesPerSecond(30); } catch (_) { /* The game loop also limits drawing. */ }
+  }
 
   function resize() {
     let width, height, pixelRatio, safeTop = 0, safeBottom = 0;
@@ -61,13 +66,23 @@ function createPlatform(environment) {
       height = positive(rect.height, positive(win && win.innerHeight, 844));
       pixelRatio = positive(win && win.devicePixelRatio, 1);
     }
-    pixelRatio = Math.min(3, pixelRatio);
+    width = Math.max(1, Math.round(width)); height = Math.max(1, Math.round(height));
+    // Bound the native backing texture, including large tablet/desktop windows.
+    // Keep logical coordinates unchanged so touch and safe-area layout still match.
+    pixelRatio = api ? Math.min(pixelRatio, lowMemory ? 1 : 2,
+      Math.sqrt((lowMemory ? 1024 * 1024 : 2 * 1024 * 1024) / (width * height)),
+      4096 / width, 4096 / height) : Math.min(3, pixelRatio);
     dimensions = {
-      width: Math.round(width), height: Math.round(height), pixelRatio,
+      width, height, pixelRatio,
       safeTop: Math.min(height / 3, safeTop), safeBottom: Math.min(height / 3, safeBottom),
     };
-    canvas.width = Math.round(dimensions.width * pixelRatio);
-    canvas.height = Math.round(dimensions.height * pixelRatio);
+    const backingWidth = Math.max(1, Math.floor(dimensions.width * pixelRatio));
+    const backingHeight = Math.max(1, Math.floor(dimensions.height * pixelRatio));
+    // Reassigning even the same size resets the context and reallocates native storage.
+    // Shrink before growing so a window rotation cannot allocate a large intermediate texture.
+    if (canvas.width > backingWidth) canvas.width = backingWidth;
+    if (canvas.height !== backingHeight) canvas.height = backingHeight;
+    if (canvas.width !== backingWidth) canvas.width = backingWidth;
     return Object.assign({}, dimensions);
   }
 
@@ -318,6 +333,19 @@ function createPlatform(environment) {
   const cancelFrame = env.cancelAnimationFrame || (win && win.cancelAnimationFrame) || canvas.cancelAnimationFrame;
   return {
     kind: api ? 'wechat' : 'browser', wx: api, canvas, resize, onPointer, onKey, onResize, storage,
+    onMemoryWarning: function (listener) {
+      if (!api || typeof api.onMemoryWarning !== 'function') return function () {};
+      try { api.onMemoryWarning(listener); } catch (_) { return function () {}; }
+      return function () { if (typeof api.offMemoryWarning === 'function') api.offMemoryWarning(listener); };
+    },
+    reduceMemory: function () {
+      lowMemory = true;
+      const metrics = resize();
+      if (api && typeof api.triggerGC === 'function') {
+        try { api.triggerGC(); } catch (_) { /* GC timing belongs to the host. */ }
+      }
+      return metrics;
+    },
     onHide: function (listener) { return lifecycle('Hide', listener); },
     onShow: function (listener) { return lifecycle('Show', listener); },
     vibrate: function () {

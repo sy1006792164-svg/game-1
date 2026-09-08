@@ -35,7 +35,7 @@ function drawLinks(r, game, y) {
 }
 
 function drawHome(r, game, now) {
-  const saved = game.store.loadRun(), completed = game.completion();
+  const saved = game.savedRun(), completed = game.completion();
   const route = departure(game.nextLevel(), saved, completed), ui = layout(r.H);
   r.icon('wind', 195, ui.top + 27, 25, C.blue);
   r.text('风笺回廊', 195, ui.top + 64, 35, C.ink, 'center', '600');
