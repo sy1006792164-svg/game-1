@@ -23,7 +23,7 @@ function setup(options = {}) {
   Object.defineProperty(api, 'cloud', { get() { throw new Error('Cloud development must not be accessed'); } });
   const callbacks = {
     onProfile(value) { calls.push('profile'); profiles.push({ ...value }); return options.onProfile ? options.onProfile(value) : undefined; },
-    onReady() { calls.push('ready'); ready.push(true); },
+    onReady(value) { calls.push('ready'); ready.push(value); },
   };
   const platform = { kind: options.kind || 'wechat', isDevelopment: !!options.development, wx: api };
   if (options.remove) delete api[options.remove];
@@ -79,7 +79,7 @@ test('first authorization uses a visible native button at CSS coordinates and re
   assert.equal(button.options.type, 'text'); assert.equal(button.options.text, '授权头像昵称并查看');
   assert.equal(button.options.withCredentials, false); assert.equal(button.options.lang, 'zh_CN');
   assert.equal(button.style.left, 42); assert.equal(button.style.top, 310); assert.equal(button.style.width, 240);
-  assert.equal(button.style.backgroundColor, '#efbd72'); assert.equal(button.style.color, '#112e32');
+  assert.equal(button.style.backgroundColor, '#39796b'); assert.equal(button.style.color, '#fffdf4');
   for (let n = 0; n < 5; n++) h.gate.updateButton(rectangle, true);
   assert.equal(h.buttons.length, 1); assert.equal(button.showCount, 1);
   h.gate.updateButton({ ...rectangle, top: 330, width: 220 }); assert.equal(button.style.top, 330); assert.equal(button.style.width, 220);
@@ -175,9 +175,12 @@ test('each new ranking visit rechecks actual WeChat permission instead of a save
   const h = setup(); const first = h.gate.open(); await h.reachSetting(true); h.pending.userinfo[0].success(userInfo()); await first; h.gate.close();
   assert.equal(h.gate.getState().enabled, true);
   const second = h.gate.open(); assert.equal(h.gate.getState().enabled, false, 'a new visit suspends sync while current permission is checked');
-  await h.reachSetting(false); await second;
-  assert.equal(h.pending.privacy.length, 2); assert.equal(h.pending.setting.length, 2);
-  assert.equal(h.gate.getState().enabled, false); assert.equal(h.gate.getState().canOpenSettings, true); h.gate.close();
+  assert.equal(h.gate.getState().canDisplay, true, 'cached ranks remain displayable while checking');
+  assert.equal(h.gate.getState().status, 'ready');
+  h.pending.setting[1].success({ authSetting: { 'scope.userInfo': false } }); await second;
+  assert.equal(h.pending.privacy.length, 1); assert.equal(h.pending.setting.length, 2);
+  assert.equal(h.gate.getState().enabled, false); assert.equal(h.gate.getState().canDisplay, false);
+  assert.equal(h.gate.getState().canOpenSettings, true); h.gate.close();
 });
 
 test('browser or missing native APIs report unavailable without starting another service', async () => {
@@ -243,16 +246,87 @@ async function enabledSession() {
   h.pending.userinfo[0].success(userInfo()); await opening; return h;
 }
 
+test('returning authorized players immediately display cached ranks and share one silent permission check', async () => {
+  const h = await enabledSession(); h.gate.close(); const before = h.calls.length;
+  const opening = h.gate.open();
+  assert.deepEqual(h.calls.slice(before), ['setting']);
+  assert.equal(h.gate.getState().status, 'ready'); assert.equal(h.gate.getState().canDisplay, true);
+  assert.equal(h.gate.getState().checking, true); assert.equal(h.gate.getState().enabled, false);
+  assert.equal(h.gate.open(), opening);
+  const authSetting = { 'scope.userInfo': true, 'scope.WxFriendInteraction': true };
+  h.pending.setting[1].success({ authSetting }); await opening;
+  assert.equal(h.gate.getState().enabled, true); assert.equal(h.gate.getState().checking, false);
+  assert.equal(h.pending.privacy.length, 1); assert.equal(h.buttons.length, 0);
+  assert.deepEqual(h.ready[1], { authSetting });
+  h.ready[1].authSetting['scope.userInfo'] = false;
+  h.gate.getState().authSetting['scope.userInfo'] = false;
+  assert.equal(h.gate.getState().authSetting['scope.userInfo'], true, 'caller snapshots cannot revoke or grant the session');
+  assert.equal(h.ready.length, 2);
+  h.pending.userinfo[1].success(userInfo({ nickName: '新的名字' })); await turn();
+  assert.equal(h.gate.getState().profile.nickName, '新的名字'); assert.equal(h.profiles[1].nickName, '新的名字');
+  assert.equal(h.ready.length, 2, 'background profile updates cannot reopen rankings or replay rank animation');
+  h.gate.close();
+});
+
+test('a temporary warm check failure keeps cached ranks and a later silent visit recovers', async () => {
+  const h = await enabledSession(); h.gate.close(); const first = h.gate.open();
+  h.pending.setting[1].fail({ errMsg: 'getSetting:fail temporary' }); await first;
+  assert.equal(h.gate.getState().canDisplay, true); assert.equal(h.gate.getState().enabled, false);
+  assert.equal(h.gate.getState().status, 'error'); assert.equal(h.ready.length, 1);
+  const retry = h.gate.open(); h.pending.setting[2].success({ authSetting: { 'scope.userInfo': true } }); await retry;
+  assert.equal(h.gate.getState().enabled, true); assert.equal(h.pending.privacy.length, 1);
+  h.gate.close();
+});
+
+test('background profile refresh errors do not interrupt cached ranks but explicit denial hides them', async () => {
+  for (const outcome of ['temporary', 'invalid', 'denied', 'denied-result', 'closed']) {
+    const h = await enabledSession(); h.gate.close(); const opening = h.gate.open();
+    h.pending.setting[1].success({ authSetting: { 'scope.userInfo': true } }); await opening;
+    if (outcome === 'closed') h.gate.close();
+    if (outcome === 'invalid') h.pending.userinfo[1].success({});
+    else if (outcome === 'closed') h.pending.userinfo[1].success(userInfo({ nickName: 'late' }));
+    else if (outcome === 'denied-result') h.pending.userinfo[1].success({ ...userInfo(), errMsg: 'getUserInfo:fail auth deny' });
+    else h.pending.userinfo[1].fail({ errMsg: outcome === 'denied' ? 'getUserInfo:fail auth deny' : 'getUserInfo:fail temporary' });
+    await turn();
+    assert.deepEqual(h.gate.getState().profile, profile); assert.equal(h.profiles.length, 1);
+    assert.equal(h.ready.length, 2);
+    assert.equal(h.gate.getState().canDisplay, !outcome.startsWith('denied'));
+    if (outcome.startsWith('denied')) { assert.equal(h.gate.getState().enabled, false); assert.equal(h.gate.getState().canOpenSettings, true); }
+    h.gate.close();
+  }
+});
+
+test('a native profile button grant updates the permission snapshot delivered with readiness', async () => {
+  const h = setup(); const opening = h.gate.open(); await h.reachSetting(); await opening;
+  assert.equal(h.gate.getState().canDisplay, false);
+  h.gate.updateButton(rectangle); h.buttons[0].tap(userInfo()); await turn();
+  assert.equal(h.ready[0].authSetting['scope.userInfo'], true); assert.equal(h.gate.getState().canDisplay, true);
+  h.gate.close();
+});
+
+test('a late warm profile result cannot restore a session revoked by a newer settings check', async () => {
+  const h = await enabledSession(); h.gate.close(); const opening = h.gate.open();
+  h.pending.setting[1].success({ authSetting: { 'scope.userInfo': true } }); await opening;
+  const revoked = h.gate.revalidate(); h.pending.setting[2].success({ authSetting: { 'scope.userInfo': false } }); await revoked;
+  h.pending.userinfo[1].success(userInfo({ nickName: 'late' })); await turn();
+  assert.equal(h.gate.getState().canDisplay, false); assert.equal(h.gate.getState().enabled, false);
+  assert.deepEqual(h.gate.getState().profile, profile); assert.equal(h.profiles.length, 1); assert.equal(h.ready.length, 2);
+  h.gate.close();
+});
+
 test('foreground permission revalidation closes the sync gate immediately and only reads settings once', async () => {
   const h = await enabledSession(); const before = h.calls.length;
   const checking = h.gate.revalidate();
   assert.equal(h.gate.getState().enabled, false, 'automatic score writes must stop before the asynchronous permission check');
+  assert.equal(h.gate.getState().canDisplay, true); assert.equal(h.gate.getState().checking, true);
+  assert.equal(h.gate.getState().status, 'ready', 'foreground checks never replace cached ranks with authorization waiting');
   assert.equal(h.gate.revalidate(), checking, 'repeated foreground events share the permission request');
   assert.deepEqual(h.calls.slice(before), ['setting']);
   const authSetting = { 'scope.userInfo': true, 'scope.WxFriendInteraction': false };
   h.pending.setting[1].success({ authSetting });
   assert.deepEqual(await checking, authSetting);
   assert.equal(h.gate.getState().enabled, true); assert.equal(h.gate.getState().status, 'ready');
+  assert.equal(h.gate.getState().checking, false); assert.deepEqual(h.gate.getState().authSetting, authSetting);
   assert.equal(h.ready.length, 1, 'a read-only refresh must not reopen rankings through onReady');
   assert.equal(h.profiles.length, 1); h.gate.close();
 });
@@ -263,6 +337,7 @@ test('revoked profile permission disables the session and offers a fresh explici
   h.pending.setting[1].success({ authSetting: { 'scope.userInfo': false, 'scope.WxFriendInteraction': true } });
   await checking;
   assert.equal(h.gate.getState().enabled, false); assert.equal(h.gate.getState().status, 'denied');
+  assert.equal(h.gate.getState().canDisplay, false);
   assert.equal(h.gate.getState().canOpenSettings, true); assert.equal(h.pending.settings, undefined);
   h.gate.show(); const restoring = h.gate.openSettings();
   assert.equal(h.pending.settings.length, 1); h.pending.settings[0].fail({ errMsg: 'openSetting:fail' }); await restoring;
@@ -279,6 +354,7 @@ test('permission read failures or malformed responses never retain the previous 
     else h.pending.setting[1].success(result);
     assert.equal(await checking, null); assert.equal(h.gate.getState().enabled, false);
     assert.equal(h.gate.getState().status, 'error'); assert.equal(h.pending.privacy.length, 1);
+    assert.equal(h.gate.getState().canDisplay, true); assert.equal(h.gate.getState().checking, false);
     h.gate.close();
   }
 });
@@ -300,7 +376,7 @@ test('closing or opening again cancels old foreground checks and late callbacks 
     assert.equal(await checking, null, 'leaving or explicitly reopening cancels the old read immediately');
     h.pending.setting[1].success({ authSetting: { 'scope.userInfo': true } }); await turn();
     assert.equal(h.gate.getState().enabled, false);
-    assert.equal(h.gate.getState().status, action === 'close' ? 'idle' : 'privacy');
+    assert.equal(h.gate.getState().status, action === 'close' ? 'idle' : 'ready');
     h.gate.close(); await next;
   }
 });
@@ -338,9 +414,11 @@ test('later foreground checks can recover after a failed, cancelled or revoked p
   }
 });
 
-test('a newly opened authorization must finish again before the prior profile becomes eligible for read-only recovery', async () => {
+test('known revocation requires a new consent flow before an old profile becomes eligible for read-only recovery', async () => {
   for (const outcome of ['cancelled', 'privacy-denied', 'needs-profile', 'profile-error']) {
-    const h = await enabledSession(); h.gate.close(); const opening = h.gate.open();
+    const h = await enabledSession(); const revoked = h.gate.revalidate();
+    h.pending.setting[1].success({ authSetting: { 'scope.userInfo': false } }); await revoked;
+    h.gate.close(); const opening = h.gate.open();
     assert.equal(await h.gate.revalidate(), null);
     if (outcome === 'cancelled') h.gate.close();
     else if (outcome === 'privacy-denied') h.pending.privacy[1].fail({ errMsg: 'requirePrivacyAuthorize:fail disagree' });
@@ -350,6 +428,7 @@ test('a newly opened authorization must finish again before the prior profile be
     }
     await opening;
     const before = h.calls.length; assert.deepEqual(h.gate.getState().profile, profile, 'an old profile exists but does not grant permission');
+    assert.equal(h.gate.getState().canDisplay, false);
     assert.equal(await h.gate.revalidate(), null); assert.equal(h.calls.length, before);
     assert.equal(h.gate.getState().enabled, false); h.gate.close();
   }

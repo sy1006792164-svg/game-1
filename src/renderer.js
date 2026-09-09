@@ -1,5 +1,6 @@
 'use strict';
 const { C } = require('./theme');
+const { drawCourier } = require('./courier-art');
 const { CONTROL, drawButton } = require('./controls');
 const { drawUiIcon, UI_ICON } = require('./ui-icons');
 const { drawHome } = require('./home-view');
@@ -56,7 +57,8 @@ class Renderer {
   }
   panel(x, y, w, h, options) {
     const style = options || {}, radius = style.radius == null ? 16 : style.radius;
-    this.round(x, y + 3, w, h, radius, '#091f262e');
+    this.round(x + 1, y + 5, w - 2, h, radius, '#55745c0a');
+    this.round(x, y + 2, w, h, radius, '#55745c10');
     this.round(x, y, w, h, radius, style.fill || C.panel, style.stroke || C.line);
     if (style.accent) this.line([[x + 18, y + 1], [x + Math.min(w - 18, 66), y + 1]], style.accent, 1.5);
   }
@@ -71,7 +73,7 @@ class Renderer {
   }
   actionIcon(type, x, y, color) { drawUiIcon(this, type, x, y, color || C.green); }
   meter(x, y, w, value, target, color) {
-    this.round(x, y, w, 5, 2.5, '#18383a');
+    this.round(x, y, w, 5, 2.5, '#d4e1d6');
     const filled = Math.max(0, Math.min(1, value / Math.max(1, target))) * w;
     if (filled > 0) this.round(x, y, Math.max(5, filled), 5, 2.5, color || C.green);
   }
@@ -150,44 +152,7 @@ class Renderer {
     else drawUiIcon(this, type, 0, 0, color, UI_ICON.viewBox);
     c.restore();
   }
-  courier(x, y, size, ghost, pose) {
-    const c = this.ctx; c.save(); c.translate(x, y); c.scale(size / 40, size / 40);
-    pose = pose || {};
-    const stride = pose.stride || 0;
-    c.globalAlpha *= pose.alpha == null ? 1 : pose.alpha;
-    c.scale(pose.facing === -1 ? -1 : 1, 1);
-    if (ghost) {
-      this.circle(0, -2, 22, '#87dce416'); this.circle(0, -2, 15, '#87dce422');
-      this.round(-11, -20, 22, 29, 11, '#94dfdfb8', '#c5ffff');
-      this.circle(-4, -9, 1.6, '#244652'); this.circle(4, -9, 1.6, '#244652');
-      this.line([[-9, 10], [-5, 6], [0, 10], [5, 6], [9, 8]], '#dbffff', 2);
-      this.line([[-13, -17], [13, -17]], '#c0f0e9', 3);
-      this.line([[-6, -24], [8, -24]], '#97d8d1', 4);
-    }
-    else {
-      c.fillStyle = '#132c3040'; c.beginPath(); c.ellipse(1, 17, 14, 4, 0, 0, Math.PI * 2); c.fill();
-      this.line([[-5, 10], [-6 - stride * 3, 17 - stride * 2]], '#293b39', 5);
-      this.line([[5, 10], [6 + stride * 3, 17 + stride * 2]], '#293b39', 5);
-      this.line([[-7 - stride * 3, 18 - stride * 2], [-3 - stride * 3, 18 - stride * 2]], '#d6b77c', 3);
-      this.line([[5 + stride * 3, 18 + stride * 2], [9 + stride * 3, 18 + stride * 2]], '#d6b77c', 3);
-      this.round(-12, -3, 24, 18, 7, '#ba6a43');
-      this.round(-10, -3, 15, 16, 6, '#efac62');
-      this.round(-9, -20, 18, 20, 8, '#e9b881');
-      this.round(-8, -20, 14, 16, 6, '#ffe2af');
-      this.round(-14, -22, 29, 7, 4, '#2c6558');
-      this.round(-9, -29, 20, 11, 5, '#427d61');
-      this.line([[-6, -27], [6, -27]], '#77a17a', 1.5);
-      this.circle(5, -21, 2, C.gold);
-      this.circle(-2, -10, 1.3, '#293b39'); this.circle(5, -10, 1.3, '#293b39');
-      this.line([[-9, -1], [-18, -5 + stride * 2], [-23, -1 + stride * 3]], '#bb6248', 5);
-      this.line([[-7, 0], [8, 12]], '#5b4938', 2.5);
-      this.round(5, 4, 12, 11, 3, '#91643b'); this.round(5, 3, 12, 4, 2, '#e0b56b');
-      this.circle(11, 8, 1, '#ffe2ac');
-      this.line([[10, 1], [15, -2 - stride * 2]], '#efac62', 4);
-      this.icon('letter', 18, -5 - stride * 2, 13, '#fff3cd');
-    }
-    c.restore();
-  }
+  courier(x, y, size, ghost, pose) { drawCourier(this, x, y, size, ghost, pose); }
   postmark(x, y, radius, label, color) {
     this.circle(x, y, radius, null, color || C.muted); this.circle(x, y, radius - 5, null, color || C.muted);
     this.text('风 · 邮', x, y - 7, 10, color || C.muted, 'center'); this.text(label, x, y + 9, 10, color || C.muted, 'center');
@@ -195,12 +160,13 @@ class Renderer {
   header(title, subtitle, back) {
     this.button('', 16, 10, 44, CONTROL.compactHeight, back, { style: 'quiet', icon: 'back' });
     this.label(title, 69, 29, 291, 19, C.ink, 'left', '600'); this.label(subtitle, 69, 53, 291, 10, C.muted);
-    this.line([[24, 77], [366, 77]], '#345254', .7);
+    this.line([[24, 77], [366, 77]], C.line, .7);
   }
   scrim(color) {
+    const bounds = this.viewport || { x: -this.ox / this.scale, y: -this.oy / this.scale,
+      w: 390 + this.ox * 2 / this.scale, h: this.H + (this.oy + this.safeBottom) / this.scale };
     this.ctx.fillStyle = color;
-    this.ctx.fillRect(-this.ox / this.scale, -this.oy / this.scale,
-      390 + this.ox * 2 / this.scale, this.H + (this.oy + this.safeBottom) / this.scale);
+    this.ctx.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
   }
   draw(game, now, metrics) {
     const c = this.ctx; const ratio = metrics.pixelRatio || 1;
@@ -209,15 +175,18 @@ class Renderer {
     const available = metrics.height - safeTop - safeBottom;
     this.scale = Math.min(metrics.width / 390, available / 700);
     this.H = available / this.scale; this.ox = (metrics.width - 390 * this.scale) / 2; this.oy = safeTop;
-    c.setTransform(ratio, 0, 0, ratio, 0, 0); c.fillStyle = C.paper; c.fillRect(0, 0, metrics.width, metrics.height);
+    // Content keeps its safe-area origin; scenery and scrims share the full canvas bounds.
+    this.viewport = { x: -this.ox / this.scale, y: -safeTop / this.scale,
+      w: metrics.width / this.scale, h: metrics.height / this.scale };
+    c.setTransform(ratio, 0, 0, ratio, 0, 0);
     c.translate(this.ox, this.oy); c.scale(this.scale, this.scale);
     this.hits = []; this.boardRect = null; this.boardProjection = null; this.collectionRect = null; this.levelRect = null; this.pointer = game.modal ? null : game.pointer;
     this.now = now;
     this.reducedMotion = false;
     c.save();
     drawBackdrop(this, now, game.page === 'game' && game.level ? game.level.chapter || 0 : 0, { reducedMotion: this.reducedMotion });
-    c.globalAlpha = game.page === 'game' ? .1 : game.page === 'home' ? .25 : .72;
-    c.fillStyle = C.paper; c.fillRect(0, 0, 390, this.H);
+    c.globalAlpha = game.page === 'game' ? .08 : game.page === 'home' ? .02 : .87;
+    this.scrim(C.paper);
     c.restore();
     if (game.page === 'game') this.game(game, now);
     else if (game.page === 'levels') this.levels(game);

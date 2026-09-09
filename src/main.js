@@ -12,10 +12,11 @@ const { CAMPAIGN } = require('./levels');
 const { getAlbum } = require('./stamp-album');
 const { ListScroll } = require('./list-scroll');
 const { levelListLayout, levelProgressOffset } = require('./level-view');
+const { leaderboardRect } = require('./leaderboard-view');
 const { developmentLevelNumber } = require('./developer-view');
 const { Renderer } = require('./renderer');
 const { MOVE_MS } = require('./motion');
-const { SceneCamera } = require('./camera');
+const { SceneCamera, INTRO_MS, SHAKE_MS } = require('./camera');
 const { insideRect } = require('./board-projection');
 const { playHint, canGuide, autoGuide, guideStep } = require('./play-guide');
 const { createSound } = require('./sound');
@@ -35,13 +36,14 @@ class Game {
     this.rankingProfile = null; this.friendResumeRevision = 0;
     const rankingAllowed = () => !this.hidden && !!this.rankingAuthorization && this.rankingAuthorization.getState().enabled;
     this.friendLeaderboard = createFriendLeaderboard(platform, config,
-      { canSync: rankingAllowed, canShow: rankingAllowed });
+      { canSync: rankingAllowed, canShow: rankingAllowed,
+        canPreview: () => !this.hidden && !!this.rankingAuthorization && this.rankingAuthorization.getState().canDisplay });
     this.rankingAuthorization = createRankingAuthorization(platform, {
-      onProfile: profile => { this.rankingProfile = profile; return true; },
-      onReady: () => {
+      onProfile: profile => { this.rankingProfile = profile; this.syncFriendScore(); return true; },
+      onReady: result => {
         if (this.hidden || this.page !== 'leaderboard') return;
         // Recheck friend permission before a changed profile can dispatch a score.
-        this.openFriendLeaderboard({ automatic: true });
+        this.openFriendLeaderboard({ automatic: true, checked: result && result.authSetting });
       }
     });
     this.ads = createAds(platform, config, active => {
@@ -59,11 +61,22 @@ class Game {
     this.toastText = ''; this.toastUntil = 0; this.transitionAt = 0; this.motionPath = null;
     this.busy = false; this.hidden = false; this.lastFrame = 0; this.pointer = null; this.pendingAction = null; this.blockedAt = null;
     this.metrics = platform.resize();
-    platform.onResize(() => { this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.metrics = platform.resize(); this.lastFrame = -Infinity; });
+    platform.onResize(() => { this.cancelRankingPointer(); this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.metrics = platform.resize(); this.lastFrame = -Infinity; });
     platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor, pan) => this.zoomScene(x, y, factor, pan), (x, y, delta) => this.scrollList(x, y, delta));
     platform.onKey(key => {
       this.unlockAudio();
       if (this.development && this.modal && this.modal.kind === 'developer-level') { this.developmentKey(key); return; }
+      if (this.rankingInteractive()) {
+        const delta = { ArrowUp: -100, ArrowDown: 100, PageUp: -340, PageDown: 340, ' ': 340 }[key];
+        if (key === 'Home' || key === 'End') {
+          if (this.pointer && this.pointer.ranking) this.cancelRankingPointer();
+          this.friendLeaderboard.scroll(key === 'Home' ? 'start' : 'end', this.platform.now()); return;
+        }
+        if (delta) {
+          if (this.pointer && this.pointer.ranking) this.cancelRankingPointer();
+          this.friendLeaderboard.wheel(delta, this.platform.now()); return;
+        }
+      }
       const scroll = this.listScroll();
       if (scroll && !this.modal && !this.busy) {
         const delta = { ArrowUp: -100, ArrowDown: 100, PageUp: -340, PageDown: 340, ' ': 340 }[key];
@@ -80,6 +93,8 @@ class Game {
     });
     platform.onHide(() => {
       this.friendResumeRevision++;
+      this.cancelRankingPointer();
+      this.friendLeaderboard.suspend();
       this.rankingAuthorization.hide();
       this.hidden = true; this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.persist();
       this.sound.suspend('hidden'); this.syncMusic();
@@ -92,10 +107,12 @@ class Game {
       this.hidden = false;
       if (this.page === 'leaderboard') this.rankingAuthorization.show();
       const token = ++this.friendResumeRevision;
-      this.rankingAuthorization.revalidate().then(settings => {
+      const checking = this.rankingAuthorization.revalidate();
+      if (this.page === 'leaderboard') this.previewRanking();
+      checking.then(settings => {
         if (token !== this.friendResumeRevision || this.hidden) return;
         if (!settings) {
-          if (this.rankingAuthorization.getState().status === 'error') this.friendLeaderboard.revalidate(null);
+          if (!this.rankingAuthorization.getState().canDisplay) this.friendLeaderboard.revalidate(null);
           return;
         }
         if (!this.rankingAuthorization.getState().enabled) { this.friendLeaderboard.revalidate(null); return; }
@@ -108,6 +125,7 @@ class Game {
       if (this.frameId == null) this.loop();
     });
     if (platform.onMemoryWarning) platform.onMemoryWarning(() => {
+      this.cancelRankingPointer();
       this.stopListScrolling();
       this.pointer = null; this.pendingAction = null;
       this.renderer.clearCaches(); this.sound.release();
@@ -225,6 +243,7 @@ class Game {
     else this.store.flush();
   }
   restore() {
+    this.cancelRankingPointer();
     this.pendingAction = null; this.blockedAt = null;
     const run = this.store.loadRun();
     if (!run) return false;
@@ -258,6 +277,7 @@ class Game {
   }
   start(level, mode = 'campaign') {
     if (this.busy || mode !== 'campaign') return;
+    this.cancelRankingPointer();
     const keepGuide = this.guideEnabled && this.level === level && this.state && this.state.status !== 'won';
     this.stopListScrolling(); this.pointer = null;
     this.pendingAction = null; this.blockedAt = null;
@@ -347,7 +367,7 @@ class Game {
       kind: 'win', title: '信已送达', stars: rating,
       lines,
       buttons: [
-        { text: next ? '下一封信' : '返回邮局', primary: true, icon: next ? 'letter' : 'home', action: () => next ? this.start(next, this.mode) : this.home() },
+        { text: next ? '下一封信' : '返回邮局', primary: true, action: () => next ? this.start(next, this.mode) : this.home() },
         { text: '再走一次', textOnly: true, icon: 'restart', action: () => this.start(this.level, this.mode) },
         ...(rewards.length ? [{ text: '看看邮票册', textOnly: true, icon: 'stamp', action: () => this.openPage('collection') }] : [])
       ]
@@ -377,7 +397,7 @@ class Game {
         ...(canRevive ? [{ text: '看视频续灯 +' + Math.max(8, Math.ceil(this.level.budget * .5)) + ' 拍 · 接着送', primary: true, icon: 'lamp', action: () => this.requestRevive() }] : []),
         { text: '重新规划 · 免费再试', primary: !canRevive, icon: 'restart', action: () => this.start(this.level, this.mode) },
         { text: '看看刚才的路线', icon: 'route', action: () => { this.modal = null; this.reviewing = true; } },
-        { text: '返回邮局', textOnly: true, icon: 'home', action: () => this.home() }
+        { text: '返回邮局', textOnly: true, action: () => this.home() }
       ]
     };
   }
@@ -419,15 +439,16 @@ class Game {
     if (!this.state || this.state.status !== 'playing') return;
     const saveLine = this.store.getStatus().persisted ? '路线已自动保存，没有倒计时。' : '没有倒计时。路线仅在本次运行保留。';
     this.modal = { kind: 'pause', title: '歇一会', lines: [saveLine], buttons: [
-      { text: '继续投递', primary: true, icon: 'play', action: () => { this.modal = null; this.syncMusic(); } },
+      { text: '继续投递', primary: true, action: () => { this.modal = null; this.syncMusic(); } },
       { text: '重新开始', icon: 'restart', action: () => this.start(this.level, this.mode) },
       ...(canGuide(this.level, this.mode) ? [{ text: '操作引导', textOnly: true, icon: 'route', action: () => this.showGuide() }] : []),
       { text: '玩法说明', textOnly: true, icon: 'book', action: () => this.help() },
-      { text: '返回邮局', textOnly: true, icon: 'home', action: () => this.home() }
+      { text: '返回邮局', textOnly: true, action: () => this.home() }
     ] };
     this.sound.stop(); this.musicActive = false;
   }
   help() {
+    this.cancelRankingPointer();
     this.pendingAction = null;
     const old = this.modal, l = this.page === 'game' ? this.level : null;
     const lines = ['点相邻亮格移动，点脚下格或“等一拍”等待。', '你收橙色信笺，晚三拍的回声收蓝色邮票。', '全部收齐后，走到邮局即可过关。'];
@@ -440,9 +461,9 @@ class Game {
     if (l && l.lights.length) lines.push('每盏风灯只补一次，共 3 拍。');
     if (l && (l.bridges || []).length) lines.push('纸桥离开后就碎，回声可以通过。');
     this.modal = { kind: 'help', title: '和回声一起送信', lines,
-      buttons: [{ text: '明白了', primary: true, icon: 'check', action: () => { this.modal = old; } }] };
+      buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
   }
-  home() { if (this.busy) return; this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
+  home() { if (this.busy) return; this.cancelRankingPointer(); this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
   openGameCircle() {
     if (!this.gameCircle.available || this.page !== 'home' || this.busy || this.hidden || this.modal) return;
     this.cue('tap');
@@ -450,28 +471,59 @@ class Game {
   }
   openPage(page) {
     if (this.busy || !['home', 'levels', 'collection', 'leaderboard'].includes(page)) return;
+    this.cancelRankingPointer();
     this.rankingAuthorization.close();
     this.friendLeaderboard.close();
     this.pendingAction = null; this.persist(); this.page = page; this.modal = null; this.reviewing = false; this.pointer = null; this.stopListScrolling();
     if (page === 'levels') this.scrollToProgress();
     if (page === 'collection') this.collectionScroll.reset(this.platform.now());
-    if (page === 'leaderboard') this.rankingAuthorization.open();
+    if (page === 'leaderboard') {
+      this.rankingAuthorization.open().then(() => {
+        const state = this.rankingAuthorization.getState();
+        if (this.page === 'leaderboard' && !this.hidden && !state.enabled && !state.canDisplay) this.friendLeaderboard.revalidate(null);
+      });
+      this.previewRanking();
+    }
     this.cue('tap');
   }
   syncFriendScore() {
     if (this.hidden || !this.rankingAuthorization.getState().enabled) return;
     return this.friendLeaderboard.submit(campaignScore(this.profile(), this.rankingProfile));
   }
+  previewRanking() {
+    if (!this.rankingAuthorization.getState().canDisplay) return false;
+    return this.friendLeaderboard.preview({ width: 354, height: leaderboardRect(this.renderer.H).h,
+      pixelRatio: Math.min(2, (this.metrics.pixelRatio || 1) * this.renderer.scale) });
+  }
   openFriendLeaderboard(options) {
     if (this.hidden || !this.rankingAuthorization.getState().enabled) return;
     // openSetting must originate from the visible "去授权" button itself.
-    if (options && options.automatic && this.friendLeaderboard.getState().status === 'denied') return;
-    const opening = this.friendLeaderboard.open({ width: 354, height: Math.max(200, this.renderer.H - 242), pixelRatio: Math.min(2, (this.metrics.pixelRatio || 1) * this.renderer.scale) });
+    if (options && options.automatic && this.friendLeaderboard.getState().status === 'denied' &&
+      !(options.checked && options.checked['scope.WxFriendInteraction'] === true)) return;
+    this.cancelRankingPointer();
+    const rect = leaderboardRect(this.renderer.H);
+    const opening = this.friendLeaderboard.open({ width: rect.w, height: rect.h, pixelRatio: Math.min(2, (this.metrics.pixelRatio || 1) * this.renderer.scale) }, options && options.checked);
     this.syncFriendScore();
     return opening;
   }
   listScroll() { return this.page === 'collection' ? this.collectionScroll : this.page === 'levels' ? this.levelScroll : null; }
   listRect() { return this.page === 'collection' ? this.renderer.collectionRect : this.page === 'levels' ? this.renderer.levelRect : null; }
+  rankingInteractive() {
+    return this.page === 'leaderboard' && !this.hidden && !this.modal && !this.busy &&
+      (this.rankingAuthorization.getState().enabled && this.friendLeaderboard.getState().status === 'ready' ||
+        this.rankingAuthorization.getState().canDisplay && this.friendLeaderboard.getState().status === 'preview');
+  }
+  cancelRankingPointer() {
+    const pointer = this.pointer;
+    if (pointer && pointer.ranking) this.pointer = null;
+    // A cancellation also stops the child's inertia/landing when a modal,
+    // pinch, resize or lifecycle event takes over without an active finger.
+    if (this.page === 'leaderboard' || pointer && pointer.ranking) {
+      const rect = pointer && pointer.ranking || leaderboardRect(this.renderer.H);
+      this.friendLeaderboard.pointer('cancel', pointer && pointer.ranking ? pointer.lastX - rect.x : 0,
+        pointer && pointer.ranking ? pointer.lastY - rect.y : 0, this.platform.now());
+    }
+  }
   stopListScrolling() { this.collectionScroll.stop(); this.levelScroll.stop(); }
   scrollToProgress() {
     if (this.page !== 'levels') return;
@@ -482,6 +534,12 @@ class Game {
     scroll.activeAt = now;
   }
   scrollList(x, y, delta) {
+    if (this.rankingInteractive()) {
+      const p = this.renderer.toLogical(x, y), rect = leaderboardRect(this.renderer.H);
+      if (!insideRect(rect, p.x, p.y)) return false;
+      if (this.pointer && this.pointer.ranking) this.cancelRankingPointer();
+      return this.friendLeaderboard.wheel(delta / this.renderer.scale, this.platform.now());
+    }
     const scroll = this.listScroll();
     if (!scroll || this.modal || this.busy || this.hidden) return false;
     const p = this.renderer.toLogical(x, y), rect = this.listRect();
@@ -490,6 +548,7 @@ class Game {
     return true;
   }
   zoomScene(x, y, factor, pan = { dx: 0, dy: 0 }) {
+    this.cancelRankingPointer();
     if (this.page !== 'game' || this.modal || this.busy || this.hidden) return;
     const p = this.renderer.toLogical(x, y), b = this.renderer.boardRect;
     if (!b || !insideRect(b, p.x, p.y)) return;
@@ -499,10 +558,27 @@ class Game {
     this.cameraMovedAt = this.platform.now();
   }
   pointerEvent(x, y, type) {
-    if (this.hidden) return;
+    if (this.hidden) { this.cancelRankingPointer(); return; }
     const p = this.renderer.toLogical(x, y);
+    if (type === 'cancel') { this.cancelRankingPointer(); this.pointer = null; this.pendingAction = null; this.stopListScrolling(); return; }
+    if (type !== 'start' && this.pointer && this.pointer.ranking) {
+      if (!this.rankingInteractive()) { this.cancelRankingPointer(); return; }
+      const origin = this.pointer, rect = origin.ranking;
+      origin.lastX = p.x; origin.lastY = p.y;
+      this.friendLeaderboard.pointer(type, p.x - rect.x, p.y - rect.y, this.platform.now());
+      if (type === 'end') this.pointer = null;
+      return;
+    }
     if (type === 'start') {
       this.unlockAudio();
+      if (this.pointer && this.pointer.ranking) this.cancelRankingPointer();
+      const ranking = this.rankingInteractive() && leaderboardRect(this.renderer.H);
+      if (ranking && insideRect(ranking, p.x, p.y)) {
+        this.pointer = null;
+        if (this.friendLeaderboard.pointer('start', p.x - ranking.x, p.y - ranking.y, this.platform.now()))
+          this.pointer = { ...p, lastX: p.x, lastY: p.y, ranking };
+        return;
+      }
       const b = this.renderer.boardRect;
       const rect = this.listRect(), scroll = this.listScroll();
       const list = scroll && !this.modal && !this.busy && rect && insideRect(rect, p.x, p.y) ? this.page : null;
@@ -511,7 +587,6 @@ class Game {
         scene: this.page === 'game' && !this.modal && !this.busy && !this.hidden && b && insideRect(b, p.x, p.y) };
       return;
     }
-    if (type === 'cancel') { this.pointer = null; this.pendingAction = null; this.stopListScrolling(); return; }
     if (this.pointer && this.pointer.list && (type === 'move' || type === 'end')) {
       if (this.page !== this.pointer.list || this.modal || this.busy) { this.pointer = null; this.stopListScrolling(); return; }
       const scroll = this.listScroll();
@@ -540,13 +615,17 @@ class Game {
     const hit = this.renderer.hits.slice().reverse().find(h => inside(h, p) && inside(h, origin));
     if (hit) {
       const cues = this.cueCount;
-      hit.action();
+      hit.action(p, origin);
       if (!origin.scene && cues === this.cueCount) this.cue('tap');
       this.syncMusic();
     } else if (origin.scene) this.guideMisstep();
   }
   loop() {
     if (this.hidden) return;
+    if (this.page === 'leaderboard' && !this.rankingAuthorization.getState().canDisplay &&
+        !this.rankingAuthorization.getState().enabled && ['ready', 'preview'].includes(this.friendLeaderboard.getState().status))
+      this.friendLeaderboard.revalidate(null);
+    if (this.pointer && this.pointer.ranking && !this.rankingInteractive()) this.cancelRankingPointer();
     const now = this.platform.now();
     this.syncMusic();
     if (this.pendingAction && now - this.transitionAt >= MOVE_MS) {
@@ -554,9 +633,13 @@ class Game {
       if (now - pending.at <= 500) this.act(pending.action);
     }
     const smoothList = !!this.listScroll() && !this.modal;
-    if (this.platform.setFrameRate) this.platform.setFrameRate(smoothList ? 60 : 30);
-    // Every native list RAF is visible, including frames arriving slightly before 16 ms.
-    const frameInterval = this.platform.kind === 'wechat' ? smoothList ? 0 : 1000 / 30 : 16;
+    const smoothScene = this.page === 'game' && !this.modal && (
+      now - this.transitionAt < MOVE_MS || now - this.camera.enteredAt < INTRO_MS ||
+      now - this.camera.shakeAt < SHAKE_MS || now - this.cameraMovedAt < 250 || !!this.pointer);
+    const smooth = smoothList || smoothScene || this.rankingInteractive();
+    if (this.platform.setFrameRate) this.platform.setFrameRate(smooth ? 60 : 30);
+    // Use every native RAF during a gesture or movement; quiet scenes return to 30 FPS.
+    const frameInterval = this.platform.kind === 'wechat' ? smooth ? 0 : 1000 / 30 : 16;
     if (now - this.lastFrame >= frameInterval - .5) { this.renderer.draw(this, now, this.metrics); this.lastFrame = now; }
     this.frameId = this.platform.raf(() => this.loop());
   }

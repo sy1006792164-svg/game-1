@@ -1,0 +1,59 @@
+'use strict';
+
+// The same tiny sculpted courier lives in the title scene and every real route.
+function drawCourier(r, x, y, size, ghost, pose = {}) {
+  const c = r.ctx, stride = pose.stride || 0;
+  const oval = (cx, cy, rx, ry, color) => {
+    c.beginPath(); c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); c.fillStyle = color; c.fill();
+  };
+  c.save(); c.translate(x, y); c.scale(size / 40 * (pose.facing === -1 ? -1 : 1), size / 40);
+  c.globalAlpha *= pose.alpha == null ? 1 : pose.alpha;
+  if (ghost) {
+    oval(0, 12, 13, 4, '#45949b18');
+    oval(0, -5, 19, 24, '#81c4c81c');
+    c.beginPath(); c.moveTo(-11, 10); c.lineTo(-11, -11);
+    c.bezierCurveTo(-11, -27, 12, -27, 12, -11); c.lineTo(12, 10);
+    c.quadraticCurveTo(8, 5, 5, 11); c.quadraticCurveTo(1, 5, -2, 11);
+    c.quadraticCurveTo(-6, 6, -11, 10); c.closePath();
+    c.fillStyle = '#8bcacecf'; c.fill(); c.strokeStyle = '#ecfffa'; c.lineWidth = 1.3; c.stroke();
+    r.round(-7, -16, 14, 16, 7, '#d7f7eb88');
+    r.circle(-3, -8, 1.25, '#2b727c'); r.circle(4, -8, 1.25, '#2b727c');
+    oval(0, -19, 14, 3, '#68abb6'); r.round(-8, -27, 17, 8, 4, '#8ecbd0');
+    r.line([[-5, -25], [5, -25]], '#e9fff4', 1);
+  } else {
+    oval(2, 18, 14, 4, '#3c615326');
+    r.line([[-5, 9], [-6 - stride * 3, 16 - stride * 2]], '#42645c', 4.5);
+    r.line([[5, 9], [6 + stride * 3, 16 + stride * 2]], '#2e504b', 4.5);
+    r.round(-9 - stride * 3, 15 - stride * 2, 8, 4, 2, '#785c46');
+    r.round(3 + stride * 3, 15 + stride * 2, 9, 4, 2, '#785c46');
+    // A round cape, lit from the upper left; side plane and hem give volume.
+    c.beginPath(); c.moveTo(-7, -5); c.quadraticCurveTo(-13, -1, -15, 10);
+    c.quadraticCurveTo(-1, 19, 14, 10); c.quadraticCurveTo(12, 0, 7, -5); c.closePath();
+    c.fillStyle = '#dd9c68'; c.fill();
+    c.beginPath(); c.moveTo(3, -4); c.quadraticCurveTo(8, 3, 9, 13);
+    c.quadraticCurveTo(13, 12, 14, 10); c.quadraticCurveTo(12, 0, 7, -5); c.closePath();
+    c.fillStyle = '#ba7958'; c.fill();
+    r.line([[-11, 10], [-2, 13], [6, 12]], '#f7ce91', 1);
+    r.round(-8, -22, 18, 21, 9, '#d99f75');
+    r.round(-8, -22, 16, 18, 8, '#ffdeaf');
+    oval(-5, -11, 2.5, 1.1, '#edb997');
+    r.circle(-2, -12, 1.1, '#3d5147'); r.circle(5, -12, 1.1, '#3d5147');
+    r.line([[0, -6], [3, -6]], '#b5775c', .7);
+    // Curved brim, raised crown and a small brass post insignia.
+    oval(0, -22, 16, 4.4, '#2b6157');
+    r.round(-10, -33, 21, 12, 6, '#548775');
+    r.round(-10, -33, 14, 10, 5, '#76a08a');
+    r.line([[-8, -24], [9, -24]], '#b8c99c', 2);
+    oval(1, -22, 14, 2.4, '#478370');
+    r.circle(6, -27, 1.8, '#f6d99c');
+    r.line([[-8, -2], [-16, -4 + stride * 2], [-23, -1 + stride * 3]], '#bd715b', 4);
+    r.line([[-6, -1], [8, 10]], '#806443', 2.2);
+    r.round(5, 3, 12, 11, 3, '#8d694b');
+    r.round(5, 3, 12, 5, 2.5, '#bc9064'); r.circle(11, 8, 1.1, '#efd6a3');
+    r.line([[10, 0], [15, -3 - stride * 2]], '#e0a777', 4);
+    r.icon('letter', 18, -6 - stride * 2, 12, '#fff6dc');
+  }
+  c.restore();
+}
+
+module.exports = { drawCourier };

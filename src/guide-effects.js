@@ -41,7 +41,7 @@ function tapGesture(r, x, y, now, color) {
   c.bezierCurveTo(26, 38, 20, 43, 12, 43); c.lineTo(9, 43);
   c.bezierCurveTo(2, 43, -1, 38, -5, 33); c.lineTo(-14, 22);
   c.bezierCurveTo(-17, 17, -12, 13, -8, 17); c.closePath();
-  c.fillStyle = '#fff3d7'; c.fill(); c.strokeStyle = '#17383a'; c.lineWidth = 3; c.stroke();
+  c.fillStyle = '#fff6df'; c.fill(); c.strokeStyle = '#6b7965'; c.lineWidth = 3; c.stroke();
   r.line([[2, 28], [16, 31]], '#dab478', 2);
   c.restore();
 }
@@ -54,20 +54,21 @@ function drawFocus(r, visual, p, rect, now, onTap) {
   if (!onScreen) {
     const edgeX = clamp(x, rect.x + 22, rect.x + rect.w - 22);
     const edgeY = clamp(y, rect.y + 22, rect.y + rect.h - 22);
-    r.circle(edgeX, edgeY, 17, C.dark, color);
+    r.circle(edgeX, edgeY, 17, C.white, color);
     c.save(); c.translate(edgeX, edgeY); c.rotate(Math.atan2(y - edgeY, x - edgeX));
     r.icon('arrow-right', 0, 0, 22, color); c.restore();
     return null;
   }
   const radius = clamp(p.halfW * 1.35, 38, 68), pulse = r.reducedMotion ? .5 : (Math.sin(now / 320) + 1) / 2;
-  // Opposite winding leaves the target lit while the surrounding board dims.
-  c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h);
-  c.moveTo(x + radius, y); c.arc(x, y, radius, 0, Math.PI * 2, true);
-  c.fillStyle = '#071d254d'; c.fill();
+  // A local glow keeps the target clear without masking the surrounding world.
+  c.save(); c.globalAlpha *= .16;
+  r.circle(x, y, radius + 7, C.white);
+  r.circle(x, y, radius - 5, '#fff1c8');
+  c.restore();
   r.circle(x, y, radius - 3 + pulse * 3, null, color);
   const arrowBaseY = y - radius - 13, arrowTravel = 7;
   const arrowY = clamp(arrowBaseY - pulse * arrowTravel, rect.y + 17, rect.y + rect.h - 17);
-  r.circle(x, arrowY, 15, C.dark, color);
+  r.circle(x, arrowY, 15, C.white, color);
   r.icon('arrow-down', x, arrowY, 22, color);
   const canTap = visual.tapCell === focus.cell;
   if (canTap) tapGesture(r, x, y, now, color);
@@ -83,8 +84,8 @@ function drawFocus(r, visual, p, rect, now, onTap) {
     const badge = [y + radius + 7, boundsTop - h - 5]
       .map(top => ({ x: left, y: top, w, h })).find(box => fits(box, rect) && !overlaps(box, actor));
     if (badge) {
-      r.panel(badge.x, badge.y, w, h, { fill: '#17383a', stroke: color, radius: 8 });
-      r.label(label, badge.x + w / 2, badge.y + h / 2, w - 16, 11, C.white, 'center', '600');
+      r.panel(badge.x, badge.y, w, h, { fill: '#fffaf0', stroke: color, radius: 8 });
+      r.label(label, badge.x + w / 2, badge.y + h / 2, w - 16, 11, C.ink, 'center', '600');
       r.hit(badge.x, badge.y, w, h, onTap);
       const right = Math.max(bounds.x + bounds.w, badge.x + w), bottom = Math.max(bounds.y + bounds.h, badge.y + h);
       bounds.x = Math.min(bounds.x, badge.x); bounds.w = right - bounds.x;
@@ -101,8 +102,8 @@ function drawPlayerLabel(r, visual, p, rect, focusBounds) {
     .map(x => ({ x, y: actor.y + actor.h * .4, w: 26, h: 20 }))
     .find(box => fits(box, rect) && !overlaps(box, focusBounds));
   if (!badge) return null;
-  r.round(badge.x, badge.y, badge.w, badge.h, 7, C.dark, C.gold);
-  r.text('你', badge.x + badge.w / 2, badge.y + badge.h / 2, 11, C.gold, 'center', '600');
+  r.round(badge.x, badge.y, badge.w, badge.h, 7, '#fff3da', C.gold);
+  r.text('你', badge.x + badge.w / 2, badge.y + badge.h / 2, 11, C.ink, 'center', '600');
   return badge;
 }
 
@@ -120,11 +121,11 @@ function drawEchoCountdown(r, echo, p, rect, occupied) {
   // The card always shows the countdown; omit the floating copy if space is tight.
   if (!badge) return;
   r.line([[x, y], [badge.x + w / 2, badge.y + h / 2]], C.blue, 1.6, [3, 3]);
-  r.panel(badge.x, badge.y, w, h, { fill: '#16383f', stroke: C.blue, radius: 10 });
+  r.panel(badge.x, badge.y, w, h, { fill: '#edf8f0', stroke: '#80b2ad', radius: 10 });
   r.icon('echo', badge.x + 16, badge.y + 15, 18, C.blue);
-  r.text(echo.turns + ' 次', badge.x + 44, badge.y + 14, 13, C.white, 'center', '600');
+  r.text(echo.turns + ' 次', badge.x + 44, badge.y + 14, 13, C.ink, 'center', '600');
   for (let index = 0; index < 3; index++) {
-    r.circle(badge.x + 25 + index * 11, badge.y + 28, 2.7, index < 3 - echo.turns ? C.blue : C.dark, C.blue);
+    r.circle(badge.x + 25 + index * 11, badge.y + 28, 2.7, index < 3 - echo.turns ? C.blue : '#dbe9e0', C.blue);
   }
 }
 

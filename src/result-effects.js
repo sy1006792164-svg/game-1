@@ -34,8 +34,8 @@ function drawDelivery(r, x, y, age) {
   if (seal) {
     c.save(); c.globalAlpha *= seal;
     const radius = 10 * (.6 + seal * .4);
-    r.circle(x + 22, y + 19, radius, C.green, C.dark);
-    r.icon('check', x + 22, y + 19, radius * 1.3, C.dark);
+    r.circle(x + 22, y + 19, radius, C.green, C.white);
+    r.icon('check', x + 22, y + 19, radius * 1.3, C.white);
     c.restore();
   }
 }
@@ -49,7 +49,7 @@ function drawFadingLamp(r, x, y, age) {
   }
   c.save(); c.translate(x, y);
   c.rotate(Math.sin(progress * Math.PI * 2) * (1 - progress) * .07);
-  r.icon('lamp', 0, 0, 34, '#78908b');
+  r.icon('lamp', 0, 0, 34, '#91a08d');
   if (light) {
     c.save(); c.globalAlpha *= light;
     r.icon('lamp', 0, 0, 34, C.gold);
@@ -74,8 +74,12 @@ function drawResultHeader(r, kind, ui, age) {
   c.save();
   // Decoration stays in the existing emblem area, above every title and button.
   c.beginPath(); c.rect(ui.x + 8, ui.y + 8, ui.w - 16, 82); c.clip();
-  r.circle(x, y, 28, won ? '#d1b97112' : '#80cdd70c', won ? '#8f8a60' : '#537276');
-  r.circle(x, y, 22, won ? '#35554e' : '#29474b');
+  r.circle(x, y, 31, won ? '#f5e9ca' : '#edeade', won ? '#c1ac72' : '#c1c6b4');
+  r.circle(x, y, 25, won ? '#fff8e4' : '#f9f8ee', won ? '#ddc994' : '#d9dccc');
+  for (let index = 0; index < 16; index++) {
+    const angle = index * Math.PI / 8;
+    r.circle(x + Math.cos(angle) * 28, y + Math.sin(angle) * 28, .75, won ? '#ba9a5f' : '#a7b39d');
+  }
   if (won) drawDelivery(r, x, y, elapsed);
   else drawFadingLamp(r, x, y, elapsed);
   c.restore();

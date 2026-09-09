@@ -2,55 +2,129 @@
 
 const { C } = require('./theme');
 
-function drawFriends(r, game) {
-  const friend = game.friendLeaderboard, state = friend.getState();
-  const box = { x: 18, y: 120, w: 354, h: Math.max(200, r.H - 242) };
-  r.text(game.development ? '开发好友榜 · 测试成绩单独保存' : '和微信好友一起收集星光', 23, 103, 11, C.muted);
-  if (state.status === 'ready') {
-    friend.resize({ width: box.w, height: box.h, pixelRatio: Math.min(2, (game.metrics.pixelRatio || 1) * r.scale) });
-    friend.draw(r.ctx, box.x, box.y, box.w, box.h);
-    r.button('上一页', 20, r.H - 105, 105, 42, () => friend.page(-1), { style: 'quiet' });
-    r.button('刷新', 143, r.H - 105, 104, 42, () => { game.syncFriendScore(); friend.refresh(); }, { style: 'quiet' });
-    r.button('下一页', 265, r.H - 105, 105, 42, () => friend.page(1), { style: 'quiet' });
-  } else {
-    r.panel(box.x, box.y, box.w, box.h, { fill: C.panel, stroke: C.line, radius: 12 });
-    r.text('好友排行榜', 195, box.y + 70, 20, C.ink, 'center', '600');
-    const lines = r.wrapLines(state.message || '允许好友互动后，查看彼此的通关成绩', 298, 12);
-    lines.forEach((line, index) => r.text(line, 195, box.y + 110 + index * 22, 12, C.muted, 'center'));
-    if (!['unavailable', 'authorizing'].includes(state.status)) {
-      r.button(state.status === 'denied' ? '去授权' : '查看好友榜', 92, box.y + 190, 206, 48, () => game.openFriendLeaderboard(), { style: 'primary', icon: 'community' });
-    }
+function drawIntro(r, game) {
+  r.header('好友排行', '总星数优先 · 同星比较通关与步数', () => game.home());
+  r.text('把沿途的星光，收进这封来信', 24, 102, 12, C.muted);
+  if (game.development) {
+    r.round(286, 91, 80, 22, 11, C.soft);
+    r.text('开发测试榜', 326, 102, 10, C.green, 'center');
   }
-  r.label(state.syncMessage || '仅展示已上传成绩的好友 · 微信内可用', 195, r.H - 39, 350, 10, state.syncStatus === 'error' ? C.gold : C.muted, 'center');
 }
 
-function drawLeaderboard(r, game) {
-  r.header('好友排行榜', '总星数 → 通关数 → 更少步数', () => game.home());
-  const auth = game.rankingAuthorization, state = auth.getState();
-  if (!state.enabled) {
-    const top = 140, buttonY = top + 228;
-    r.panel(18, top, 354, 355, { fill: C.panel, stroke: C.line, radius: 12 });
-    r.text('用微信头像昵称上榜', 195, top + 47, 21, C.ink, 'center', '600');
-    r.text('头像昵称仅用于好友榜和本人排名展示', 195, top + 82, 12, C.muted, 'center');
-    r.text('好友榜另需微信朋友信息授权', 195, top + 106, 12, C.muted, 'center');
-    const lines = r.wrapLines(state.message || '首次使用需同意隐私保护指引', 298, 12);
-    lines.slice(0, 4).forEach((line, index) => r.text(line, 195, top + 146 + index * 20, 12, C.gold, 'center'));
-    if (state.needsProfile) {
-      r.round(55, buttonY, 280, 48, 8, C.green);
-      r.text('授权头像昵称并查看', 195, buttonY + 24, 15, C.paper, 'center', '600');
-      auth.updateButton({ left: r.ox + 55 * r.scale, top: r.oy + buttonY * r.scale, width: 280 * r.scale, height: 48 * r.scale }, { visible: !game.hidden && !game.modal });
-    } else {
-      auth.updateButton(null);
+function drawStatusCard(r, box) {
+  // The list uses the full page; a consent or error card keeps its readable size.
+  r.panel(box.x, box.y, box.w, Math.min(470, box.h), { fill: C.panel, stroke: C.line, radius: 22 });
+  const top = box.y;
+  r.circle(195, top + 65, 36, C.soft);
+  r.circle(195, top + 65, 27, C.raised);
+  r.actionIcon('community', 195, top + 65, C.green);
+  r.icon('star', 147, top + 48, 12, C.gold);
+  r.icon('star', 240, top + 84, 9, C.gold);
+  return top;
+}
+
+function drawMessage(r, message, y, warning) {
+  r.wrapLines(message, 294, 12).slice(0, 4).forEach((line, index) =>
+    r.text(line, 195, y + index * 20, 12, warning ? C.gold : C.muted, 'center'));
+}
+
+function drawFooter(r, note, warning) {
+  r.label(note, 195, r.H - 18, 342, 10, warning ? C.gold : C.muted, 'center');
+}
+
+function drawRankPlaceholder(r, game, box) {
+  r.round(box.x, box.y, box.w, 126, 19, C.green);
+  r.circle(55, box.y + 37, 19, '#dce9d8');
+  r.text('我的邮路', 88, box.y + 31, 15, C.white, 'left', '600');
+  ['总星数', '已通关', '最佳总步数'].forEach((label, i) => {
+    const x = box.x + (i + .5) * box.w / 3;
+    r.text('—', x, box.y + 84, 21, C.white, 'center');
+    r.text(label, x, box.y + 109, 10, '#dce9d8', 'center');
+  });
+  r.text('好友成绩', 22, box.y + 154, 14, C.ink, 'left', '600');
+  for (let i = 0; i < 3; i++) {
+    const y = box.y + 176 + i * 76;
+    r.panel(box.x, y, box.w, 64, { fill: C.panel, stroke: C.line, radius: 13 });
+    r.circle(49, y + 32, 17, C.soft);
+    r.round(80, y + 20, 116, 7, 3, C.soft); r.round(80, y + 38, 73, 6, 3, '#e3ebdf');
+  }
+  drawFooter(r, '仅向微信好友展示已上传的成绩');
+}
+
+function drawFriends(r, game, box) {
+  const friend = game.friendLeaderboard, state = friend.getState();
+  if (state.status === 'ready' || state.status === 'preview') {
+    friend.resize({ width: box.w, height: box.h, pixelRatio: Math.min(2, (game.metrics.pixelRatio || 1) * r.scale) });
+    friend.draw(r.ctx, box.x, box.y, box.w, box.h);
+    // The host forwards complete gestures; scrolling and tap recognition both
+    // stay in the child, so a drag can never trigger a second canvas tap.
+  } else if (['authorizing', 'waiting', 'loading'].includes(state.status)) {
+    return drawRankPlaceholder(r, game, box);
+  } else {
+    const unavailable = state.status === 'unavailable';
+    const warning = ['denied', 'error'].includes(state.status);
+    const top = drawStatusCard(r, box);
+    const title = unavailable ? '在微信里，与好友相逢' : state.status === 'error' ? '来信暂时没有送达' : '和好友一起收集星光';
+    r.text(title, 195, top + 121, 20, C.ink, 'center', '600');
+    r.text(unavailable ? '好友成绩由微信提供' : '看看彼此走过的邮路与收集的星星', 195, top + 156, 12, C.muted, 'center');
+    drawMessage(r, state.message || (unavailable ? '请在微信小游戏中打开好友排行' : '允许好友互动后，即可查看好友成绩'), top + 202, warning);
+    if (!unavailable) {
+      r.button(state.status === 'denied' ? '去授权' : state.status === 'error' ? '重新打开好友榜' : '查看好友榜',
+        92, top + 302, 206, 48, () => game.openFriendLeaderboard(), { style: 'primary' });
+    }
+    r.text(unavailable ? '这段邮路，可以先由你独自探索' : '随时可以返回，继续自己的旅程', 195, top + 412, 11, C.muted, 'center');
+  }
+  const syncError = state.syncStatus === 'error';
+  const auth = game.rankingAuthorization.getState();
+  drawFooter(r, auth.canDisplay && auth.status === 'error' ? '本次更新暂未完成，正在展示上次成绩' :
+    syncError ? state.syncMessage || '成绩暂未同步，重新进入后会自动更新' : '仅向微信好友展示已上传的成绩', syncError);
+}
+
+function drawAuthorization(r, game, box, state) {
+  const auth = game.rankingAuthorization;
+  const unavailable = state.status === 'unavailable';
+  const warning = ['denied', 'error'].includes(state.status);
+  const top = drawStatusCard(r, box);
+  const title = unavailable ? '好友排行，在微信里相见' : '用熟悉的名字，点亮好友榜';
+  r.text(title, 195, top + 121, 20, C.ink, 'center', '600');
+  r.text(unavailable ? '浏览器中可以完整体验解谜旅程' : '头像和昵称用于展示你的成绩', 195, top + 156, 12, C.muted, 'center');
+  if (!unavailable) r.text('随后由微信确认好友互动权限', 195, top + 179, 11, C.muted, 'center');
+  drawMessage(r, state.message || '首次使用时，请完成微信隐私授权', top + 216, warning);
+
+  const buttonY = top + 302;
+  if (state.needsProfile && !unavailable) {
+    // The real consent control is native; keep its CSS-pixel bounds aligned.
+    r.round(55, buttonY + 3, 280, 48, 12, '#285c50');
+    r.round(55, buttonY, 280, 48, 12, C.green);
+    r.text('授权头像昵称并查看', 195, buttonY + 24, 15, C.white, 'center', '600');
+    auth.updateButton({ left: r.ox + 55 * r.scale, top: r.oy + buttonY * r.scale, width: 280 * r.scale, height: 48 * r.scale },
+      { visible: !game.hidden && !game.modal });
+  } else {
+    auth.updateButton(null);
+    if (!unavailable) {
       if (state.canOpenSettings) r.button('去设置授权', 55, buttonY, 280, 48, () => auth.openSettings(), { style: 'primary' });
       else if (['idle', 'denied', 'error'].includes(state.status)) r.button('重新申请授权', 55, buttonY, 280, 48, () => auth.open(), { style: 'primary' });
     }
-    r.button('隐私保护指引', 83, top + 296, 224, 38, () => auth.openContract(), { style: 'quiet' });
-    r.button('暂不授权，返回游戏', 71, top + 379, 248, 44, () => game.home(), { style: 'quiet' });
-    r.text('拒绝授权不影响单人游玩与本地存档', 195, r.H - 37, 11, C.muted, 'center');
-    return;
   }
-  auth.updateButton(null);
-  drawFriends(r, game);
+  if (!unavailable) {
+    r.button('隐私保护指引', 45, top + 375, 144, 38, () => auth.openContract(), { style: 'quiet' });
+    r.button('暂不授权', 201, top + 375, 144, 38, () => game.home(), { style: 'quiet' });
+  } else r.text('星光与本地进度，会留在你的旅途中', 195, top + 375, 11, C.muted, 'center');
+  drawFooter(r, '拒绝授权不影响单人游玩与本地存档');
 }
 
-module.exports = { drawLeaderboard };
+function drawLeaderboard(r, game) {
+  drawIntro(r, game);
+  const box = leaderboardRect(r.H);
+  const state = game.rankingAuthorization.getState();
+  if (!state.enabled && !state.canDisplay) {
+    if (['privacy', 'authorizing', 'loading'].includes(state.status)) return drawRankPlaceholder(r, game, box);
+    return drawAuthorization(r, game, box, state);
+  }
+  game.rankingAuthorization.updateButton(null);
+  drawFriends(r, game, box);
+}
+
+function leaderboardRect(height) { return { x: 18, y: 120, w: 354, h: Math.max(280, height - 158) }; }
+
+module.exports = { drawLeaderboard, leaderboardRect };

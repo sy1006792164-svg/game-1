@@ -22,12 +22,13 @@ function levelProgressOffset(level, height) {
 }
 
 function drawLetterCard(r, x, y, w, h, unlocked, next, held) {
-  r.panel(x, y, w, h, { fill: held && unlocked ? '#30544d' : next ? '#284742' : unlocked ? C.panel : C.dark,
-    stroke: next ? '#a18c5e' : C.line, accent: next ? C.gold : null, radius: 11 });
-  if (!unlocked) return;
-  r.round(x + 6, y + 6, w - 12, h - 12, 7, null, next ? '#8b805855' : '#65877733');
-  r.line([[x + 17, y + h - 42], [x + w - 17, y + h - 42]], next ? '#aa96666b' : '#76908255', .8, [3, 4]);
-  r.circle(x + 136, y + 25, 13, next ? '#655a3544' : '#36584a55', next ? '#a9915d' : '#587768');
+  r.panel(x, y, w, h, { fill: held && unlocked ? '#e5ecde' : next ? '#fff7e5' : unlocked ? C.panel : '#dce5dc',
+    stroke: next ? '#cba477' : C.line, accent: next ? C.gold : unlocked ? C.green : null, radius: 13 });
+  r.round(x + 6, y + 6, w - 12, h - 12, 8, null, next ? '#e7d4af' : unlocked ? '#e1e7d9' : '#d0dbd0');
+  r.line([[x + 17, y + h - 42], [x + w - 17, y + h - 42]], next ? '#d5b98b' : '#b6cab9', .8, [3, 4]);
+  r.circle(x + 136, y + 26, 14, next ? '#dfbf8e55' : '#78977d1c');
+  r.circle(x + 136, y + 24, 13, next ? '#f6e6c6' : unlocked ? '#e6eee0' : '#d3dfd2', next ? '#c8a476' : '#abc1ae');
+  if (unlocked) r.line([[x + w - 29, y + 15], [x + w - 20, y + 15]], '#fffdf4', 1.4);
 }
 
 function drawLevelCard(r, game, level, record, index, rect, viewport, current, saved) {
@@ -47,9 +48,9 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   const scale = held ? .975 : 1;
   c.translate(x + w / 2, y + h / 2); c.scale(scale, scale); c.translate(-x - w / 2, -y - h / 2);
   drawLetterCard(r, x, y, w, h, unlocked, next, held);
-  r.text(String(level.id).padStart(3, '0'), x + 17, y + 26, 22, unlocked ? C.green : '#6c8780', 'left', '600');
+  r.text(String(level.id).padStart(3, '0'), x + 17, y + 26, 22, unlocked ? C.green : '#74897a', 'left', '600');
   if (inProgress) r.text('进行中', x + 77, y + 26, 10, C.gold);
-  r.actionIcon(unlocked ? record ? 'check' : 'letter' : 'lock', x + 136, y + 25, unlocked ? C.gold : '#6c8780');
+  r.actionIcon(unlocked ? record ? 'check' : 'letter' : 'lock', x + 136, y + 25, unlocked ? C.gold : '#74897a');
   r.label(level.title, x + 17, y + 60, 132, 14, unlocked ? C.ink : C.muted, 'left', '500');
   if (record) {
     for (let star = 0; star < 3; star++) r.icon('star', x + 23 + star * 21, y + h - 24, 14, star < record.stars ? C.gold : C.line);
@@ -97,7 +98,7 @@ function drawLevels(r, game) {
   if (maxScroll > 0 && alpha > 0) {
     const thumb = Math.max(34, viewport.h * viewport.h / contentHeight);
     c.save(); c.globalAlpha *= alpha;
-    r.round(377, viewport.y + (viewport.h - thumb) * clamp(scroll.offset / maxScroll), 2, thumb, 1, '#a7b997');
+    r.round(377, viewport.y + (viewport.h - thumb) * clamp(scroll.offset / maxScroll), 2, thumb, 1, C.green);
     c.restore();
   }
 }

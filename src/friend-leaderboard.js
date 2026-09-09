@@ -20,12 +20,14 @@ function createFriendLeaderboard(platform, config, options) {
   const api = platform && platform.kind === 'wechat' && platform.wx;
   const canSync = options && typeof options.canSync === 'function' ? options.canSync : function () { return false; };
   const canShow = options && typeof options.canShow === 'function' ? options.canShow : function () { return true; };
+  const canPreview = options && typeof options.canPreview === 'function' ? options.canPreview : function () { return false; };
   const key = (config && config.FRIEND_LEADERBOARD_KEY || FRIEND_STORAGE_KEY) + (platform && platform.isDevelopment ? '_development' : '');
   let state = { status: 'idle', message: '授权后可查看同玩好友的成绩' };
   let context = null, visible = false, authorized = false, revision = 0, cancelAuthorization = null, pendingShow = null;
   let dimensions = { width: 354, height: 400, pixelRatio: 1 };
   let desired = null, desiredScore = null, dispatched = '';
   let syncStatus = 'idle', syncMessage = '';
+  let activePointer = null;
 
   function setState(status, message) { state = { status, message }; return getState(); }
   function getState() { return Object.assign({}, state, { syncStatus, syncMessage, syncPending: !!desired && desired !== dispatched }); }
@@ -49,6 +51,7 @@ function createFriendLeaderboard(platform, config, options) {
     const ratio = Number.isFinite(next.pixelRatio) && next.pixelRatio > 0 ? next.pixelRatio : dimensions.pixelRatio;
     const pixelRatio = Math.min(2, ratio, Math.sqrt(2 * 1024 * 1024 / (width * height)));
     const changed = width !== dimensions.width || height !== dimensions.height || pixelRatio !== dimensions.pixelRatio;
+    if (changed) cancelPointer();
     dimensions = { width, height, pixelRatio };
     if (context && context.canvas) {
       const backingWidth = Math.max(1, Math.floor(width * dimensions.pixelRatio));
@@ -75,16 +78,22 @@ function createFriendLeaderboard(platform, config, options) {
     return getState();
   }
   // Call only from the player's explicit "view friends" / "authorize" click.
-  function open(next) {
+  function open(next, checked) {
+    const previewing = state.status === 'preview';
+    cancelPointer();
     if (cancelAuthorization) cancelAuthorization();
     visible = true; authorized = false; pendingShow = null;
     resize(next);
     if (!available()) return Promise.resolve(getState());
     const token = ++revision;
+    if (checked && checked[FRIEND_SCOPE] === true) return Promise.resolve(show(token));
+    if (checked && checked[FRIEND_SCOPE] === false) {
+      post('close'); return Promise.resolve(setState('denied', '好友互动权限尚未开启\n点击授权按钮可前往设置开启'));
+    }
     // Recheck even after a previous visit: permission may have been revoked in
     // WeChat settings. authorize does not prompt again while permission remains.
     const useSettings = state.status === 'denied' && typeof api.openSetting === 'function';
-    setState('authorizing', '正在获取好友榜授权…');
+    setState(previewing ? 'preview' : 'authorizing', '正在获取好友榜授权…');
     return new Promise(function (resolve) {
       let done = false;
       function finish(ok, message) {
@@ -93,7 +102,7 @@ function createFriendLeaderboard(platform, config, options) {
         cancelAuthorization = null;
         if (!visible || token !== revision) { resolve(getState()); return; }
         if (ok) resolve(show(token));
-        else { authorized = false; resolve(setState('denied', message || '尚未允许好友互动\n点击授权按钮可前往设置开启')); }
+        else { authorized = false; post('close'); resolve(setState('denied', message || '尚未允许好友互动\n点击授权按钮可前往设置开启')); }
       }
       // System authorization may remain open while the player reads it.
       cancelAuthorization = function () { done = true; cancelAuthorization = null; resolve(getState()); };
@@ -117,6 +126,7 @@ function createFriendLeaderboard(platform, config, options) {
   function revalidate(settings) {
     if (settings && cancelAuthorization) return false;
     if (!settings || settings[FRIEND_SCOPE] !== true) {
+      cancelPointer();
       revision++; pendingShow = null;
       if (cancelAuthorization) cancelAuthorization();
       authorized = false; post('close');
@@ -127,6 +137,7 @@ function createFriendLeaderboard(platform, config, options) {
     if (!context) return false;
     const wasAuthorized = authorized;
     authorized = true;
+    post('validated');
     if (visible) {
       if (!wasAuthorized && !post('open', dimensions)) return false;
       setState('ready', '好友数据仅在微信开放数据域展示');
@@ -140,9 +151,54 @@ function createFriendLeaderboard(platform, config, options) {
     }
     return false;
   }
-  function close() { visible = false; revision++; pendingShow = null; if (cancelAuthorization) cancelAuthorization(); post('close'); }
+  function tap(x, y) {
+    if (!visible || !syncAllowed() || state.status !== 'ready' || !Number.isFinite(x) || !Number.isFinite(y) ||
+        x < 0 || y < 0 || x > dimensions.width || y > dimensions.height) return false;
+    return post('tap', { x, y });
+  }
+  function preview(next) {
+    if (!context || !authorized || !canPreview() || state.status === 'denied') return false;
+    visible = true; resize(next);
+    return post('preview', dimensions) && (setState('preview', '正在更新好友成绩'), true);
+  }
+  function inputAllowed() { return visible && (state.status === 'ready' && syncAllowed() || state.status === 'preview' && canPreview()); }
+  function cancelPointer() {
+    const previous = activePointer;
+    activePointer = null;
+    if (!previous || !inputAllowed()) return false;
+    return post('pointer', Object.assign({ phase: 'cancel' }, previous));
+  }
+  function pointer(phase, x, y, time) {
+    if (!['start', 'move', 'end', 'cancel'].includes(phase) || ![x, y, time].every(Number.isFinite)) return false;
+    if (!inputAllowed()) { activePointer = null; return false; }
+    if (phase === 'start') {
+      if (x < 0 || y < 0 || x > dimensions.width || y > dimensions.height) return false;
+      cancelPointer();
+    } else if (!activePointer && phase !== 'cancel') return false;
+    // Release coordinates can be outside the shared canvas: the child owns the
+    // entire gesture once an in-bounds start is accepted, including tap detection.
+    activePointer = phase === 'end' || phase === 'cancel' ? null : { x, y, time };
+    const sent = post('pointer', { phase, x, y, time });
+    if (!sent) activePointer = null;
+    return sent;
+  }
+  function wheel(delta, time) {
+    if (!inputAllowed() || !Number.isFinite(delta) || !delta || !Number.isFinite(time)) return false;
+    cancelPointer();
+    return post('wheel', { delta, time });
+  }
+  function scroll(edge, time) {
+    if (!inputAllowed() || !['start', 'end'].includes(edge) || !Number.isFinite(time)) return false;
+    cancelPointer();
+    return post('scroll', { edge, time });
+  }
+  function suspend() {
+    cancelPointer();
+    return visible && authorized ? post('suspend') : false;
+  }
+  function close() { cancelPointer(); visible = false; revision++; pendingShow = null; if (cancelAuthorization) cancelAuthorization(); post('hide'); }
   function draw(ctx, x, y, width, height) {
-    if (!visible || state.status !== 'ready' || !context || !context.canvas) return false;
+    if (!visible || !['ready', 'preview'].includes(state.status) || !context || !context.canvas) return false;
     try { ctx.drawImage(context.canvas, x, y, width, height); return true; }
     catch (_) { setState('error', '好友榜画面暂时不可用，请重试'); return false; }
   }
@@ -151,7 +207,7 @@ function createFriendLeaderboard(platform, config, options) {
   function flush() {
     if (!desired || !syncAllowed() || !context) return false;
     if (desired === dispatched) return true;
-    if (!post('submit', { score: desiredScore })) { syncStatus = 'error'; syncMessage = '成绩暂未交给微信，请刷新重试'; return false; }
+    if (!post('submit', { score: desiredScore })) { syncStatus = 'error'; syncMessage = '成绩暂未交给微信，重新进入后会自动同步'; return false; }
     dispatched = desired; syncStatus = 'delegated'; syncMessage = '';
     return true;
   }
@@ -169,7 +225,7 @@ function createFriendLeaderboard(platform, config, options) {
     if (desired !== dispatched) { syncStatus = 'pending'; syncMessage = '完成授权后同步好友成绩'; }
     return Promise.resolve(flush());
   }
-  return { open, resize, refresh, retry, revalidate, page, close, submit, getState, draw };
+  return { open, preview, resize, refresh, retry, revalidate, page, tap, pointer, wheel, scroll, suspend, close, submit, getState, draw };
 }
 
 module.exports = { createFriendLeaderboard, FRIEND_STORAGE_KEY };

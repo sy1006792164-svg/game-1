@@ -17,29 +17,36 @@ function drawIslandSurface(r, corners, depth, now) {
     const left = Math.min(...xs), right = Math.max(...xs), front = Math.max(...ys);
     c.save(); c.globalAlpha *= Math.min(1, depth / 26);
     c.beginPath(); c.ellipse((left + right) / 2, front + depth + 7, (right - left) * .34, 10, 0, 0, Math.PI * 2);
-    c.fillStyle = '#061f2824'; c.fill(); c.restore();
+    c.fillStyle = '#64816c18'; c.fill(); c.restore();
     corners.forEach((a, index) => {
       const b = corners[(index + 1) % corners.length];
       // Clockwise screen-space edges face the viewer when they run right to left.
       if (b[0] >= a[0]) return;
       const baseA = [a[0], a[1] + depth], baseB = [b[0], b[1] + depth];
-      polygon(r, [a, b, baseB, baseA], b[1] > a[1] ? '#2a504c' : '#3e6258');
-      polygon(r, [a, edgePoint(a, b, .42), edgePoint(a, b, .27, depth * .72), baseA], '#496d5c');
-      polygon(r, [edgePoint(a, b, .42), b, baseB, edgePoint(a, b, .64, depth * .55)], '#31554e');
-      polygon(r, [edgePoint(a, b, .27, depth * .72), edgePoint(a, b, .42), edgePoint(a, b, .64, depth * .55), baseB], '#365d54');
-      r.line([edgePoint(a, b, .02, depth * .17), edgePoint(a, b, .98, depth * .17)], '#88a07760', Math.min(1.1, depth * .06));
+      const shaded = b[1] > a[1];
+      polygon(r, [a, b, baseB, baseA], shaded ? '#9caf9b' : '#c7cbb1');
+      // A carved limestone rim and continuous masonry courses give the floating
+      // courtyard weight without changing any of the playable top-surface points.
+      polygon(r, [a, b, edgePoint(a, b, 1, depth * .2), edgePoint(a, b, 0, depth * .2)], shaded ? '#bbc8ac' : '#e4e3c7');
+      polygon(r, [edgePoint(a, b, 0, depth * .82), edgePoint(a, b, 1, depth * .82), baseB, baseA], shaded ? '#8da28e' : '#b6c0a5');
+      [.21, .5, .8].forEach(fraction => r.line([edgePoint(a, b, .005, depth * fraction), edgePoint(a, b, .995, depth * fraction)], shaded ? '#dce4c738' : '#f5f0d666', .85));
+      const blocks = Math.max(1, Math.floor(Math.hypot(b[0] - a[0], b[1] - a[1]) / 28));
+      for (let block = 1; block < blocks; block++) {
+        r.line([edgePoint(a, b, block / blocks, depth * .22), edgePoint(a, b, block / blocks, depth * .49)], '#819b8155', .65);
+        r.line([edgePoint(a, b, (block - .5) / blocks, depth * .51), edgePoint(a, b, (block - .5) / blocks, depth * .79)], '#819b8155', .65);
+      }
       const count = Math.min(4, Math.floor((a[0] - b[0]) / 45));
       for (let vine = 1; vine <= count; vine++) {
         const [x, y] = edgePoint(a, b, vine / (count + 1));
         const drop = depth * (.5 + vine % 3 * .12);
         const sway = Math.sin(now / 2200 + index + vine) * Math.min(2, depth * .07);
         const leaf = Math.min(3, depth * .1), stemX = x + sway;
-        r.line([[x, y + depth * .08], [stemX, y + drop], [stemX + leaf * .4, y + drop + leaf]], '#759d78', Math.min(1.4, depth * .09));
-        polygon(r, [[stemX, y + drop * .7], [stemX + leaf, y + drop * .7 - leaf], [stemX + leaf * 1.2, y + drop * .7 + leaf]], '#8ba779');
+        r.line([[x, y + depth * .08], [stemX, y + drop], [stemX + leaf * .4, y + drop + leaf]], '#739875', Math.min(1.4, depth * .09));
+        polygon(r, [[stemX, y + drop * .7], [stemX + leaf, y + drop * .7 - leaf], [stemX + leaf * 1.2, y + drop * .7 + leaf]], '#91ae83');
       }
     });
   }
-  polygon(r, corners, '#597c63');
+  polygon(r, corners, '#a7be98');
 }
 
 module.exports = { drawIslandSurface };

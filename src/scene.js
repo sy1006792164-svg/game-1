@@ -7,11 +7,12 @@ const { OFFICE, officeFlag, hitPostOffice } = require('./post-office-geometry');
 const { drawIslandSurface } = require('./island-surface');
 const { drawAtmosphere, drawActorTrails, drawDestination } = require('./scene-effects');
 const { drawGuideTargets } = require('./guide-view');
+const { drawHomeArchitecture } = require('./world-art');
 
 const COLOR = {
-  night: '#102d32', forest: '#173e40', fog: '#285557', teal: '#77cdd0',
-  stone: '#f0e4c3', stoneLight: '#fff0cc', moss: '#658d75', gold: '#efb45d',
-  rock: '#38605b', rockDark: '#254a48', ink: '#24483e', cream: '#fff1ce'
+  sky: '#e9efe7', forest: '#b8cebf', fog: '#d6e2d7', teal: '#60b4ba',
+  stone: '#eee9d4', stoneLight: '#faf3dd', moss: '#91ae8b', gold: '#c89756',
+  rock: '#b0bda3', rockDark: '#8fa590', ink: '#294d49', cream: '#fff8e7'
 };
 
 function polygon(r, points, fill, stroke) {
@@ -47,15 +48,13 @@ function hitProp(r, x, y, width, height, radius, angle, action) {
 }
 
 function tree(r, x, y, size, now, distant) {
-  const c = r.ctx, sway = Math.sin(now / 2100 + x) * size * .022;
-  ellipse(r, x + size * .1, y + 1, size * .36, size * .11, '#102c302b');
-  polygon(r, [[x - size * .055, y], [x - size * .025, y - size * .7], [x + size * .05, y - size * .7], [x + size * .08, y]], distant ? '#183b3d' : '#576b52');
-  const tones = distant ? ['#214849', '#275052', '#2a5353'] : ['#3b6c59', '#51836a', '#75a47a'];
-  for (let i = 0; i < 3; i++) {
-    const width = size * (.43 - i * .07), bottom = y - size * (.22 + i * .21);
-    polygon(r, [[x - width + sway, bottom], [x + sway, bottom - size * .48], [x + width + sway, bottom], [x + sway, bottom + size * .09]], tones[i]);
-    if (!distant) r.line([[x + sway, bottom - size * .38], [x + width * .65 + sway, bottom - size * .02]], '#a6c09155', .75);
-  }
+  const sway = Math.sin(now / 2600 + x) * size * .012;
+  polygon(r, [[x - size * .15, y], [x + size * .08, y - 2], [x + size * .74, y + size * .13], [x + size * .39, y + size * .22]], distant ? '#70938209' : '#577c6724');
+  r.line([[x, y], [x, y - size * .72]], distant ? '#9ab7a5' : '#7f8163', Math.max(1, size * .045));
+  ellipse(r, x + sway, y - size * .62, size * .27, size * .48, distant ? '#b3cdbb' : '#7fa589');
+  ellipse(r, x - size * .08 + sway, y - size * .71, size * .19, size * .35, distant ? '#c0d4c3' : '#adc69a');
+  ellipse(r, x + size * .1 + sway, y - size * .61, size * .12, size * .32, distant ? '#adc7b5' : '#73997e');
+  if (!distant) r.line([[x - size * .09 + sway, y - size * .94], [x - size * .16 + sway, y - size * .83]], '#e0e8ba88', .85);
 }
 
 function grass(r, x, y, size, now, color) {
@@ -66,22 +65,27 @@ function grass(r, x, y, size, now, color) {
 
 function postOffice(r, x, y, size, now, ready) {
   const c = r.ctx; c.save(); c.translate(x, y); c.scale(size / 44, size / 44);
-  ellipse(r, 2, 2, 23, 7, '#143d3445');
+  polygon(r, [[-18, 0], [20, -9], [42, 1], [9, 13]], '#597c6633');
+  ellipse(r, 2, 2, 23, 7, '#597c6619');
   if (ready) glow(r, 0, -11, 20, COLOR.gold, .065 + Math.sin(now / 550) * .012);
-  polygon(r, OFFICE.front, '#dfcda6');
-  polygon(r, OFFICE.side, '#adba94');
-  polygon(r, OFFICE.roof, '#466f61');
-  polygon(r, OFFICE.frontTrim, '#2b574e');
-  polygon(r, OFFICE.sideTrim, '#264e49');
-  r.line([[-4, -42], [24, -35]], '#85a48b', 1.4);
-  r.round(-12, -18, 10, 16, 3, '#426b5a');
-  r.round(-10, -16, 6, 8, 2, ready ? '#ffe7a4' : '#a9c8b1');
+  polygon(r, OFFICE.front, '#fff5de');
+  polygon(r, OFFICE.side, '#c2cbb2');
+  polygon(r, OFFICE.roof, '#cf8b74');
+  polygon(r, [[-23, -27], [-4, -43], [8, -35], [8, -19]], '#e9a087');
+  polygon(r, OFFICE.frontTrim, '#edb296');
+  polygon(r, OFFICE.sideTrim, '#ad705c');
+  r.line([[-4, -42], [24, -35]], '#f6c4a5', 1.4);
+  [[-11, -37, 1, -21], [-17, -32, -9, -24], [5, -41, 17, -28]].forEach(([ax, ay, bx, by]) => r.line([[ax, ay], [bx, by]], '#f8bea063', .65));
+  r.line([[-18, -5], [7, 1]], '#e0d9be', 1.1);
+  r.round(-12, -18, 10, 16, 4.8, '#678c7c');
+  r.round(-10, -16, 6, 8, 2.8, ready ? '#ffe3a7' : '#bad5bb');
   r.circle(-4, -7, 1, '#e6bd77');
-  polygon(r, [[12, -18], [18, -21], [18, -13], [12, -10]], ready ? '#ffe0a0' : '#cbd2ae');
+  polygon(r, [[12, -18], [18, -21], [18, -13], [12, -10]], ready ? '#f9d497' : '#789b87');
   r.line([[15, -19], [15, -12]], '#779779', .75);
   r.round(-14, -30, 20, 8, 2, COLOR.cream);
   r.icon('letter', -4, -26, 8, '#bf7f47');
-  polygon(r, OFFICE.step, '#bfbe99');
+  polygon(r, OFFICE.step, '#dce0c5');
+  r.line([[8, 2], [-18, -4]], '#fff9e5', 1.3);
   r.line([[22, -6], [22, -45], [34, -44]], '#385e51', 1.7);
   const flap = Math.sin(now / 370) * 2;
   polygon(r, officeFlag(now), COLOR.gold);
@@ -112,31 +116,10 @@ function lantern(r, x, y, size, now, action) {
 function diamond(r, x, y, hw, hh, fill, stroke, height) {
   const z = height || 0;
   if (z) {
-    polygon(r, [[x - hw, y], [x, y + hh], [x, y + hh - z], [x - hw, y - z]], '#537b59');
-    polygon(r, [[x, y + hh], [x + hw, y], [x + hw, y - z], [x, y + hh - z]], '#3e654e');
+    polygon(r, [[x - hw, y], [x, y + hh], [x, y + hh - z], [x - hw, y - z]], '#b7c3a2');
+    polygon(r, [[x, y + hh], [x + hw, y], [x + hw, y - z], [x, y + hh - z]], '#8da98e');
   }
   polygon(r, [[x, y - hh - z], [x + hw, y - z], [x, y + hh - z], [x - hw, y - z]], fill, stroke);
-}
-
-function island(r, corners, depth, now) {
-  const [top, right, front, left] = corners;
-  const bottom = [front[0], front[1] + depth];
-  ellipse(r, front[0], front[1] + depth + 11, (right[0] - left[0]) * .34, 11, '#061f2824');
-  polygon(r, [left, front, bottom, [left[0] + 5, left[1] + depth * .6]], '#3e6258');
-  polygon(r, [front, right, [right[0] - 6, right[1] + depth * .6], bottom], '#2a504c');
-  polygon(r, [left, [front[0] - 28, front[1] + 5], [front[0] - 62, front[1] + depth * .7], [left[0] + 5, left[1] + depth * .6]], '#496d5c');
-  polygon(r, [[front[0] - 28, front[1] + 5], front, bottom, [front[0] - 62, front[1] + depth * .7]], '#31554e');
-  polygon(r, [[front[0] + 62, front[1] - 24], [front[0] + 33, front[1] + depth * .54], bottom, front], '#365d54');
-  r.line([[left[0] + 4, left[1] + 7], [front[0], front[1] + 7], [right[0] - 4, right[1] + 7]], '#88a07760', 1.3);
-  polygon(r, corners, '#597c63');
-  for (let i = 1; i < 7; i++) {
-    const t = i / 7, edge = i % 2 ? left : right;
-    const x = edge[0] + (front[0] - edge[0]) * t, y = edge[1] + (front[1] - edge[1]) * t;
-    const drop = 8 + i % 3 * 4;
-    r.line([[x, y + 3], [x + Math.sin(now / 2200 + i) * 2, y + drop], [x + 2, y + drop + 4]], '#759d78', 1.6);
-    r.icon('leaf', x + 2, y + drop - 2, 7, '#8ba779');
-  }
-  polygon(r, [[bottom[0] - 7, bottom[1] - 1], [bottom[0] + 1, bottom[1] + 10], [bottom[0] + 6, bottom[1] - 3]], '#648f82');
 }
 
 function groundDetail(r, game, now, cell, p) {
@@ -205,7 +188,7 @@ function drawBoard(r, game, now, rect, guide) {
   c.save(); c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip();
   c.translate(p.centerX + view.panX * rect.w, p.centerY + view.panY * rect.h);
   c.scale(view.scale, view.scale); c.translate(-p.centerX, -p.centerY);
-  glow(r, rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w * .32, '#6aaba0', .018);
+  glow(r, rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w * .32, '#f9f3d3', .026);
   drawIslandSurface(r, corners, 26, time);
   const { walls, adjacent, ordered } = geometry;
   const selectCell = cell => {
@@ -224,11 +207,12 @@ function drawBoard(r, game, now, rect, guide) {
   const actors = [];
   for (const cell of ordered) {
     const [x, y] = point(cell), wall = walls.has(cell);
-    diamond(r, x, y, hw - .8, hh - .7, wall ? (cell % 3 ? '#315e50' : '#3b6956') : cell % 3 ? COLOR.stone : COLOR.stoneLight, wall ? '#507d60' : '#fff4d8', wall ? 4 : 0);
+    diamond(r, x, y, hw - .8, hh - .7, wall ? (cell % 3 ? '#9db792' : '#acc09a') : cell % 3 ? COLOR.stone : COLOR.stoneLight, wall ? '#c3d1ac' : '#fff9e8', wall ? 4 : 0);
     if (wall) {
       if (cell % 3 === 0) actors.push({ y: y + 2, draw: () => {
-        polygon(r, [[x - 8, y - 3], [x - 5, y - 10], [x + 2, y - 12], [x + 8, y - 5], [x + 4, y]], '#83a082');
-        r.line([[x - 5, y - 10], [x + 2, y - 12], [x + 6, y - 7]], '#b1c296', 1);
+        polygon(r, [[x - 8, y - 3], [x - 5, y - 10], [x + 2, y - 12], [x + 8, y - 5], [x + 4, y]], '#d5d7bb');
+        polygon(r, [[x + 2, y - 12], [x + 8, y - 5], [x + 4, y], [x, y - 4]], '#a3b29a');
+        r.line([[x - 5, y - 10], [x + 2, y - 12], [x + 6, y - 7]], '#f6efd6', 1);
         grass(r, x - 8, y - 1, 5, time);
       } });
       // Trees only line the rear rim, so they never hide a floor tile.
@@ -236,9 +220,11 @@ function drawBoard(r, game, now, rect, guide) {
       if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false) });
       else if (cell % 2) actors.push({ y, draw: () => grass(r, x + 5, y - 4, 6, time, '#b1c293') });
     } else {
+      // Shallow bevels keep the original tappable floor plane exact.
+      r.line([[x - hw + 2, y + 1], [x, y + hh - 1.4], [x + hw - 2, y + 1]], '#c4ccb178', .8);
       groundDetail(r, game, time, cell, p);
       if (cell === l.exit) {
-        diamond(r, x, y, hw - 2, hh - 1.5, '#adc6a0', '#d1dfb2');
+        diamond(r, x, y, hw - 2, hh - 1.5, '#cbd9b6', '#eff1ce');
         const ready = !s.letters.length && !s.seals.length;
         actors.push({ y: y + 2, draw: () => {
           postOffice(r, x, y + OFFICE.sideOffset, hw * 1.2, time, ready);
@@ -246,9 +232,9 @@ function drawBoard(r, game, now, rect, guide) {
         } });
       }
       if (!game.reviewing && s.status === 'playing' && adjacent.has(cell) && (!guide || guide.visual.tapCell === cell)) {
-        diamond(r, x, y, hw - 3, hh - 2, '#f8d68877', null);
-        floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#edb457', 1.7);
-        ellipse(r, x, y + hh * .43, hw * .15, hh * .17, '#e5ae52');
+        diamond(r, x, y, hw - 3, hh - 2, '#f4d49b66', null);
+        floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#c69755', 1.45);
+        ellipse(r, x, y + hh * .43, hw * .12, hh * .14, '#b68b52');
       }
       const selectProp = !game.reviewing && s.status === 'playing' ? () => selectCell(cell) : null;
       if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, time, selectProp) });
@@ -289,42 +275,54 @@ function drawBoard(r, game, now, rect, guide) {
 function drawBackdrop(r, now, chapter, options = {}) {
   if (options.reducedMotion) now = 0;
   const H = r.H, c = r.ctx;
-  c.fillStyle = COLOR.night; c.fillRect(0, 0, 390, H);
-  glow(r, 296, H * .3, 152, chapter > 2 ? '#336a70' : '#366d64', .09);
-  glow(r, 67, H * .66, 120, '#456855', .055);
-  const drift = Math.sin(now / 10000) * 3;
-  polygon(r, [[0, H * .45], [0, H * .26], [46 + drift, H * .19], [95, H * .31], [160, H * .2], [216, H * .3], [289, H * .15], [390, H * .31], [390, H * .51]], '#1a4042');
-  polygon(r, [[0, H * .56], [0, H * .37], [54, H * .3], [104, H * .41], [199, H * .29], [262, H * .4], [339, H * .27], [390, H * .33], [390, H * .61]], '#1e4747');
-  ellipse(r, 195 + drift, H * .48, 227, 39, '#84b3a208');
-  [-12, 15, 378, 410].forEach((x, i) => tree(r, x, H * (.64 + i % 2 * .11), 132 + i % 3 * 24, now, true));
-  drawAtmosphere(r, now, { x: 0, y: 64, w: 390, h: H - 130 }, options);
-  r.line([[0, H * .78], [70, H * .76], [174, H * .79], [265, H * .75], [390, H * .77]], '#7daf9c09', 16);
+  const bounds = r.viewport || { x: 0, y: 0, w: 390, h: H };
+  const mapX = x => bounds.x + x * bounds.w / 390, spread = bounds.w / 390;
+  c.fillStyle = COLOR.sky; c.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
+  // Canvas gradients extend their end colors beyond these stops, so the safe areas
+  // continue the same sky without changing the artwork's position inside the page.
+  const sky = c.createLinearGradient(0, 0, 0, H);
+  if (sky && typeof sky.addColorStop === 'function') {
+    sky.addColorStop(0, '#f6f3e8'); sky.addColorStop(.5, '#e3eee3'); sky.addColorStop(1, '#d8e5d8');
+    c.fillStyle = sky; c.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
+  }
+  const drift = Math.sin(now / 15000) * 2;
+  glow(r, mapX(310), H * .225, 35, '#fff7d7', .17);
+  r.circle(mapX(310), H * .225, 24, '#f6e8bd');
+  r.circle(mapX(310) - 7, H * .216, 18, '#f9edcf55');
+  // Broad, soft ridge lines recede into the mist; they stay quieter than the board.
+  c.beginPath(); c.moveTo(mapX(0), H * .46); c.lineTo(mapX(0), H * .34);
+  c.bezierCurveTo(mapX(45 + drift), H * .25, mapX(57), H * .28, mapX(112), H * .37);
+  c.bezierCurveTo(mapX(173), H * .4, mapX(207), H * .23, mapX(266), H * .31);
+  c.bezierCurveTo(mapX(320), H * .39, mapX(346), H * .27, mapX(390), H * .31);
+  c.lineTo(mapX(390), H * .56); c.closePath(); c.fillStyle = '#d0dfd1'; c.fill();
+  c.beginPath(); c.moveTo(mapX(0), H * .59); c.lineTo(mapX(0), H * .42);
+  c.bezierCurveTo(mapX(59), H * .33, mapX(88), H * .47, mapX(157), H * .45);
+  c.bezierCurveTo(mapX(205), H * .42, mapX(260), H * .34, mapX(310), H * .43);
+  c.bezierCurveTo(mapX(343), H * .48, mapX(359), H * .4, mapX(390), H * .39);
+  c.lineTo(mapX(390), H * .64); c.closePath(); c.fillStyle = '#c1d6c5'; c.fill();
+  ellipse(r, mapX(167 + drift), H * .49, 247 * spread, 31, '#e7efe5b8');
+  ellipse(r, mapX(272 - drift), H * .58, 216 * spread, 35, '#e0ebdfad');
+  [-20, 403].forEach((x, i) => tree(r, mapX(x), H * .69, 96 + i * 19, now, true));
+  ellipse(r, mapX(195), H * .77, 235 * spread, 53, '#e2ecdf55');
+  drawAtmosphere(r, now, { x: bounds.x, y: 64, w: bounds.w, h: H - 130 }, options);
 }
 
 function drawVignette(r, now, rect, options = {}) {
   if (options.reducedMotion) now = 0;
-  const c = r.ctx, scale = Math.min(rect.w / 350, rect.h / 250), x = rect.x + rect.w / 2, y = rect.y + rect.h * .38;
+  const c = r.ctx, scale = Math.min(rect.w / 350, rect.h / 285), x = rect.x + rect.w / 2, y = rect.y + rect.h * .53;
   c.save(); c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip(); c.translate(x, y); c.scale(scale, scale);
-  glow(r, 25, -18, 82, COLOR.gold, .035);
-  island(r, [[0, -43], [151, 30], [3, 101], [-150, 27]], 31, now);
-  polygon(r, [[0, -43], [151, 30], [3, 101], [-150, 27]], '#6e9476');
-  polygon(r, [[-104, 13], [-18, -29], [113, 34], [25, 76]], '#bad0a1');
-  [[-79, 19], [-44, 36], [-9, 52], [26, 35], [61, 17]].forEach(([sx, sy], i) => diamond(r, sx, sy, 24, 12, i % 2 ? '#e8dcc0' : '#f0e5c9', '#fff0d0', 3));
-  r.line([[-79, 13], [-44, 30], [-9, 46], [26, 29], [61, 11]], '#699996', 1.6, [3, 5]);
-  tree(r, -105, -3, 55, now, false); tree(r, -61, -17, 45, now + 600, false);
-  tree(r, 113, 31, 57, now + 300, false); tree(r, 133, 38, 38, now + 800, false);
-  postOffice(r, 48, 8, 77, now, true);
-  lantern(r, 82, 32, 32, now);
-  const bob = Math.sin(now / 950) * 1.5;
-  r.courier(-49, 19 + bob, 31, true, { alpha: .72, stride: 0, facing: 1 });
-  r.courier(0, 30 + Math.sin(now / 1200) * .6, 43, false, { alpha: 1, stride: Math.sin(now / 1100) * .08, facing: 1 });
-  [[-112, 39, 10], [-87, 59, 8], [46, 72, 9], [74, 57, 8], [-18, 77, 7]].forEach(([sx, sy, size]) => grass(r, sx, sy, size, now));
-  floatingMail(r, -88, -53, 28, now, 5, false); floatingMail(r, -24, -71, 17, now, 2, true);
-  for (let i = 0; i < 8; i++) {
-    const phase = now / 2600 + i * .8, sx = Math.sin(phase) * 142, sy = Math.cos(phase * .7 + i) * 48 + 12;
-    glow(r, sx, sy, 2, i % 2 ? COLOR.gold : COLOR.teal, .08);
-    r.circle(sx, sy, .9, '#e5ddb0');
-  }
+  drawHomeArchitecture(r, now);
+  r.line([[-28, 36], [-9, 45], [11, 35], [26, 27]], '#5a9f9c99', 1.3, [2, 5]);
+  const bob = Math.sin(now / 1350) * .8;
+  r.courier(-31, 25 + bob, 25, true, { alpha: .66, stride: 0, facing: 1 });
+  r.courier(4, 29 + Math.sin(now / 1600) * .35, 33, false, { alpha: 1, stride: Math.sin(now / 1400) * .05, facing: 1 });
+  floatingMail(r, -100, -53, 19, now, 5, false);
+  floatingMail(r, -69, -83, 13, now, 2, true);
+  // Two distant swifts add life without competing with the architectural silhouette.
+  [-1, 1].forEach((side, i) => {
+    const sx = side * 120, sy = -105 + i * 16, flap = Math.sin(now / 650 + i) * 1.1;
+    r.line([[sx - 5, sy - 2 - flap], [sx, sy], [sx + 5, sy - 3 + flap]], '#7d9f945b', 1.15);
+  });
   c.restore();
 }
 

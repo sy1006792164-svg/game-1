@@ -6,11 +6,10 @@ const { CONTROL } = require('./controls');
 const { drawVignette } = require('./scene');
 
 function layout(height) {
-  const top = Math.max(0, (height - 780) / 2);
-  // Keep the navigation above the bottom area reserved for transient notices.
-  const heroY = 112 + top, heroH = Math.min(400, height - 383 - top);
-  const routeY = heroY + heroH + 9, buttonY = routeY + 24;
-  return { top, heroY, heroH, routeY, buttonY, linksY: buttonY + CONTROL.height + 24 };
+  const top = Math.max(0, (height - 844) / 2);
+  const heroY = 142 + top, heroH = Math.min(386, height - 410 - top);
+  const routeY = heroY + heroH + 32, buttonY = routeY + 48;
+  return { top, heroY, heroH, routeY, buttonY, linksY: buttonY + CONTROL.height + 28 };
 }
 
 function departure(next, saved, completed) {
@@ -23,8 +22,16 @@ function departure(next, saved, completed) {
 }
 
 function drawBrand(r, top) {
-  r.text('风笺回廊', 195, top + 52, 35, C.ink, 'center', '600');
-  r.text('你收信，三拍后的回声收蓝票。', 195, top + 86, 11, C.muted, 'center');
+  r.line([[137, top + 29], [157, top + 29]], '#90ac99', .8);
+  r.text('风 起 · 信 至', 195, top + 29, 9, C.green, 'center');
+  r.line([[233, top + 29], [253, top + 29]], '#90ac99', .8);
+  // A quiet book-cover title, with generous tracking and a native serif face.
+  const c = r.ctx; c.save();
+  c.font = '500 39px "Songti SC","STSong","SimSun",serif';
+  c.fillStyle = C.ink; c.textAlign = 'center'; c.textBaseline = 'middle';
+  Array.from('风笺回廊').forEach((char, i) => c.fillText(char, 120 + i * 50, top + 76));
+  c.restore();
+  r.text('和三拍后的自己，走一程山间邮路。', 195, top + 121, 11, C.muted, 'center');
 }
 
 function drawLinks(r, game, y) {
@@ -45,10 +52,14 @@ function drawHome(r, game, now) {
   const saved = game.savedRun(), completed = game.completion();
   const route = departure(game.nextLevel(), saved, completed), ui = layout(r.H);
   drawBrand(r, ui.top);
-  drawVignette(r, now, { x: -30, y: ui.heroY, w: 450, h: ui.heroH }, { reducedMotion: r.reducedMotion });
-  r.label(route.detail, 195, ui.routeY, 324, 11, C.muted, 'center');
-  r.button(route.title, 30, ui.buttonY, 330, CONTROL.height, () => game.primary(), { style: 'primary', icon: 'letter', trailing: 'chevron' });
+  drawVignette(r, now, { x: 5, y: ui.heroY, w: 380, h: ui.heroH }, { reducedMotion: r.reducedMotion });
+  r.line([[171, ui.routeY - 13], [219, ui.routeY - 13]], '#a6bfa6', .8);
+  r.label(route.detail, 195, ui.routeY + 6, 324, 12, C.ink, 'center', '600');
+  r.text(saved ? '路线已留好，随时接着走' : '你拾起信笺 · 回声收集邮票', 195, ui.routeY + 28, 10, C.muted, 'center');
+  r.button(route.title, 42, ui.buttonY, 306, CONTROL.height, () => game.primary(), { style: 'primary' });
   drawLinks(r, game, ui.linksY);
+  const footerY = ui.linksY + CONTROL.compactHeight + 32;
+  r.text(completed ? '已送达 ' + completed + ' 封信 · 每一程都算数' : '不必赶路，想好了再出发', 195, footerY, 10, C.muted, 'center');
 }
 
 module.exports = { drawHome };

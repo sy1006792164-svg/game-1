@@ -3,43 +3,43 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#112e32">
-  <title>风笺回廊 · 林间的三拍回声</title>
+  <meta name="theme-color" content="#e9efe7">
+  <title>风笺回廊 · 风起，信至</title>
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
     body {
       display: flex; align-items: center; justify-content: center; gap: clamp(46px, 7vw, 112px);
-      color: #f4eddc; background: #0c2429; font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-      background-image: radial-gradient(ellipse at 70% 25%, #2a676450, transparent 48%),
-        radial-gradient(ellipse at 20% 100%, #34524250, transparent 55%), linear-gradient(140deg, #102d31, #081a20);
+      color: #294d49; background: #edf0e7; font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      background-image: radial-gradient(ellipse at 70% 25%, #aecdb448, transparent 48%),
+        radial-gradient(ellipse at 20% 100%, #dcccaa42, transparent 55%), linear-gradient(140deg, #f7f5ea, #dce8dd);
     }
     body::before {
       content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .35;
-      background-image: radial-gradient(circle at 14% 19%, #efbd72 0 1px, transparent 2px),
-        radial-gradient(circle at 36% 76%, #80cdd7 0 1px, transparent 2px),
-        radial-gradient(circle at 89% 52%, #efbd72 0 1px, transparent 2px);
+      background-image: radial-gradient(circle at 14% 19%, #bc7e47 0 1px, transparent 2px),
+        radial-gradient(circle at 36% 76%, #368f9d 0 1px, transparent 2px),
+        radial-gradient(circle at 89% 52%, #bc7e47 0 1px, transparent 2px);
       background-size: 410px 450px, 530px 610px, 690px 520px;
       animation: fireflies 7s ease-in-out infinite alternate;
     }
     aside { position: relative; width: 310px; flex: 0 0 310px; }
-    .eyebrow { display: flex; align-items: center; gap: 12px; color: #85b9b7; letter-spacing: 3px; font-size: 10px; }
-    .eyebrow::before { content: ""; width: 27px; height: 1px; background: #85b9b7; }
-    h1 { font-size: 47px; letter-spacing: 6px; font-weight: 500; margin: 24px 0 17px; }
-    .lead { font-size: 20px; line-height: 1.9; color: #dfdac4; margin: 0; }
-    .lead em { font-style: normal; color: #efbd72; }
-    .rule { margin-top: 37px; padding-top: 24px; border-top: 1px solid #385352; }
-    .touch { margin: 0; color: #afc2b8; font-size: 12px; line-height: 2; }
-    .touch strong { font-weight: 400; color: #80cdd7; }
-    .keys { margin: 18px 0 0; color: #7f9f94; font-size: 10px; line-height: 2; }
+    .eyebrow { display: flex; align-items: center; gap: 12px; color: #668d7d; letter-spacing: 3px; font-size: 10px; }
+    .eyebrow::before { content: ""; width: 27px; height: 1px; background: #668d7d; }
+    h1 { font-family: "Songti SC", "SimSun", serif; font-size: 47px; letter-spacing: 8px; font-weight: 500; margin: 24px 0 17px; }
+    .lead { font-size: 20px; line-height: 1.9; color: #60796b; margin: 0; }
+    .lead em { font-style: normal; color: #bc7e47; }
+    .rule { margin-top: 37px; padding-top: 24px; border-top: 1px solid #c4d2c0; }
+    .touch { margin: 0; color: #60796b; font-size: 12px; line-height: 2; }
+    .touch strong { font-weight: 400; color: #368f9d; }
+    .keys { margin: 18px 0 0; color: #748d7d; font-size: 10px; line-height: 2; }
     #phone { height: min(844px, 96dvh); aspect-ratio: 390 / 844; position: relative; flex-shrink: 0;
-      border: 1px solid #5c797268; box-shadow: 0 35px 100px #020d15bb, 0 0 60px #40736b24;
-      border-radius: 30px; overflow: hidden; background: #112e32; }
+      border: 6px solid #ffffffc9; box-shadow: 0 35px 100px #59756226, 0 0 60px #7e9b7510;
+      border-radius: 30px; overflow: hidden; background: #e9efe7; }
     canvas { width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
     @keyframes fireflies { from { opacity: .15; transform: translateY(0); } to { opacity: .6; transform: translateY(-8px); } }
     @media (prefers-reduced-motion: reduce) { body::before { animation: none; } }
     @media (max-width: 850px) {
-      aside { display: none; } body { background: #112e32; } body::before { display: none; }
+      aside { display: none; } body { background: #e9efe7; } body::before { display: none; }
       #phone { height: 100dvh; width: 100%; aspect-ratio: auto; max-width: 500px; border: 0; border-radius: 0; box-shadow: none;
         padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
     }
@@ -53,7 +53,7 @@
   <aside aria-label="游戏介绍与操作指南">
     <div class="eyebrow">WIND LETTER CORRIDOR</div>
     <h1>风笺回廊</h1>
-    <p class="lead">你拾起信笺。<br><em>三拍后</em>，<br>回声替你收蓝票。</p>
+    <p class="lead">山间有风，沿途有你。<br><em>三拍之后</em>，<br>回声替你收起蓝票。</p>
     <section class="rule" aria-label="操作指南">
       <p class="touch">点相邻亮格移动，点脚下格等一拍。<br><strong>双指捏合放大棋盘，放大后拖动查看。</strong><br>电脑滚轮缩放。</p>
       <p class="keys">方向键 / WASD 移动 · Space 等待<br>Z / Backspace 回溯 · Esc 暂停</p>

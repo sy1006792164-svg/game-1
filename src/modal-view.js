@@ -44,17 +44,27 @@ function modalLayout(r, modal) {
 function drawModal(r, modal, now, resultAge = null) {
   const c = r.ctx, age = Math.max(0, now - r.modalAt), ui = modalLayout(r, modal);
   const result = modal.kind === 'win' || modal.kind === 'fail';
-  const accent = modal.kind === 'fail' ? C.blue : C.gold;
+  const accent = modal.kind === 'fail' ? '#a76e55' : C.gold;
   c.save(); c.globalAlpha *= r.reducedMotion ? 1 : Math.min(1, .18 + age / 180);
-  r.scrim('#071d25c7');
-  r.round(ui.x, ui.y + 5, ui.w, ui.h, 24, '#071c24');
-  r.round(ui.x, ui.y, ui.w, ui.h, 24, C.panel, modal.kind === 'fail' ? '#537276' : '#6a8270');
-  r.line([[ui.x + 35, ui.y + 2], [ui.x + ui.w - 35, ui.y + 2]], accent, 2);
+  r.scrim('#36554979');
+  r.round(ui.x + 3, ui.y + 8, ui.w - 6, ui.h, 23, '#24473526');
+  r.round(ui.x - 2, ui.y + 3, ui.w + 4, ui.h, 23, '#e6e8d7', '#c1cbb6');
+  r.round(ui.x, ui.y, ui.w, ui.h, 23, '#fffdf4', '#c6d0bd');
+  r.round(ui.x + 8, ui.y + 8, ui.w - 16, ui.h - 16, 18, null, '#e4e8d9');
+  r.line([[ui.x + 42, ui.y + 2], [ui.x + ui.w - 42, ui.y + 2]], accent, 2);
+  // Small cancellation marks turn the result into a paper receipt without
+  // adding height or moving its text and actions on compact screens.
+  [ui.x + 48, ui.x + ui.w - 89].forEach(left => {
+    for (let line = 0; line < 3; line++) {
+      const y = ui.y + 46 + line * 6;
+      r.line([[left, y + 2], [left + 12, y], [left + 26, y + 2], [left + 40, y]], '#c7d4be', 1);
+    }
+  });
   const help = modal.kind === 'help';
   if (result) drawResultHeader(r, modal.kind, ui, resultAge);
   else {
-    r.circle(195, ui.y + 52, 28, '#d1b97112', '#697e69');
-    r.circle(195, ui.y + 52, 22, '#35554e');
+    r.circle(195, ui.y + 52, 29, '#f5ecd5', '#d6c5a5');
+    r.circle(195, ui.y + 52, 23, '#fffaf0', '#e6d8bb');
     r.icon(help ? 'echo' : 'wind', 195, ui.y + 52, 28, help ? C.blue : C.gold);
   }
   if (modal.kicker) r.label(modal.kicker, 195, ui.y + ui.kickerY, ui.width, 10, C.muted, 'center');
@@ -63,6 +73,12 @@ function drawModal(r, modal, now, resultAge = null) {
   ui.paragraphs.forEach(paragraph => paragraph.lines.forEach((line, i) => {
     r.text(line, help ? ui.x + 24 : 195, ui.y + paragraph.y + i * ui.lineHeight, 13, C.muted, help ? 'left' : 'center');
   }));
+  if (ui.buttons.length) {
+    const separatorY = ui.y + ui.buttons[0].y - 12;
+    r.line([[ui.x + 24, separatorY], [ui.x + ui.w - 24, separatorY]], '#d1d8c3', 1, [2, 5]);
+    r.circle(ui.x + 8, separatorY, 3, '#e0e6d3');
+    r.circle(ui.x + ui.w - 8, separatorY, 3, '#e0e6d3');
+  }
   ui.buttons.forEach(button => r.button(button.text, button.x, ui.y + button.y, button.w, button.h, button.action,
     { style: button.style, icon: button.icon }));
   c.restore();

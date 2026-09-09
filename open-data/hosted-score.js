@@ -73,7 +73,7 @@ function createStorageKeySync(api, key, changed) {
         status = 'saved'; message = '已保存微信托管最佳成绩';
         return true;
       } catch (_) {
-        status = 'error'; message = readSucceeded ? '成绩暂未保存，点击刷新重试' : '历史成绩读取失败，未覆盖旧成绩；请刷新';
+        status = 'error'; message = readSucceeded ? '成绩暂未保存，可点击重试' : '历史成绩读取失败，未覆盖旧成绩；可重试';
         return false;
       } finally {
         flight = null; notify();

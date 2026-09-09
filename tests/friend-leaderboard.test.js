@@ -29,14 +29,17 @@ function hosted(initial) {
   return { sync, api, writes, changes, current: () => parseScore(stored), failRead: value => { failRead = value; }, failWrite: value => { failWrite = value; } };
 }
 function drawing() {
-  const labels = [], ctx = new Proxy({ fillText: text => labels.push(String(text)), measureText: value => ({ width: Array.from(String(value)).length * 8 }) }, { get: (target, name) => target[name] || (() => {}) });
+  const labels = [], frameLabels = [], ctx = new Proxy({
+    clearRect: () => { frameLabels.length = 0; },
+    fillText: text => { labels.push(String(text)); frameLabels.push(String(text)); },
+    measureText: value => ({ width: Array.from(String(value)).length * 8 }) }, { get: (target, name) => target[name] || (() => {}) });
   const requests = { friends: [], mine: [], identity: [], writes: [] };
   const canvas = { width: 708, height: 800, getContext: () => ctx };
   const api = { getSharedCanvas: () => canvas, onMessage: cb => { api.message = cb; },
     getFriendCloudStorage: o => requests.friends.push(o), getUserCloudStorage: o => requests.mine.push(o),
     getUserInfo: o => requests.identity.push(o), setUserCloudStorage: o => requests.writes.push(o) };
   createOpenDataLeaderboard(api);
-  return { api, requests, labels, send: value => api.message({ channel: CHANNEL, ...value }) };
+  return { api, requests, labels, frameLabels, send: value => api.message({ channel: CHANNEL, ...value }) };
 }
 test('browser never invokes WeChat and new players do not create zero-score rankings', async () => {
   const h = bridge({ kind: 'browser' });
@@ -74,6 +77,7 @@ test('open requests only friend permission and flushes a cached local aggregate 
 test('native authorization revocation blocks later uploads until explicit settings recovery', async () => {
   const h = bridge(); await h.open(); h.board.close();
   const revoked = h.board.open(); h.authorizations[1].fail(); assert.equal((await revoked).status, 'denied');
+  assert.equal(h.messages.at(-1).action, 'close', 'confirmed native refusal clears cached friend rows, not just their pixels');
   await h.board.submit(score()); h.board.retry(); assert.equal(h.messages.some(m => m.action === 'submit'), false);
   const restore = h.board.open(); assert.equal(h.settings.length, 1);
   h.settings[0].success({ authSetting: { [SCOPE]: true } }); await restore;
@@ -82,7 +86,8 @@ test('native authorization revocation blocks later uploads until explicit settin
 test('close cancels late grants, but preserves confirmed permission for later gameplay score submissions', async () => {
   const h = bridge(); const opening = h.board.open(); h.board.close(); h.authorizations[0].success(); await opening;
   assert.equal(h.messages.length, 0);
-  await h.open(); h.board.close(); assert.equal(await h.board.submit(score()), true); assert.equal(h.messages.at(-1).action, 'submit');
+  await h.open(); h.board.close(); assert.equal(h.messages.at(-1).action, 'hide', 'normal navigation preserves private child cache');
+  assert.equal(await h.board.submit(score()), true); assert.equal(h.messages.at(-1).action, 'submit');
   assert.equal(h.board.draw({}, 0, 0, 1, 1), false);
 });
 test('development runtime uses a distinct native WeChat storage key', async () => {
@@ -187,26 +192,45 @@ test('hosted key/value stays within the 1024-byte limit when avatar URLs and Uni
   const value = serializeScore(score({ name: '信'.repeat(24), avatarUrl: 'https://thirdwx.qlogo.cn/' + 'a'.repeat(970) }), KEY);
   assert.ok(Buffer.byteLength(KEY + value, 'utf8') <= 1024); assert.equal(JSON.parse(value).avatarUrl, '');
 });
-test('open data uses selfOpenId sentinel and renders my native rank, paging, and a late-close guard', () => {
+test('open data resolves my native rank, automatically locates it, scrolls continuously, and ignores late callbacks after close', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 10000 });
+  const advanceFrames = duration => {
+    for (let elapsed = 0; elapsed < duration; elapsed += 16) t.mock.timers.tick(Math.min(16, duration - elapsed));
+  };
   const h = drawing(); h.send({ action: 'open', width: 354, height: 280, pixelRatio: 2 });
   assert.deepEqual(h.requests.identity[0].openIdList, ['selfOpenId']);
   h.requests.identity[0].success({ data: [{ openId: 'my-native-id', nickName: '我' }] });
   h.requests.mine[0].success({ KVDataList: kv(score()) });
-  const friends = Array.from({ length: 5 }, (_,i) => ({ openid: 'peer-'+i, nickname: '好友'+i, KVDataList: kv(score({ stars: 5 })) }));
+  const friends = Array.from({ length: 5 }, (_,i) => ({ openid: 'peer-'+i, nickname: '好友'+i, KVDataList: kv(score({ stars: 9, completed: 3 })) }));
   friends.push({ openid: 'my-native-id', nickname: '我', KVDataList: kv(score()) });
   h.requests.friends[0].success({ data: friends });
-  assert.ok(h.labels.includes('我的名次  1')); assert.ok(h.labels.includes('1 / 3 页 · 共 6 人'));
-  h.send({ action: 'page', delta: 1 }); assert.ok(h.labels.includes('2 / 3 页 · 共 6 人'));
+  assert.ok(h.frameLabels.includes('我的名次  6')); assert.ok(h.frameLabels.includes('6 人'));
+  assert.ok(h.frameLabels.includes('好友0')); assert.equal(h.frameLabels.includes('我 · 我'), false);
+  advanceFrames(400);
+  assert.ok(h.frameLabels.includes('我 · 我'), 'the first successful entry scrolls to my genuine row');
+  assert.equal(h.frameLabels.includes('好友0'), false);
+  assert.equal(h.labels.some(label => /刷新成绩|上一页|下一页|\d \/ \d/.test(label)), false);
+  const rankWrites = h.requests.writes.filter(write => write.KVDataList.some(item => item.key === KEY + '_seen_rank'));
+  assert.equal(rankWrites.length, 1);
+  assert.deepEqual(JSON.parse(rankWrites[0].KVDataList[0].value), { v: 1, rank: 6, index: 5 });
+  assert.equal(h.requests.writes.filter(write => write.KVDataList.some(item => item.key === KEY)).length, 0, 'viewing ranks never writes an aggregate score');
+  rankWrites[0].success();
+  h.send({ action: 'wheel', delta: -1000 }); advanceFrames(800);
+  assert.ok(h.frameLabels.includes('好友0')); assert.equal(h.frameLabels.includes('我 · 我'), false);
+  assert.equal(h.frameLabels.includes('定位我'), false, 'manual self-location is removed; scrolling remains available');
   h.send({ action: 'refresh' }); h.send({ action: 'close' }); const count = h.labels.length;
   h.requests.identity[1].success({ data: [{ openId: 'my-native-id' }] });
   h.requests.mine[1].success({ KVDataList: kv(score()) }); h.requests.friends[1].success({ data: friends });
+  advanceFrames(1500);
   assert.equal(h.labels.length, count);
 });
 test('open data submits own storage while closed without reading friends or drawing hidden canvases', async () => {
   const h = drawing(); h.send({ action: 'submit', score: score() });
   assert.equal(h.requests.friends.length, 0); assert.equal(h.requests.identity.length, 0);
   h.requests.mine[0].success({ KVDataList: [] }); await tick();
-  assert.equal(h.requests.writes.length, 1); h.requests.writes[0].success(); await tick();
+  const scoreWrites = h.requests.writes.filter(write => write.KVDataList.some(item => item.key === KEY));
+  assert.equal(scoreWrites.length, 1); assert.equal(parseScore(scoreWrites[0].KVDataList).stars, 6);
+  scoreWrites[0].success(); await tick();
   assert.equal(h.labels.length, 0); assert.equal(h.api.postMessage, undefined);
 });
 
@@ -215,16 +239,20 @@ test('a failed native identity lookup still displays the independently read own 
   h.requests.identity[0].fail({ errMsg: 'identity unavailable' });
   h.requests.mine[0].success({ KVDataList: kv(score()) }); h.requests.friends[0].success({ data: [] });
   assert.ok(h.labels.includes('我的最佳成绩')); assert.ok(h.labels.includes('本人成绩单独展示'));
-  assert.ok(h.labels.includes('6 ★ · 2 关')); h.send({ action: 'close' });
+  assert.ok(['6', '2', '20'].every(value => h.labels.includes(value))); h.send({ action: 'close' });
 });
 
 test('a stale identity callback cannot replace the active refresh identity', () => {
-  const h = drawing(); h.send({ action: 'open' }); h.send({ action: 'refresh' });
+  const h = drawing(); h.send({ action: 'open' });
+  // Scores finish independently while the first identity response stays late.
+  h.requests.mine[0].success({ KVDataList: [] }); h.requests.friends[0].success({ data: [] });
+  h.send({ action: 'refresh' });
   h.requests.identity[1].success({ data: [{ openId: 'correct-native-id', nickName: 'Correct' }] });
   h.requests.identity[0].success({ data: [{ openId: 'stale-native-id', nickName: 'Stale' }] });
   h.requests.mine[1].success({ KVDataList: kv(score()) });
   h.requests.friends[1].success({ data: [{ openid: 'correct-native-id', nickname: 'Correct', KVDataList: kv(score()) }] });
-  assert.ok(h.labels.includes('1 / 1 页 · 共 1 人')); assert.ok(h.labels.includes('我的名次  1'));
+  assert.ok(h.labels.includes('1 人')); assert.ok(h.labels.includes('我的名次  1'));
+  assert.equal(h.labels.includes('Stale'), false);
   h.send({ action: 'close' });
 });
 

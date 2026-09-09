@@ -1752,7 +1752,7 @@ test('friend-only ranking navigation preserves the active route and has no world
     const h = harness({ kind: 'browser', metrics }); h.start(); h.act('right');
     const saved = clone(h.game.store.loadRun()); h.game.openPage('leaderboard'); h.draw();
     const labels = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
-    assert.ok(labels.includes('好友排行榜')); assert.ok(!labels.includes('全服榜') && !labels.includes('世界榜'));
+    assert.ok(labels.includes('好友排行')); assert.ok(!labels.includes('全服榜') && !labels.includes('世界榜'));
     assert.equal(h.game.listScroll(), null); assert.equal(h.game.rankingAuthorization.getState().status, 'unavailable');
     h.game.home(); assert.deepEqual(h.game.store.loadRun(), saved); h.destroy();
   }
@@ -1798,37 +1798,71 @@ test('friend ranking uses existing local bests after native consent without logi
   h.destroy();
 });
 
-function rankingHarness() {
-  const messages = [], authorizations = [], settings = [], checks = [];
+function rankingHarness(options = {}) {
+  const messages = [], authorizations = [], settings = [], checks = [], privacy = [];
   let nickName = '微信邮差', holdChecks = false;
-  const permissions = { 'scope.userInfo': true, 'scope.WxFriendInteraction': true };
+  const permissions = { 'scope.userInfo': true, ...(options.friendGranted ? { 'scope.WxFriendInteraction': true } : {}) };
   const context = { canvas: { width: 1, height: 1 }, postMessage: message => messages.push(message) };
   const h = harness({ wx: {
-    requirePrivacyAuthorize: options => options.success(),
+    requirePrivacyAuthorize: options => { privacy.push(options); options.success(); },
     getSetting: options => { if (holdChecks) checks.push(options); else options.success({ authSetting: { ...permissions } }); },
     getUserInfo: options => options.success({ userInfo: { nickName, avatarUrl: '' } }),
     createUserInfoButton() { throw new Error('Already authorized profile needs no native button'); },
-    authorize: options => authorizations.push(options),
-    openSetting: options => settings.push(options),
+    authorize: options => authorizations.push({ ...options,
+      success: result => { permissions['scope.WxFriendInteraction'] = true; options.success(result); },
+      fail: error => { permissions['scope.WxFriendInteraction'] = false; options.fail(error); } }),
+    openSetting: options => settings.push({ ...options,
+      success: result => { Object.assign(permissions, result && result.authSetting); options.success(result); } }),
     getOpenDataContext: () => context,
   } });
   h.game.store.recordWin(1, 3, 4);
-  return { ...h, messages, authorizations, settings, checks, permissions,
+  return { ...h, messages, authorizations, settings, checks, privacy, permissions,
     rename: value => { nickName = value; }, holdChecks: value => { holdChecks = value; } };
 }
 const rankingTick = () => new Promise(resolve => setImmediate(resolve));
 
 test('revisiting rankings rechecks friend permission before a changed profile submits any score', async () => {
-  const h = rankingHarness();
+  for (const revoked of [false, true]) {
+    const h = rankingHarness();
+    try {
+      h.game.openPage('leaderboard'); await rankingTick(); h.authorizations[0].success(); await rankingTick();
+      h.game.home(); h.rename('新昵称'); h.messages.length = 0; h.holdChecks(true);
+      h.game.openPage('leaderboard'); h.draw();
+      assert.equal(h.game.friendLeaderboard.getState().status, 'preview', 'the click immediately restores the cached child');
+      assert.ok(h.calls.some(call => call.method === 'drawImage'), 'cached ranks are drawn before any permission reply');
+      assert.equal(h.calls.some(call => call.method === 'fillText' && /正在确认微信授权|等待授权|我的邮路/.test(String(call.args[0]))), false,
+        'returning players see neither an authorization card nor empty placeholders');
+      await rankingTick();
+      assert.equal(h.authorizations.length, 1); assert.equal(h.privacy.length, 1);
+      assert.equal(h.checks.length, 1);
+      assert.equal(h.messages.some(message => ['open', 'refresh', 'retry', 'submit'].includes(message.action)), false,
+        'showing cached ranks cannot initiate reads or changed-profile uploads during permission validation');
+      h.checks[0].success({ authSetting: { ...h.permissions, 'scope.WxFriendInteraction': !revoked } }); await rankingTick();
+      assert.equal(h.authorizations.length, 1, 'a current settings snapshot replaces repeated friend authorization');
+      if (revoked) {
+        assert.equal(h.messages.some(message => message.action === 'submit'), false);
+        assert.equal(h.game.friendLeaderboard.getState().status, 'denied');
+      } else {
+        assert.equal(h.messages.filter(message => message.action === 'open').length, 1);
+        const submitted = h.messages.filter(message => message.action === 'submit');
+        assert.equal(submitted.length, 1); assert.equal(submitted[0].score.name, '新昵称');
+      }
+    } finally { h.game.home(); h.destroy(); }
+  }
+});
+
+test('a delayed background profile denial removes the already visible cached leaderboard', async () => {
+  const h = rankingHarness(), profiles = [];
   try {
     h.game.openPage('leaderboard'); await rankingTick(); h.authorizations[0].success(); await rankingTick();
-    h.game.home(); h.rename('新昵称'); h.messages.length = 0;
-    h.game.openPage('leaderboard'); await rankingTick();
-    assert.equal(h.authorizations.length, 2);
-    assert.equal(h.messages.some(message => message.action === 'submit'), false);
-    h.authorizations[1].fail({ errMsg: 'authorize:fail auth deny' }); await rankingTick();
-    assert.equal(h.messages.some(message => message.action === 'submit'), false);
-    assert.equal(h.game.friendLeaderboard.getState().status, 'denied');
+    h.game.home(); h.game.platform.wx.getUserInfo = options => profiles.push(options); h.messages.length = 0;
+    h.game.openPage('leaderboard'); await rankingTick(); h.draw();
+    assert.equal(profiles.length, 1); assert.ok(h.calls.some(call => call.method === 'drawImage'));
+    profiles[0].fail({ errMsg: 'getUserInfo:fail auth deny' }); await rankingTick();
+    h.game.loop(); h.draw();
+    assert.equal(h.game.rankingAuthorization.getState().canDisplay, false);
+    assert.ok(h.messages.some(message => message.action === 'close'), 'known revocation purges the private child cache');
+    assert.equal(h.calls.some(call => call.method === 'drawImage'), false);
   } finally { h.game.home(); h.destroy(); }
 });
 
@@ -1856,7 +1890,8 @@ test('foreground recovery revalidates both permissions before resuming friend tr
       h.callbacks.hide(); h.game.store.recordWin(2, 3, 5); h.messages.length = 0; h.holdChecks(true);
       h.callbacks.show(); h.game.syncFriendScore();
       assert.equal(h.checks.length, 1); assert.equal(h.game.rankingAuthorization.getState().enabled, false);
-      assert.deepEqual(h.messages, [], 'nothing is sent while permissions are being checked');
+      assert.equal(h.messages.some(message => ['open', 'submit', 'retry', 'refresh'].includes(message.action)), false,
+        'cached preview draws cannot resume data traffic while permissions are being checked');
       h.checks[0].success({ authSetting: { ...h.permissions, ...(revoked ? { [revoked]: false } : {}) } }); await rankingTick();
       const traffic = h.messages.filter(message => ['submit', 'retry', 'refresh'].includes(message.action));
       if (revoked) {
@@ -1873,7 +1908,7 @@ test('foreground recovery revalidates both permissions before resuming friend tr
 });
 
 test('late profile authorization in the background waits for the player to open friends in the foreground', async () => {
-  const h = rankingHarness();
+  const h = rankingHarness({ friendGranted: true });
   try {
     h.game.openPage('leaderboard'); h.callbacks.hide(); await rankingTick();
     assert.equal(h.game.rankingAuthorization.getState().enabled, true);
@@ -1936,4 +1971,60 @@ test('a failed or page-cancelled foreground check can recover pending scores on 
       assert.equal(h.authorizations.length, 1, 'recovery uses existing permissions without another prompt');
     } finally { h.game.home(); h.destroy(); }
   }
+});
+
+test('WeChat scene motion draws at 60 FPS and returns to 30 without accelerating turns or paused routes', t => {
+  const { INTRO_MS } = require('../src/camera');
+  const h = harness(); t.after(() => h.destroy());
+  const draw = h.game.renderer.draw.bind(h.game.renderer), drawnAt = [];
+  h.game.renderer.draw = (...args) => { drawnAt.push(h.platform.now()); draw(...args); };
+  const frame = ms => { h.advance(ms, false); h.callbacks.frame(); };
+  h.start(CAMPAIGN[1]);
+  const initial = clone(h.game.state);
+  for (const ms of [10, 15, 17, 8]) frame(ms);
+  assert.equal(h.frameRates.at(-1), 60, 'the entrance uses the native 60 FPS cadence');
+  assert.equal(drawnAt.length, 4, 'each entrance RAF is painted, including short intervals');
+  assert.deepEqual(h.game.state, initial, 'the entrance itself spends no turns or light');
+
+  frame(INTRO_MS);
+  assert.equal(h.frameRates.at(-1), 30);
+  let before = drawnAt.length;
+  frame(1000 / 60);
+  assert.equal(drawnAt.length, before, 'a settled board skips the next 60 Hz callback');
+  frame(1000 / 60);
+  assert.equal(drawnAt.length, before + 1, 'a settled board paints at 30 FPS');
+
+  h.game.act('right');
+  before = drawnAt.length;
+  for (const ms of [9, 17, 8]) frame(ms);
+  assert.equal(h.frameRates.at(-1), 60, 'a real move restores smooth rendering');
+  assert.equal(drawnAt.length, before + 3, 'movement paints every native callback');
+  const firstMove = clone(h.game.state);
+  h.game.act('right');
+  assert.equal(h.game.pendingAction.action, 'right');
+  frame(MOVE_MS - 35);
+  assert.deepEqual(h.game.state, firstMove, 'extra drawing never executes a buffered turn early');
+  frame(1);
+  assert.equal(h.game.state.turn, initial.turn + 2, 'the buffered turn executes at the original MOVE_MS boundary');
+  assert.equal(h.game.state.energy, initial.energy - 2);
+  assert.deepEqual(h.game.actions, ['right', 'right']);
+  assert.equal(h.frameRates.at(-1), 60, 'the buffered movement also receives smooth frames');
+  frame(MOVE_MS + 1);
+  assert.equal(h.frameRates.at(-1), 30, 'completed movement returns to the idle cadence');
+
+  h.game.act('down'); frame(10);
+  assert.equal(h.frameRates.at(-1), 60);
+  h.game.act('down');
+  const paused = clone({ state: h.game.state, actions: h.game.actions, run: h.game.store.loadRun() });
+  h.game.pause();
+  assert.equal(h.game.pendingAction, null);
+  before = drawnAt.length;
+  frame(1000 / 60);
+  assert.equal(h.frameRates.at(-1), 30, 'pause overrides an in-flight scene animation');
+  assert.equal(drawnAt.length, before);
+  frame(1000 / 60);
+  assert.equal(drawnAt.length, before + 1);
+  frame(MOVE_MS + 1);
+  assert.deepEqual(clone({ state: h.game.state, actions: h.game.actions, run: h.game.store.loadRun() }), paused,
+    'paused frames neither consume light nor execute the cancelled input');
 });

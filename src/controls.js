@@ -5,9 +5,9 @@ const { UI_ICON, drawUiIcon } = require('./ui-icons');
 
 const CONTROL = Object.freeze({ height: 52, compactHeight: 44, icon: UI_ICON.size, gap: 8, depth: 3, lineHeight: 20 });
 const TONES = Object.freeze({
-  primary: { face: C.gold, held: '#dca85f', edge: '#ffe1a3', base: '#88613a', shine: '#fff0c2', ink: C.dark, icon: C.dark },
-  secondary: { face: '#2d5250', held: '#24443f', edge: '#78927a', base: '#0a2428', shine: '#b2c79b66', ink: C.ink, icon: C.gold },
-  quiet: { face: '#1d3c3e', held: '#2c504a', edge: '#526f64', base: '#102c2d', shine: '#82977933', ink: C.ink, icon: C.green }
+  primary: { face: '#39796b', held: '#2e655b', edge: '#4c8a77', base: '#285b52', shine: '#a6c9ad88', ink: C.white, icon: '#f3d4a0' },
+  secondary: { face: '#fcfaf0', held: '#e1eadc', edge: '#b7cbbd', base: '#b4c6b8', shine: '#ffffff', ink: C.ink, icon: C.green },
+  quiet: { face: '#edf2e8', held: '#d7e4d6', edge: '#c3d2c4', base: '#c4d2c5', shine: '#ffffff99', ink: C.ink, icon: C.green }
 });
 
 function optionsFor(style) { return style && typeof style === 'object' ? style : { style }; }
@@ -52,12 +52,16 @@ function drawButton(r, text, x, y, w, h, action, style) {
   // Color changes priority; geometry, icon size and baseline stay the same.
   const depth = CONTROL.depth, faceH = h - depth;
   const top = y + (pressed && !r.reducedMotion ? depth - 1 : 0);
-  const cut = 8, notch = primary && w >= 140;
+  const cut = primary ? 12 : 9, notch = primary && w >= 140;
   if (disabled) c.globalAlpha *= .46;
+  if (!pressed && !disabled && primary) {
+    r.round(x + 4, y + 7, w - 8, faceH, 14, '#476c5b12');
+    r.round(x + 2, y + 4, w - 4, faceH, 14, '#476c5b12');
+  }
   plaque(r, x, y + depth, w, faceH, cut, notch, tone.base);
   plaque(r, x, top, w, faceH, cut, notch, pressed ? tone.held : tone.face, tone.edge);
   r.line([[x + cut + 3, top + 2], [x + w - cut - 3, top + 2]], tone.shine, 1);
-  const middle = top + h / 2;
+  const middle = top + faceH / 2;
   const groupX = x + ui.inset + (w - ui.inset * 2 - ui.trailing - ui.leading - ui.textSpan) / 2;
   if (options.icon) {
     const iconOnly = String(text).length === 0;
