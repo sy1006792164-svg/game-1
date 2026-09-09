@@ -8,6 +8,8 @@ const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const { CAMPAIGN, undoFor } = require('../src/levels');
 const { MOVE_MS } = require('../src/motion');
+const { drawResultHeader, drawResultStars } = require('../src/result-effects');
+const { C } = require('../src/theme');
 const { RUN_KEY, PROFILE_KEY, DEV_RUN_KEY, DEV_PROFILE_KEY } = require('../src/storage');
 
 const mainPath = path.join(__dirname, '../src/main.js');
@@ -83,10 +85,13 @@ function harness(options = {}) {
       suspend(reason) { soundCalls.push(['suspend', reason]); }, resume(reason) { soundCalls.push(['resume', reason]); },
     }) };
     if (specifier === './config') return { REWARDED_AD_UNIT_ID: options.configured === false ? '' : 'adunit-integrationtest' };
+    // Non-guide scenarios deliberately explore waits, failures and buffered input.
+    // Keep their saved profiles intact while dedicated guide cases use the real policy.
+    if (specifier === './play-guide' && options.guide !== true) return { ...actualRequire(specifier), autoGuide: () => false };
     return actualRequire(specifier);
   }, module, module.exports, ClockDate);
   const game = new module.exports.Game(platform);
-  function draw() { calls.length = 0; now += 200; game.renderer.draw(game, now, metrics); }
+  function draw(ms = 200) { calls.length = 0; now += ms; game.renderer.draw(game, now, metrics); }
   return {
     game, data, clock, calls, callbacks, platform, draw, soundCalls, audio, ad, frameRates,
     get showCount() { return showCount; },
@@ -97,6 +102,62 @@ function harness(options = {}) {
     destroy() { game.ads.destroy(); game.sound.release(); }
   };
 }
+
+test('selecting the ongoing level resumes its route and guide while explicit restart begins again', () => {
+  const h = harness({ guide: true }); h.start();
+  h.act('right'); h.act('right'); h.game.undo();
+  const state = clone(h.game.state), run = clone(h.game.store.loadRun());
+  h.game.openPage('levels'); h.draw(500);
+  assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '进行中'));
+  assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '继续投递'));
+  assert.equal(h.game.selectLevel(1), true);
+  assert.deepEqual(h.game.state, state);
+  assert.deepEqual(h.game.store.loadRun(), run);
+  assert.equal(h.game.undosUsed, 1);
+  assert.equal(h.game.guideEnabled, true);
+  const reloaded = harness({ data: h.data, guide: true });
+  reloaded.game.openPage('levels');
+  assert.equal(reloaded.game.selectLevel(1), true);
+  assert.deepEqual(reloaded.game.state, state);
+  assert.equal(reloaded.game.undosUsed, 1);
+  assert.equal(reloaded.game.guideStep().step, h.game.guideStep().step);
+  reloaded.game.pause();
+  reloaded.game.modal.buttons.find(button => button.text === '重新开始').action();
+  assert.equal(reloaded.game.state.turn, 0);
+  assert.equal(reloaded.game.undosUsed, 0);
+  assert.deepEqual(reloaded.game.actions, []);
+  h.destroy(); reloaded.destroy();
+});
+
+test('a temporary score write failure recovers on backgrounding without losing the unlocked next route', () => {
+  for (const enterNext of [false, true]) {
+    const h = harness(); h.start();
+    const save = h.platform.storage.set;
+    let unavailable = true;
+    h.platform.storage.set = (key, value) => {
+      if (key === PROFILE_KEY && unavailable) throw new Error('temporarily unavailable');
+      return save(key, value);
+    };
+    CAMPAIGN[0].solution.forEach(action => h.act(action));
+    assert.equal(h.game.state.status, 'won');
+    assert.equal(h.game.store.getStatus().persisted, false);
+    if (enterNext) {
+      h.game.modal.buttons[0].action();
+      h.act(CAMPAIGN[1].solution[0]);
+    }
+    const state = clone(h.game.state);
+    unavailable = false;
+    h.callbacks.hide();
+    assert.equal(h.game.store.getStatus().persisted, true);
+    const reloaded = harness({ data: h.data });
+    assert.deepEqual(reloaded.game.profile().completed['1'], { stars: 3, bestTurns: 4 });
+    assert.equal(reloaded.game.unlocked(1), true);
+    assert.equal(reloaded.game.restore(), enterNext);
+    if (enterNext) assert.deepEqual(reloaded.game.state, state);
+    else assert.equal(reloaded.game.savedRun(), null);
+    h.destroy(); reloaded.destroy();
+  }
+});
 
 test('WeChat lists draw every RAF at 60 FPS and restore 30 FPS for modals and other pages', () => {
   const h = harness();
@@ -267,6 +328,111 @@ test('real turn events select distinct sounds without replaying outcomes after u
   const count = h.soundCalls.length;
   h.game.victory();
   assert.equal(h.soundCalls.length, count, 'opening the result does not replay its jingle');
+});
+
+test('result effects preserve earned stars and saves, fit small screens and allow immediate next-level taps', t => {
+  for (const [waits, earned] of [[0, 3], [1, 2], [3, 1]]) {
+    const h = harness({ guide: waits === 0, metrics: { width: 320, height: 568, pixelRatio: 2, safeTop: 70, safeBottom: 20 } });
+    t.after(() => h.destroy()); h.start();
+    for (let i = 0; i < waits; i++) h.act('wait');
+    CAMPAIGN[0].solution.forEach(action => h.act(action));
+    assert.equal(h.game.modal.stars, earned);
+    const snapshot = clone({ state: h.game.state, profile: h.game.profile(), actions: h.game.actions, data: Array.from(h.data) });
+    const soundCount = h.soundCalls.length, ages = [];
+    const renderer = h.game.renderer, modal = renderer.modal.bind(renderer);
+    let bounds;
+    renderer.modal = (value, now, age) => { ages.push(age); bounds = modal(value, now, age); return bounds; };
+    h.draw(399);
+    assert.equal(ages.length, 0, 'the final move gets its existing 400 ms presentation');
+    assert.equal(renderer.hits.length, 0, 'the covered board has no active hit targets');
+    h.draw(1);
+    assert.equal(ages.at(-1), 0);
+    assert.ok(bounds.y >= 0 && bounds.y + bounds.h <= renderer.H, 'the result fits the smallest supported phone');
+    assert.ok(h.game.modal.buttons.every(button => renderer.hits.some(hit => hit.action === button.action)), 'every action is available on the first visible result frame');
+    const next = renderer.hits.find(hit => hit.action === h.game.modal.buttons[0].action);
+    for (const ms of [120, 330, 750, 3800]) h.draw(ms);
+    assert.deepEqual(clone({ state: h.game.state, profile: h.game.profile(), actions: h.game.actions, data: Array.from(h.data) }), snapshot);
+    assert.equal(h.soundCalls.length, soundCount, 'drawing and finishing the animation do not replay feedback');
+
+    const icons = [], icon = renderer.icon.bind(renderer);
+    renderer.icon = (...args) => { icons.push(args); icon(...args); };
+    drawResultStars(renderer, h.game.modal.stars, bounds.y + bounds.starsY, null);
+    assert.equal(icons.filter(args => args[0] === 'star' && args[4] === C.yellow).length, earned, 'the final row lights only the stars actually earned');
+    renderer.icon = icon;
+
+    const resultDraws = ages.length;
+    const x = renderer.ox + (next.x + next.w / 2) * renderer.scale;
+    const y = renderer.oy + (next.y + next.h / 2) * renderer.scale;
+    h.game.pointerEvent(x, y, 'start'); h.game.pointerEvent(x, y, 'end');
+    assert.equal(h.game.level.id, 2);
+    assert.equal(h.game.modal, null);
+    h.draw(1);
+    assert.equal(ages.length, resultDraws, 'no result overlay survives into the next level');
+  }
+});
+
+test('failed result effects keep the original turn time across review, ads and backgrounding', async t => {
+  const h = harness(); t.after(() => h.destroy()); h.start();
+  for (let i = 0; i < CAMPAIGN[0].budget; i++) h.act('wait');
+  const renderer = h.game.renderer, modal = renderer.modal.bind(renderer), ages = [];
+  renderer.modal = (value, now, age) => { ages.push({ kind: value.kind, age }); return modal(value, now, age); };
+  h.draw(400);
+  assert.deepEqual(ages.at(-1), { kind: 'fail', age: 0 });
+  assert.ok(h.game.modal.buttons.every(button => renderer.hits.some(hit => hit.action === button.action)), 'failure actions are immediately available too');
+  h.game.modal.buttons.find(button => /刚才的路线/.test(button.text)).action();
+  h.draw(500);
+  assert.equal(ages.length, 1);
+  h.game.pause(); h.draw(0);
+  assert.deepEqual(ages.at(-1), { kind: 'fail', age: 500 }, 'reviewing does not restart the effect');
+
+  let pending = h.game.requestRevive(); await Promise.resolve();
+  h.draw(100);
+  assert.equal(ages.at(-1).age, null, 'the ad loading dialog is not an outcome');
+  h.advance(1200, false); h.closeAd(false); await pending; h.draw(0);
+  assert.deepEqual(ages.at(-1), { kind: 'fail', age: 1800 }, 'cancelling an ad does not replay failure');
+  h.callbacks.hide(); h.advance(4000, false); h.callbacks.show();
+  assert.deepEqual(ages.at(-1), { kind: 'fail', age: 5800 }, 'returning from the background expires the effect instead of restarting it');
+  assert.equal(h.soundCalls.filter(call => call[0] === 'play' && call[1] === 'fail').length, 1);
+
+  pending = h.game.requestRevive(); await Promise.resolve(); h.closeAd(true); await pending;
+  const resultDraws = ages.length;
+  h.draw(0);
+  assert.equal(h.game.state.status, 'playing');
+  assert.equal(ages.length, resultDraws, 'a relit route has no leftover failure effect');
+  for (let i = h.game.state.energy; i > 0; i--) h.act('wait');
+  h.draw(400);
+  assert.deepEqual(ages.at(-1), { kind: 'fail', age: 0 }, 'a new real failure gets its own effect');
+  h.game.modal.buttons.find(button => /免费再试/.test(button.text)).action(); h.draw(0);
+  assert.equal(h.game.modal, null);
+  assert.equal(h.game.state.turn, 0);
+});
+
+test('restored failures are static and outcome decorations stop after their short presentation', t => {
+  const h = harness(); t.after(() => h.destroy()); h.start();
+  for (let i = 0; i < CAMPAIGN[0].budget; i++) h.act('wait');
+  const restored = harness({ data: h.data }); t.after(() => restored.destroy());
+  assert.equal(restored.game.restore(), true);
+  const renderer = restored.game.renderer, modal = renderer.modal.bind(renderer);
+  let age, bounds;
+  renderer.modal = (value, now, resultAge) => { age = resultAge; bounds = modal(value, now, resultAge); return bounds; };
+  restored.draw(0);
+  assert.equal(age, null, 'saved failure has no fresh event to animate');
+  assert.ok(renderer.hits.length > 0);
+  assert.equal(restored.soundCalls.some(call => call[0] === 'play' && call[1] === 'fail'), false);
+
+  function decoration(kind, resultAge, reducedMotion = false) {
+    restored.calls.length = 0; renderer.reducedMotion = reducedMotion;
+    drawResultHeader(renderer, kind, bounds, resultAge);
+    if (kind === 'win') drawResultStars(renderer, 2, 200, resultAge);
+    return clone(restored.calls);
+  }
+  for (const kind of ['win', 'fail']) {
+    const settled = decoration(kind, null);
+    assert.notDeepEqual(decoration(kind, 220), settled, kind + ' has visible short feedback');
+    assert.deepEqual(decoration(kind, 5000), settled, kind + ' stops animating instead of looping');
+    assert.deepEqual(decoration(kind, 9000), settled);
+    assert.deepEqual(decoration(kind, 220, true), settled, 'reduced motion renders the final state');
+  }
 });
 
 test('a complete first delivery records three stars, unlocks the next level and clears its run', () => {
@@ -468,6 +634,252 @@ test('the first route starts without a modal and explains the real echo countdow
   h.destroy();
 });
 
+test('first-route guidance depends on that route and the dismissal preference, not unrelated wins', () => {
+  const score = { stars: 3, bestTurns: 4 };
+  const profiles = [
+    { name: 'fresh profile', profile: {}, enabled: true },
+    { name: 'another campaign win', profile: { completed: { 2: score } }, enabled: true },
+    { name: 'archived daily win', profile: { daily: { '2026-09-08': score } }, enabled: true },
+    { name: 'first route completed', profile: { completed: { 1: score } }, enabled: false },
+    { name: 'explicitly dismissed', profile: { guideDismissed: true }, enabled: false }
+  ];
+  for (const scenario of profiles) {
+    const profile = { version: 1, completed: {}, daily: {}, ...scenario.profile };
+    const h = harness({ guide: true, data: new Map([[PROFILE_KEY, profile]]) });
+    h.start();
+    assert.equal(h.game.guideEnabled, scenario.enabled, scenario.name);
+    assert.equal(!!h.game.guideStep(), scenario.enabled, scenario.name);
+    assert.equal(h.game.modal, null, 'guidance starts on the real board');
+    h.start(CAMPAIGN[1]);
+    assert.equal(h.game.guideEnabled, false, 'later routes retain free play');
+    h.destroy();
+  }
+});
+
+test('first-route guidance gives four executable neighboring taps and the real three-turn echo delay', () => {
+  const h = harness({ guide: true }); h.start();
+  for (const [index, cell] of [14, 15, 16, 17].entries()) {
+    const guide = h.game.guideStep();
+    assert.equal(guide.step, index + 1);
+    assert.equal(guide.total, 4);
+    assert.equal(guide.action, 'right');
+    assert.equal(guide.visual.tapCell, cell, 'the pointer must stay on the next reachable floor');
+    const { neighbor } = require('../src/engine');
+    assert.equal(neighbor(h.game.level, h.game.state.player, guide.action, h.game.state), cell);
+    if (index) assert.equal(guide.visual.echo.turns, 4 - index);
+    h.act(guide.action);
+    assert.equal(h.game.state.player, cell);
+    assert.equal(h.game.state.turn, index + 1);
+  }
+  assert.equal(h.game.state.status, 'won');
+  assert.deepEqual(h.game.state.letters, []);
+  assert.deepEqual(h.game.state.seals, []);
+  assert.equal(h.game.state.echo, 14);
+  assert.equal(h.game.profile().completed['1'].stars, 3);
+  assert.equal(h.game.guideStep(), null);
+  assert.equal(h.game.store.loadRun(), null);
+  h.destroy();
+});
+
+test('guide mis-taps, reverse movement and wait keys preserve energy and the saved route', () => {
+  const h = harness({ guide: true }); h.start(); h.draw();
+  const initial = clone(h.game.state), saved = clone(h.game.store.loadRun());
+  tapBoardPoint(h, h.game.renderer.boardGeometry.projection.point(h.game.state.player));
+  h.callbacks.key(' ');
+  h.callbacks.key('ArrowUp');
+  h.act('wait');
+  assert.deepEqual(h.game.state, initial, 'selecting the courier cannot spend the first teaching turn');
+  assert.deepEqual(h.game.store.loadRun(), saved);
+  h.act('right'); h.draw();
+  const onStamp = clone(h.game.state), stampRun = clone(h.game.store.loadRun());
+  h.act('left');
+  h.callbacks.key(' ');
+  tapBoardPoint(h, h.game.renderer.boardGeometry.projection.point(h.game.level.letters[0]));
+  assert.deepEqual(h.game.state, onStamp, 'a valid backward step and a distant goal tap cannot bypass the lesson');
+  assert.deepEqual(h.game.store.loadRun(), stampRun);
+  assert.equal(h.game.pendingAction, null);
+  assert.equal(h.game.guideStep().visual.tapCell, 15);
+  h.act('right');
+  assert.equal(h.game.state.player, 15, 'the recommended input still works after mistakes');
+  h.destroy();
+});
+
+test('guide callout taps advance one real action even when a frame renders before touch release', () => {
+  for (const priorSteps of [0, 2]) {
+    const h = harness({ guide: true }); h.start();
+    for (let index = 0; index < priorSteps; index++) h.act('right');
+    h.advance(1200, false); h.draw();
+    const guide = h.game.guideStep(), r = h.game.renderer;
+    const label = h.calls.find(call => call.method === 'fillText' && call.args[0] === guide.visual.label);
+    assert.ok(label, 'the real drawing must expose the current callout');
+    const [, x, y] = label.args;
+    const hit = r.hits.slice().reverse().find(item => x >= item.x && x <= item.x + item.w &&
+      y >= item.y && y <= item.y + item.h && (!item.contains || item.contains(x, y)));
+    assert.ok(hit && !hit.contains, 'the callout itself must have a hit region independent of the floor');
+    const before = clone(h.game.state), actions = [...h.game.actions, guide.action];
+    const dx = x * r.scale + r.ox, dy = y * r.scale + r.oy;
+    h.game.pointerEvent(dx, dy, 'start');
+    h.draw();
+    h.game.pointerEvent(dx, dy, 'end');
+    assert.equal(h.game.state.turn, before.turn + 1, guide.visual.label + ' spends exactly one turn');
+    assert.equal(h.game.state.energy, before.energy - 1);
+    assert.equal(h.game.state.player, guide.visual.tapCell);
+    assert.deepEqual(h.game.actions, actions);
+    assert.deepEqual(h.game.state, replayed(h.game.level, actions));
+    assert.deepEqual(h.game.store.loadRun().actions, actions);
+    h.advance(MOVE_MS * 2);
+    assert.equal(h.game.state.turn, before.turn + 1, 'the label never queues a duplicate action');
+    h.destroy();
+  }
+});
+
+test('guide taps on actual empty board space show a correction without changing the saved route', () => {
+  const h = harness({ guide: true }); h.start(); h.advance(1200, false); h.draw();
+  const r = h.game.renderer, rect = r.boardRect;
+  const occupied = (x, y) => r.hits.some(hit => x >= hit.x && x <= hit.x + hit.w &&
+    y >= hit.y && y <= hit.y + hit.h && (!hit.contains || hit.contains(x, y)));
+  let blank;
+  for (let y = rect.y + 8; y < rect.y + rect.h - 8 && !blank; y += 12) {
+    for (let x = rect.x + 8; x < rect.x + rect.w - 8; x += 12) {
+      if (!occupied(x, y)) { blank = [x, y]; break; }
+    }
+  }
+  assert.ok(blank, 'choose real board background outside every rendered hit region');
+  const before = clone(h.game.state), saved = clone(h.game.store.loadRun());
+  const dx = blank[0] * r.scale + r.ox, dy = blank[1] * r.scale + r.oy;
+  h.game.pointerEvent(dx, dy, 'start');
+  assert.equal(h.game.pointer.scene, true);
+  h.draw();
+  h.game.pointerEvent(dx, dy, 'end');
+  assert.deepEqual(h.game.state, before);
+  assert.deepEqual(h.game.store.loadRun(), saved);
+  assert.equal(h.game.pendingAction, null);
+  assert.equal(h.game.blockedAt, h.platform.now());
+  assert.ok(h.game.toastUntil > h.platform.now(), 'an empty-space mistake needs visible feedback');
+  assert.match(h.game.toastText, /手指.*亮格/);
+  h.destroy();
+});
+
+test('guide animation ignores repeated input without buffering a hidden extra teaching step', () => {
+  const h = harness({ guide: true }); h.start();
+  h.game.act('right');
+  const first = clone(h.game.state), saved = clone(h.game.store.loadRun());
+  h.advance(30, false); h.game.act('right');
+  h.advance(30, false); h.game.act('wait');
+  assert.equal(h.game.pendingAction, null);
+  assert.deepEqual(h.game.state, first);
+  assert.deepEqual(h.game.store.loadRun(), saved);
+  h.advance(MOVE_MS * 2);
+  assert.deepEqual(h.game.state, first, 'finishing the animation must wait for a fresh deliberate input');
+  assert.deepEqual(h.game.actions, ['right']);
+  h.act('right');
+  assert.deepEqual(h.game.actions, ['right', 'right']);
+  h.destroy();
+});
+
+test('skipping enables free play and reopening guidance follows the actual detour without resetting it', () => {
+  const h = harness({ guide: true }); h.start();
+  h.game.dismissGuide();
+  assert.equal(h.game.guideStep(), null);
+  assert.equal(h.game.profile().guideDismissed, true);
+  for (const action of ['right', 'left', 'right']) h.act(action);
+  assert.equal(h.game.state.turn, 3, 'free play accepts the reverse step');
+  const before = clone(h.game.state), actions = clone(h.game.actions);
+  h.game.showGuide();
+  assert.deepEqual(h.game.state, before);
+  assert.deepEqual(h.game.actions, actions);
+  assert.notEqual(h.game.profile().guideDismissed, true);
+  assert.equal(h.game.guideStep().action, 'right');
+  assert.equal(h.game.guideStep().visual.tapCell, 15);
+  assert.equal(h.game.guideStep().visual.echo.turns, 1, 'the oldest pending visit determines the real countdown');
+  for (let index = 0; index < 3; index++) h.act(h.game.guideStep().action);
+  assert.equal(h.game.state.status, 'won');
+  assert.equal(h.game.state.turn, 6);
+  h.destroy();
+});
+
+test('guide undo, relaunch and retry derive the next lesson from the replayed route', () => {
+  const h = harness({ guide: true }); h.start();
+  for (let index = 0; index < 3; index++) h.act('right');
+  assert.equal(h.game.guideStep().step, 4);
+  h.game.undo();
+  assert.equal(h.game.guideStep().step, 3);
+  assert.equal(h.game.guideStep().visual.tapCell, 16);
+  assert.equal(h.game.guideStep().visual.echo.turns, 2);
+  const before = clone(h.game.state), actions = clone(h.game.actions);
+  const reloaded = harness({ guide: true, data: h.data });
+  assert.equal(reloaded.game.restore(), true);
+  assert.deepEqual(reloaded.game.state, before);
+  assert.deepEqual(reloaded.game.actions, actions);
+  assert.equal(reloaded.game.guideStep().step, 3);
+  assert.equal(reloaded.game.guideStep().visual.tapCell, 16);
+  assert.equal(reloaded.game.guideStep().visual.echo.turns, 2);
+  reloaded.start();
+  assert.equal(reloaded.game.guideStep().step, 1);
+  assert.equal(reloaded.game.guideStep().visual.tapCell, 14);
+  assert.equal(reloaded.game.state.energy, CAMPAIGN[0].budget);
+  assert.equal(reloaded.game.undosUsed, 0);
+  h.destroy(); reloaded.destroy();
+});
+
+test('completed players can resume or restart a manually opened guide and keep a later dismissal', () => {
+  const h = harness({ guide: true }); h.start();
+  CAMPAIGN[0].solution.forEach(action => h.act(action));
+  const earned = clone(h.game.profile().completed);
+  h.start();
+  assert.equal(h.game.guideEnabled, false, 'a completed first route no longer auto-opens guidance');
+  h.game.showGuide(); h.act('right');
+  const before = clone(h.game.state);
+  const reloaded = harness({ guide: true, data: h.data });
+  assert.equal(reloaded.game.restore(), true);
+  assert.equal(reloaded.game.guideEnabled, true, 'manual guidance must survive relaunch independently of autoGuide');
+  assert.deepEqual(reloaded.game.state, before);
+  assert.equal(reloaded.game.guideStep().visual.tapCell, 15);
+  reloaded.start();
+  assert.equal(reloaded.game.guideEnabled, true, 'retry keeps the manually chosen lesson active');
+  assert.equal(reloaded.game.guideStep().step, 1);
+  reloaded.game.dismissGuide();
+  const dismissed = harness({ guide: true, data: h.data });
+  assert.equal(dismissed.game.restore(), true);
+  assert.equal(dismissed.game.guideEnabled, false, 'a stale saved guide flag cannot undo an explicit dismissal');
+  dismissed.act('wait');
+  assert.equal(dismissed.game.state.turn, 1, 'free play is restored after relaunch');
+  assert.deepEqual(dismissed.game.profile().completed, earned);
+  h.destroy(); reloaded.destroy(); dismissed.destroy();
+});
+
+test('an unsolvable detour offers undo or an explicit fresh guide instead of spending more light', () => {
+  for (const remainingUndos of [true, false]) {
+    const h = harness({ guide: true }); h.start(); h.game.dismissGuide();
+    if (!remainingUndos) {
+      for (let index = 0; index < CAMPAIGN[0].undo; index++) { h.act('wait'); h.game.undo(); }
+    }
+    for (let index = 0; index < 5; index++) h.act('wait');
+    assert.equal(h.game.state.status, 'playing');
+    assert.equal(h.game.state.energy, 3, 'four moves are still needed from the start');
+    h.game.showGuide();
+    assert.equal(h.game.guideStep().control, remainingUndos ? 'undo' : 'restart');
+    const before = clone(h.game.state), saved = clone(h.game.store.loadRun());
+    h.act('right'); h.act('wait');
+    assert.deepEqual(h.game.state, before, 'recovery must happen before another route action');
+    assert.deepEqual(h.game.store.loadRun(), saved);
+    if (remainingUndos) {
+      h.game.undo();
+      assert.equal(h.game.guideStep().action, 'right');
+      assert.equal(h.game.state.energy, 4);
+    } else {
+      h.game.restartGuide();
+      assert.equal(h.game.guideEnabled, true);
+      assert.equal(h.game.guideStep().step, 1);
+      assert.equal(h.game.state.turn, 0);
+      assert.equal(h.game.state.energy, CAMPAIGN[0].budget);
+      assert.equal(h.game.undosUsed, 0);
+      assert.deepEqual(h.game.actions, []);
+    }
+    h.destroy();
+  }
+});
+
 test('a difficulty update restarts the changed route with notice and preserves earned progress', () => {
   const h = harness(); h.start();
   CAMPAIGN[0].solution.forEach(action => h.act(action));
@@ -518,6 +930,7 @@ test('a failed route can be reviewed without spending turns and free retry prese
   const failed = clone(h.game.state), saved = clone(h.game.store.loadRun());
   assert.equal(h.game.modal.buttons[0].primary, true);
   assert.match(h.game.modal.buttons[0].text, /看视频续灯/, 'with a configured ad the relight leads the failure dialog');
+  assert.ok(h.game.modal.lines.some(line => /最高二星/.test(line)), 'the score limit is disclosed before choosing an ad');
   const retry = h.game.modal.buttons.find(button => /免费再试/.test(button.text));
   assert.ok(retry, 'the free retry always remains available');
   assert.equal(retry.primary, false);
@@ -744,13 +1157,14 @@ function tapBoardPoint(h, point) {
 }
 
 test('post office roof, door and ready badge deliver from the screenshot state without changing the camera', () => {
+  const cameraState = ({ zoom, panX, panY, enteredAt }) => ({ zoom, panX, panY, enteredAt });
   const views = [
     { name: 'default', camera: {} },
     { name: 'zoomed out', camera: { zoom: .7 } },
     { name: 'zoom and pan', camera: { zoom: 1.4, panX: .08, panY: .04 } }
   ];
   for (const view of views) for (const part of ['roof', 'door', 'badge']) {
-    const h = readyPostOffice(view.camera), beforeCamera = clone(h.game.camera);
+    const h = readyPostOffice(view.camera), beforeCamera = cameraState(h.game.camera);
     const beforeTurn = h.game.state.turn, beforeActions = h.game.actions.length;
     tapBoardPoint(h, postOfficePoint(h, part));
     assert.equal(h.game.state.player, h.game.level.exit, `${view.name}: tapping ${part} enters the post office`);
@@ -759,7 +1173,13 @@ test('post office roof, door and ready badge deliver from the screenshot state w
     assert.equal(h.game.state.energy, 1);
     assert.equal(h.game.actions.length, beforeActions + 1);
     assert.equal(h.game.actions.at(-1), 'up');
-    assert.deepEqual(clone(h.game.camera), beforeCamera, 'delivery does not require a camera change');
+    assert.deepEqual(cameraState(h.game.camera), beforeCamera, 'delivery does not require a camera change');
+    h.draw(45);
+    const effect = h.game.camera.frame(h.platform.now());
+    assert.ok(Math.hypot(effect.panX - beforeCamera.panX, effect.panY - beforeCamera.panY) > 0, 'delivery adds only a temporary visual impact');
+    h.draw(215);
+    assert.equal(h.game.camera.frame(h.platform.now()).panX, beforeCamera.panX);
+    assert.equal(h.game.camera.frame(h.platform.now()).panY, beforeCamera.panY);
     h.destroy();
   }
 });
@@ -1104,6 +1524,191 @@ test('large campaign boards render and accept adjacent moves at phone sizes', ()
       assert.equal(h.game.state.energy, expected.energy);
       assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '撤回（1）'));
       assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '等一拍'));
+    }
+    h.destroy();
+  }
+});
+
+test('repeated destination taps during arrival do not turn a move into an accidental wait', () => {
+  for (const redraw of [false, true]) {
+    const h = harness(); h.start(); h.draw(900);
+    const target = h.game.state.player + 1;
+    const device = boardDevicePoint(h, h.game.renderer.boardGeometry.projection.point(target));
+    const tap = () => { h.game.pointerEvent(...device, 'start'); h.game.pointerEvent(...device, 'end'); };
+    tap();
+    const arrived = clone(h.game.state), saved = clone(h.game.store.loadRun());
+    if (redraw) h.draw(70); else h.advance(70, false);
+    tap();
+    assert.equal(h.game.pendingAction, null, 'a duplicate move destination must not queue a wait');
+    h.advance(MOVE_MS - 70);
+    assert.deepEqual(h.game.state, arrived);
+    assert.deepEqual(h.game.store.loadRun(), saved);
+    tap();
+    assert.deepEqual(h.game.actions, ['right', 'wait'], 'the settled foot tile still supports intentional waiting');
+    h.destroy();
+  }
+});
+
+test('the explicit wait button still queues an intentional wait during movement', () => {
+  const h = harness(); h.start(); h.draw(900);
+  tapBoardPoint(h, h.game.renderer.boardGeometry.projection.point(h.game.state.player + 1));
+  h.draw(70);
+  const r = h.game.renderer, button = r.hits.find(hit => hit.x === 201 && hit.w === 165 && hit.h === 52);
+  assert.ok(button);
+  const x = (button.x + button.w / 2) * r.scale + r.ox, y = (button.y + button.h / 2) * r.scale + r.oy;
+  h.game.pointerEvent(x, y, 'start'); h.game.pointerEvent(x, y, 'end');
+  assert.equal(h.game.pendingAction.action, 'wait');
+  h.advance(MOVE_MS - 70);
+  assert.deepEqual(h.game.actions, ['right', 'wait']);
+  h.destroy();
+});
+
+test('board inspection, viewport changes and cancelled touches discard buffered movement', () => {
+  const gestures = [
+    { name: 'zoom', run: (h, x, y) => h.game.zoomScene(x, y, 1.2) },
+    { name: 'drag', run: (h, x, y) => {
+      h.game.pointerEvent(x, y, 'start'); h.game.pointerEvent(x + 40, y, 'move'); h.game.pointerEvent(x + 40, y, 'end');
+    } },
+    { name: 'resize', run: h => h.callbacks.resize() },
+    { name: 'cancel', run: (h, x, y) => {
+      h.game.pointerEvent(x, y, 'start'); h.game.pointerEvent(x, y, 'cancel');
+    } },
+  ];
+  for (const gesture of gestures) {
+    const h = harness(); h.start(); h.game.camera.zoom = 1.3; h.draw(900);
+    h.game.act('right'); h.advance(40, false); h.game.act('right');
+    assert.ok(h.game.pendingAction);
+    const state = clone(h.game.state), saved = clone(h.game.store.loadRun());
+    const r = h.game.renderer, b = r.boardRect;
+    gesture.run(h, (b.x + b.w / 2) * r.scale + r.ox, (b.y + b.h / 2) * r.scale + r.oy);
+    assert.equal(h.game.pendingAction, null, gesture.name + ' cancels buffered movement immediately');
+    h.advance(MOVE_MS * 2);
+    assert.deepEqual(h.game.state, state, gesture.name + ' cannot spend a turn while inspecting the board');
+    assert.deepEqual(h.game.store.loadRun(), saved);
+    h.destroy();
+  }
+});
+
+function propPoint(h, cell, kind) {
+  const p = h.game.renderer.boardGeometry.projection, [x, y] = p.point(cell), now = h.platform.now();
+  const size = p.halfW * (kind === 'letter' ? .76 : .7);
+  if (kind === 'light') {
+    const scale = size / 24, angle = Math.sin(now / 870 + x) * .06;
+    return [x + (5 - 7 * Math.sin(angle)) * scale, y - 1 + (-25 + 7 * Math.cos(angle)) * scale];
+  }
+  const angle = Math.sin(now / 1500 + cell) * .09, offset = size * (kind === 'letter' ? .18 : .3);
+  return [x + offset * Math.sin(angle), y - size * .5 + Math.sin(now / 670 + cell * .7) * 2.2 - offset * Math.cos(angle)];
+}
+
+test('visible mail and lantern shapes select their own cells across animation frames and camera views', () => {
+  const samples = [
+    { id: 7, turn: 9, cell: 35, kind: 'seal', action: 'down' },
+    { id: 1, turn: 2, cell: 16, kind: 'letter', action: 'right' },
+    { id: 19, turn: 2, cell: 31, kind: 'light', action: 'left' },
+  ];
+  for (const sample of samples) for (const now of [3200, 3400, 3600, 3800, 4000]) for (const view of [
+    { zoom: .7, panX: 0, panY: 0 }, { zoom: 1, panX: 0, panY: 0 }, { zoom: 1.4, panX: .02, panY: -.01 },
+  ]) {
+    const h = harness(), level = CAMPAIGN[sample.id - 1], actions = level.solution.slice(0, sample.turn);
+    h.start(level); actions.forEach(action => h.act(action)); Object.assign(h.game.camera, view); h.draw(now - h.platform.now());
+    tapBoardPoint(h, propPoint(h, sample.cell, sample.kind));
+    assert.equal(h.game.state.player, sample.cell, sample.kind + ' selects its painted object instead of the floor behind it');
+    assert.deepEqual(h.game.state, replayed(level, [...actions, sample.action]));
+    h.destroy();
+  }
+});
+
+test('prop hit shapes preserve exposed neighboring floors and do not move toward distant objects', () => {
+  for (const zoom of [1, 1.4]) for (const target of [28, 35, 33]) {
+    const h = harness(), level = CAMPAIGN[6], actions = level.solution.slice(0, 9);
+    h.start(level); actions.forEach(action => h.act(action)); h.game.camera.zoom = zoom; h.draw(600);
+    const before = clone(h.game.state), p = h.game.renderer.boardGeometry.projection;
+    tapBoardPoint(h, target === 33 ? propPoint(h, target, 'seal') : p.point(target));
+    if (target === 33) {
+      assert.deepEqual(h.game.state, before, 'the distant stamp cannot activate a floor hidden behind it');
+      assert.match(h.game.toastText, /点相邻格/);
+    } else assert.equal(h.game.state.player, target, 'uncovered floor ' + target + ' remains directly reachable');
+    h.destroy();
+  }
+});
+
+test('WeChat renders a bounded canvas shake for pickups and wins without hardware vibration', () => {
+  const cases = [
+    { id: 1, actions: ['right'], shakes: false },
+    { id: 1, actions: ['wait'], shakes: false },
+    { id: 1, actions: Array(CAMPAIGN[0].budget).fill('wait'), shakes: false },
+    { id: 1, turns: 3, shakes: true },
+    { id: 7, turns: 7, shakes: true },
+    { id: 19, turns: 3, shakes: true },
+    { id: 1, turns: 4, shakes: true },
+  ];
+  for (const sample of cases) {
+    const h = harness({ kind: 'wechat' }), level = CAMPAIGN[sample.id - 1];
+    assert.equal(h.platform.wx.vibrateShort, undefined, 'the device bridge provides no hardware vibration');
+    h.platform.vibrate = () => {};
+    h.start(level); h.draw(900);
+    (sample.actions || level.solution.slice(0, sample.turns)).forEach(action => h.act(action));
+    if (h.game.state.status === 'playing') h.game.act('wait');
+    const snapshot = clone({ state: h.game.state, actions: h.game.actions, saved: h.game.store.loadRun(), pending: h.game.pendingAction });
+    const camera = h.game.camera, baseline = { zoom: camera.zoom, panX: camera.panX, panY: camera.panY };
+    h.draw(45);
+    const view = h.game.renderer.boardGeometry.view, dx = view.panX - baseline.panX, dy = view.panY - baseline.panY;
+    assert.equal(Math.hypot(dx, dy) > 0, sample.shakes, JSON.stringify(sample));
+    assert.ok(Math.abs(dx) <= .012 && Math.abs(dy) <= .0045, 'feedback stays within a few screen pixels');
+    h.draw(215);
+    assert.equal(h.game.renderer.boardGeometry.view.panX, baseline.panX, 'the view settles after 260 ms');
+    assert.equal(h.game.renderer.boardGeometry.view.panY, baseline.panY);
+    assert.deepEqual({ zoom: camera.zoom, panX: camera.panX, panY: camera.panY }, baseline, 'visual feedback cannot drift the chosen camera');
+    assert.deepEqual(clone({ state: h.game.state, actions: h.game.actions, saved: h.game.store.loadRun(), pending: h.game.pendingAction }), snapshot,
+      'drawing the effect never advances the puzzle, saves a turn or changes queued input');
+    h.destroy();
+  }
+});
+
+test('shaking board projections keep floor and floating-object taps aligned after zoom and pan', () => {
+  const targets = [{ cell: 23, kind: 'letter', action: 'up' }, { cell: 35, kind: 'seal', action: 'down' }, { cell: 28, action: 'left' }];
+  for (const zoom of [.7, 1, 1.4]) for (const target of targets) {
+    const h = harness({ kind: 'wechat' }), level = CAMPAIGN[6], actions = level.solution.slice(0, 7);
+    h.start(level); actions.slice(0, -1).forEach(action => h.act(action)); h.draw(400);
+    h.game.camera.zoomAt(zoom); h.game.camera.pan(.06, -.02); h.act(actions.at(-1)); h.draw(45);
+    const r = h.game.renderer, view = r.boardGeometry.view;
+    assert.ok(Math.hypot(view.panX - h.game.camera.panX, view.panY - h.game.camera.panY) > 0);
+    const point = target.kind ? propPoint(h, target.cell, target.kind) : r.boardGeometry.projection.point(target.cell);
+    tapBoardPoint(h, point);
+    assert.equal(h.game.pendingAction.action, target.action, 'the visibly shifted target queues its own grid direction');
+    assert.deepEqual(h.game.actions, actions, 'the active move must finish before the tapped next step');
+    h.advance(MOVE_MS - 45);
+    assert.deepEqual(h.game.state, replayed(level, [...actions, target.action]));
+    assert.deepEqual(h.game.actions, [...actions, target.action]);
+    h.destroy();
+  }
+});
+
+test('canvas shake is cleared by pausing, lifecycle changes, route recovery and camera gestures', () => {
+  const transitions = [
+    { name: 'pause', run: h => { h.game.pause(); h.game.modal.buttons[0].action(); } },
+    { name: 'background', run: h => { h.callbacks.hide(); h.callbacks.show(); h.game.modal.buttons[0].action(); } },
+    { name: 'resize', run: h => h.callbacks.resize() },
+    { name: 'undo', run: h => h.game.undo() },
+    { name: 'restart', run: h => h.start() },
+    { name: 'restore', run: h => assert.equal(h.game.restore(), true) },
+    { name: 'zoom', run: (h, x, y) => h.game.zoomScene(x, y, 1.1) },
+    { name: 'pan', run: (h, x, y) => {
+      h.game.pointerEvent(x, y, 'start'); h.game.pointerEvent(x + 40, y, 'move'); h.game.pointerEvent(x + 40, y, 'end');
+    } },
+  ];
+  for (const transition of transitions) {
+    const h = harness(); h.start(); h.game.camera.zoomAt(1.4); h.draw(900);
+    CAMPAIGN[0].solution.slice(0, 3).forEach(action => h.act(action)); h.draw(45);
+    const camera = h.game.camera, active = camera.frame(h.platform.now());
+    assert.ok(Math.hypot(active.panX - camera.panX, active.panY - camera.panY) > 0);
+    const r = h.game.renderer, b = r.boardRect;
+    transition.run(h, (b.x + b.w / 2) * r.scale + r.ox, (b.y + b.h / 2) * r.scale + r.oy);
+    for (const age of [0, 40, 300]) {
+      h.draw(age);
+      const view = camera.frame(h.platform.now());
+      assert.equal(view.panX, camera.panX, transition.name + ' clears horizontal feedback without a later replay');
+      assert.equal(view.panY, camera.panY, transition.name + ' clears vertical feedback without a later replay');
     }
     h.destroy();
   }

@@ -2,7 +2,7 @@
 const { createPlatform } = require('./platform');
 const { createStore } = require('./storage');
 const { createAds } = require('./ads');
-const { ACTIONS, DIRECTIONS, createState, step, replay, revive, stars } = require('./engine');
+const { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, createState, step, replay, revive, stars } = require('./engine');
 const { CAMPAIGN } = require('./levels');
 const { getAlbum } = require('./stamp-album');
 const { ListScroll } = require('./list-scroll');
@@ -41,7 +41,7 @@ class Game {
     this.toastText = ''; this.toastUntil = 0; this.transitionAt = 0; this.motionPath = null;
     this.busy = false; this.hidden = false; this.lastFrame = 0; this.pointer = null; this.pendingAction = null; this.blockedAt = null;
     this.metrics = platform.resize();
-    platform.onResize(() => { this.stopListScrolling(); this.pointer = null; this.metrics = platform.resize(); this.lastFrame = -Infinity; });
+    platform.onResize(() => { this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.metrics = platform.resize(); this.lastFrame = -Infinity; });
     platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor, pan) => this.zoomScene(x, y, factor, pan), (x, y, delta) => this.scrollList(x, y, delta));
     platform.onKey(key => {
       this.unlockAudio();
@@ -61,7 +61,7 @@ class Game {
       else if (key === 'z' || key === 'Backspace') this.undo();
     });
     platform.onHide(() => {
-      this.hidden = true; this.stopListScrolling(); this.pointer = null; this.pendingAction = null; this.persist();
+      this.hidden = true; this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.persist();
       this.sound.suspend('hidden'); this.syncMusic();
       if (this.frameId != null) platform.cancelRaf(this.frameId);
       this.frameId = null;
@@ -104,13 +104,28 @@ class Game {
   dismissGuide() {
     this.pendingAction = null; this.guideEnabled = false;
     this.store.setGuideDismissed(true);
-    this.toast('已跳过引导，可在第一关的暂停菜单重新开启');
+    this.persist();
+    this.toast('已跳过引导，点上方“操作引导”可重新开启');
   }
   showGuide() {
     if (!canGuide(this.level, this.mode) || this.page !== 'game' || this.busy || !this.state || this.state.status !== 'playing') return;
     this.pendingAction = null; this.pointer = null; this.blockedAt = null; this.toastUntil = 0;
     this.store.setGuideDismissed(false);
-    this.guideEnabled = true; this.modal = null; this.reviewing = false; this.syncMusic();
+    this.guideEnabled = true; this.modal = null; this.reviewing = false; this.persist(); this.syncMusic();
+  }
+  restartGuide() {
+    if (!canGuide(this.level, this.mode) || this.page !== 'game' || this.busy || this.hidden) return;
+    this.start(this.level, this.mode); this.showGuide();
+  }
+  guideMisstep() {
+    const guide = this.guideStep();
+    if (!guide) return false;
+    this.pendingAction = null; this.blockedAt = this.platform.now();
+    this.toast(guide.control === 'undo' ? '先点下方“撤回”，恢复拍数后继续学。'
+      : guide.control === 'restart' ? '点下方“重新学一遍”，从起点跟着走。'
+      : guide.control === 'wait' ? '点下方“等一拍”，让回声继续走。'
+      : '直接点手指指向的亮格，不用先选人物。');
+    return true;
   }
   record(level, mode) {
     const p = this.profile();
@@ -125,6 +140,8 @@ class Game {
   selectLevel(id) {
     if (this.hidden || this.busy || !Number.isInteger(id) || !this.unlocked(id - 1)) return false;
     if (this.modal && this.modal.kind !== 'developer-level') return false;
+    const saved = this.savedRun();
+    if (saved && saved.levelId === id && this.restore()) return true;
     this.start(CAMPAIGN[id - 1], 'campaign');
     return true;
   }
@@ -168,7 +185,9 @@ class Game {
     if (force || enabled !== this.musicActive) { this.musicActive = enabled; this.sound.ambience(enabled); }
   }
   persist() {
-    if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', actions: this.actions.slice(), reviveAt: this.reviveAt, undosUsed: this.undosUsed });
+    if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', actions: this.actions.slice(), reviveAt: this.reviveAt, undosUsed: this.undosUsed,
+      ...(this.guideEnabled ? { guide: true } : {}) });
+    else this.store.flush();
   }
   restore() {
     this.pendingAction = null; this.blockedAt = null;
@@ -193,7 +212,8 @@ class Game {
       this.transitionAt = this.platform.now() - MOVE_MS;
       this.actions = run.actions.slice(); this.reviveAt = run.reviveAt; this.undosUsed = undosUsed;
       this.mode = run.mode; this.page = 'game'; this.session++;
-      this.guideEnabled = autoGuide(this.profile(), level, this.mode);
+      this.guideEnabled = autoGuide(this.profile(), level, this.mode) ||
+        (canGuide(level, this.mode) && run.guide === true && !this.profile().guideDismissed);
       this.pointer = null; this.camera.enter(this.platform.now());
       this.modal = null; this.reviewing = false;
       if (state.status === 'failed') this.failure();
@@ -203,10 +223,11 @@ class Game {
   }
   start(level, mode = 'campaign') {
     if (this.busy || mode !== 'campaign') return;
+    const keepGuide = this.guideEnabled && this.level === level && this.state && this.state.status !== 'won';
     this.stopListScrolling(); this.pointer = null;
     this.pendingAction = null; this.blockedAt = null;
     this.level = level; this.mode = mode || 'campaign';
-    this.guideEnabled = autoGuide(this.profile(), level, this.mode);
+    this.guideEnabled = canGuide(level, this.mode) && (keepGuide || autoGuide(this.profile(), level, this.mode));
     this.state = createState(level); this.previousState = null; this.moveEvents = []; this.motionPath = null; this.actions = []; this.reviveAt = null; this.undosUsed = 0;
     this.page = 'game'; this.modal = null; this.reviewing = false; this.session++; this.transitionAt = this.platform.now() - MOVE_MS; this.toastUntil = 0;
     this.pointer = null; this.camera.enter(this.platform.now());
@@ -220,7 +241,9 @@ class Game {
     if (this.page !== 'game' || this.modal || this.busy || this.hidden || this.reviewing || !this.state || this.state.status !== 'playing') { this.pendingAction = null; return; }
     if (!ACTIONS.includes(action)) return;
     const now = this.platform.now();
-    if (now - this.transitionAt < MOVE_MS) { this.pendingAction = { action, at: now }; return; }
+    const guide = this.guideStep();
+    if (guide && action !== guide.action) { this.guideMisstep(); return; }
+    if (now - this.transitionAt < MOVE_MS) { this.pendingAction = guide ? null : { action, at: now }; return; }
     this.pendingAction = null;
     const result = step(this.level, this.state, action);
     if (!result.moved) {
@@ -228,16 +251,20 @@ class Game {
       this.blockedAt = now; return;
     }
     this.blockedAt = null;
+    if (guide) this.toastUntil = 0;
     this.previousState = this.state; this.state = result.state;
     this.actions.push(action); this.transitionAt = now;
     this.moveEvents = result.events; this.motionPath = null;
     const feedback = turnFeedback(result.events, this.previousState, this.state);
     feedback.sounds.forEach(type => this.cue(type));
-    if (feedback.haptic) this.platform.vibrate();
+    if (feedback.haptic) {
+      this.camera.shake(now, this.state.status === 'won' ? 1 : .6);
+      this.platform.vibrate();
+    }
     this.persist();
     if (this.state.status === 'won') this.victory();
     else if (this.state.status === 'failed') this.failure();
-    else if (this.state.player === this.level.exit && (this.state.letters.length || this.state.seals.length)) this.toast('还差信笺或回声邮票，集齐后再来投递');
+    else if (this.state.player === this.level.exit && (this.state.letters.length || this.state.seals.length)) this.toast(this.playHint());
   }
   undoLeft() { return Math.max(0, this.undoLimit() - this.undosUsed); }
   undoLimit(level = this.level) { return level && Number.isInteger(level.undo) ? level.undo : DEFAULT_UNDO; }
@@ -257,6 +284,7 @@ class Game {
     try { state = replay(this.level, actions, this.reviveAt); } catch (_) { return; }
     const undone = step(this.level, state, this.actions[this.actions.length - 1]);
     this.motionPath = [state.player, ...undone.events.filter(event => event.type === 'move' || event.type === 'wind').map(event => event.cell)].reverse();
+    this.camera.stopShake();
     this.previousState = this.state; this.state = state; this.actions = actions; this.undosUsed += 1;
     this.moveEvents = [{ type: 'undo', cell: state.player }]; this.transitionAt = this.platform.now(); this.persist(); this.cue('undo');
   }
@@ -273,6 +301,9 @@ class Game {
     const saveLine = saved ? '本次纪录已保存。' : '本次纪录仅在本次运行保留。';
     const bestLine = !before ? saveLine : this.state.turn < before.bestTurns ? '刷新纪录，比上次少走 ' + (before.bestTurns - this.state.turn) + ' 拍。' : this.state.turn === before.bestTurns ? '追平个人最佳 · ' + before.bestTurns + ' 拍' : '个人最佳 ' + before.bestTurns + ' 拍 · 本次多走 ' + (this.state.turn - before.bestTurns) + ' 拍';
     const lines = [this.state.turn + ' 拍完成' + (this.state.revived ? ' · 续灯最高二星' : ''), bestLine];
+    if (this.guideEnabled && canGuide(this.level, this.mode)) {
+      lines.push('你收信；回声晚 3 次行动，替你收蓝票。', '收齐信和票，再走进邮局就能过关。');
+    }
     if (before && !saved) lines.push(saveLine);
     const rewards = this.album().stamps.filter(stamp => stamp.owned && !albumBefore.stamps[stamp.index].owned);
     if (rewards.length) lines.push(rewards.length > 1 ? '收到 ' + rewards.length + ' 枚新邮票' : '收到新邮票「' + rewards[0].name + '」');
@@ -280,9 +311,9 @@ class Game {
       kind: 'win', title: '信已送达', stars: rating,
       lines,
       buttons: [
-        { text: next ? '下一封信' : '返回邮局', primary: true, action: () => next ? this.start(next, this.mode) : this.home() },
-        { text: '再走一次', textOnly: true, action: () => this.start(this.level, this.mode) },
-        ...(rewards.length ? [{ text: '看看邮票册', textOnly: true, action: () => this.openPage('collection') }] : [])
+        { text: next ? '下一封信' : '返回邮局', primary: true, icon: next ? 'letter' : 'home', action: () => next ? this.start(next, this.mode) : this.home() },
+        { text: '再走一次', textOnly: true, icon: 'restart', action: () => this.start(this.level, this.mode) },
+        ...(rewards.length ? [{ text: '看看邮票册', textOnly: true, icon: 'stamp', action: () => this.openPage('collection') }] : [])
       ]
     };
   }
@@ -304,12 +335,13 @@ class Game {
     // letters and stamps all survive, so it is the natural way to finish.
     this.modal = {
       kind: 'fail', title: canRevive ? '灯灭了，路线还在' : '换条路线，再寄一次',
-      lines: [remaining.length ? '还差 ' + remaining.join(' / ') : '信笺和邮票已收齐', this.failureHint()],
+      lines: [remaining.length ? '还差 ' + remaining.join(' / ') : '信笺和邮票已收齐', this.failureHint(),
+        ...(canRevive ? ['续灯保留路线与收集，本次最高二星。'] : [])],
       buttons: [
-        ...(canRevive ? [{ text: '看视频续灯 +' + Math.max(8, Math.ceil(this.level.budget * .5)) + ' 拍 · 接着送', primary: true, action: () => this.requestRevive() }] : []),
-        { text: '重新规划 · 免费再试', primary: !canRevive, action: () => this.start(this.level, this.mode) },
-        { text: '看看刚才的路线', action: () => { this.modal = null; this.reviewing = true; } },
-        { text: '返回邮局', textOnly: true, action: () => this.home() }
+        ...(canRevive ? [{ text: '看视频续灯 +' + Math.max(8, Math.ceil(this.level.budget * .5)) + ' 拍 · 接着送', primary: true, icon: 'lamp', action: () => this.requestRevive() }] : []),
+        { text: '重新规划 · 免费再试', primary: !canRevive, icon: 'restart', action: () => this.start(this.level, this.mode) },
+        { text: '看看刚才的路线', icon: 'route', action: () => { this.modal = null; this.reviewing = true; } },
+        { text: '返回邮局', textOnly: true, icon: 'home', action: () => this.home() }
       ]
     };
   }
@@ -344,17 +376,18 @@ class Game {
   }
   pause() {
     this.pendingAction = null;
+    this.camera.stopShake();
     if (this.busy) return;
     if (this.reviewing) { this.failure(); return; }
     if (this.modal && this.modal.kind === 'pause') { this.modal = null; this.syncMusic(); return; }
     if (!this.state || this.state.status !== 'playing') return;
     const saveLine = this.store.getStatus().persisted ? '路线已自动保存，没有倒计时。' : '没有倒计时。路线仅在本次运行保留。';
     this.modal = { kind: 'pause', title: '歇一会', lines: [saveLine], buttons: [
-      { text: '继续投递', primary: true, action: () => { this.modal = null; this.syncMusic(); } },
-      { text: '重新开始', action: () => this.start(this.level, this.mode) },
-      ...(canGuide(this.level, this.mode) ? [{ text: '操作引导', textOnly: true, action: () => this.showGuide() }] : []),
-      { text: '玩法说明', textOnly: true, action: () => this.help() },
-      { text: '返回邮局', textOnly: true, action: () => this.home() }
+      { text: '继续投递', primary: true, icon: 'play', action: () => { this.modal = null; this.syncMusic(); } },
+      { text: '重新开始', icon: 'restart', action: () => this.start(this.level, this.mode) },
+      ...(canGuide(this.level, this.mode) ? [{ text: '操作引导', textOnly: true, icon: 'route', action: () => this.showGuide() }] : []),
+      { text: '玩法说明', textOnly: true, icon: 'book', action: () => this.help() },
+      { text: '返回邮局', textOnly: true, icon: 'home', action: () => this.home() }
     ] };
     this.sound.stop(); this.musicActive = false;
   }
@@ -362,12 +395,16 @@ class Game {
     this.pendingAction = null;
     const old = this.modal, l = this.page === 'game' ? this.level : null;
     const lines = ['点相邻亮格移动，点脚下格或“等一拍”等待。', '你收橙色信笺，晚三拍的回声收蓝色邮票。', '全部收齐后，走到邮局即可过关。'];
-    if (l) lines.push('双指捏合放大棋盘，放大后可拖动查看；电脑滚轮缩放。');
+    if (l) {
+      lines.push(this.state.revived ? '本次已续灯，最高二星；' + (l.par + STAR_TWO_MARGIN) + ' 拍内得二星。'
+        : '评分：' + l.par + ' 拍内三星，' + (l.par + STAR_TWO_MARGIN) + ' 拍内二星。');
+      lines.push('双指捏合缩放，放大后拖动；电脑用滚轮。');
+    }
     if (l && Object.keys(l.winds).length) lines.push('箭头会再推一格，等待不会触发风。');
     if (l && l.lights.length) lines.push('每盏风灯只补一次，共 3 拍。');
     if (l && (l.bridges || []).length) lines.push('纸桥离开后就碎，回声可以通过。');
     this.modal = { kind: 'help', title: '和回声一起送信', lines,
-      buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
+      buttons: [{ text: '明白了', primary: true, icon: 'check', action: () => { this.modal = old; } }] };
   }
   home() { if (this.busy) return; this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
   openPage(page) {
@@ -400,7 +437,7 @@ class Game {
     if (this.page !== 'game' || this.modal || this.busy || this.hidden) return;
     const p = this.renderer.toLogical(x, y), b = this.renderer.boardRect;
     if (!b || !insideRect(b, p.x, p.y)) return;
-    this.pointer = null;
+    this.pointer = null; this.pendingAction = null;
     const dx = pan.dx / this.renderer.scale / b.w, dy = pan.dy / this.renderer.scale / b.h;
     this.camera.zoomAt(factor, (p.x - b.x - b.w / 2) / b.w - dx, (p.y - b.y - b.h / 2 - 4) / b.h - dy, dx, dy);
     this.cameraMovedAt = this.platform.now();
@@ -418,7 +455,7 @@ class Game {
         scene: this.page === 'game' && !this.modal && !this.busy && !this.hidden && b && insideRect(b, p.x, p.y) };
       return;
     }
-    if (type === 'cancel') { this.pointer = null; this.stopListScrolling(); return; }
+    if (type === 'cancel') { this.pointer = null; this.pendingAction = null; this.stopListScrolling(); return; }
     if (this.pointer && this.pointer.list && (type === 'move' || type === 'end')) {
       if (this.page !== this.pointer.list || this.modal || this.busy) { this.pointer = null; this.stopListScrolling(); return; }
       const scroll = this.listScroll();
@@ -431,7 +468,7 @@ class Game {
       const origin = this.pointer, b = this.renderer.boardRect;
       if (!b || this.modal || this.busy || this.hidden || this.page !== 'game') { this.pointer = null; return; }
       if (origin.dragging || Math.hypot(p.x - origin.x, p.y - origin.y) > 8) {
-        origin.dragging = true;
+        origin.dragging = true; this.pendingAction = null;
         this.camera.pan((p.x - origin.lastX) / b.w, (p.y - origin.lastY) / b.h);
         this.cameraMovedAt = this.platform.now();
         origin.lastX = p.x; origin.lastY = p.y;
@@ -450,7 +487,7 @@ class Game {
       hit.action();
       if (!origin.scene && cues === this.cueCount) this.cue('tap');
       this.syncMusic();
-    }
+    } else if (origin.scene) this.guideMisstep();
   }
   loop() {
     if (this.hidden) return;

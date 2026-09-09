@@ -1,10 +1,13 @@
 'use strict';
 const { C } = require('./theme');
+const { CONTROL, drawButton } = require('./controls');
+const { drawUiIcon, UI_ICON } = require('./ui-icons');
 const { drawHome } = require('./home-view');
 const { drawGame } = require('./game-view');
 const { drawLevels } = require('./level-view');
 const { drawCollection } = require('./collection-view');
 const { drawModal } = require('./modal-view');
+const { RESULT_DELAY_MS } = require('./result-effects');
 const { drawDeveloperPicker } = require('./developer-view');
 const { drawBackdrop } = require('./scene');
 const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑': 'arrow-up', '↓': 'arrow-down', '↗': 'arrow-ne', '↘': 'arrow-se', '↙': 'arrow-sw', '↖': 'arrow-nw', '✓': 'check' });
@@ -63,24 +66,9 @@ class Renderer {
   circle(x, y, r, fill, stroke) { const c = this.ctx; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.lineWidth = 1.3; c.strokeStyle = stroke; c.stroke(); } }
   hit(x, y, w, h, action, contains) { this.hits.push({ x, y, w, h, action, contains }); }
   button(text, x, y, w, h, action, style) {
-    const options = typeof style === 'object' && style ? style : { style };
-    const primary = options.style === 'primary', quiet = options.style === 'quiet', disabled = !!options.disabled;
-    const c = this.ctx, p = this.pointer, pressed = !disabled && p && p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h;
-    const top = y + (pressed && !quiet && !this.reducedMotion ? 2 : 0);
-    c.save();
-    if (disabled) c.globalAlpha *= .45;
-    if (!quiet) {
-      this.round(x, y + 3, w, h, 13, primary ? '#805c37' : '#0b2529');
-      this.round(x, top, w, h, 13, primary ? pressed ? '#dca962' : C.gold : pressed ? C.soft : C.raised, primary ? '#f3ce94' : C.line);
-      this.line([[x + 15, top + 2], [x + w - 15, top + 2]], primary ? '#ffe6b377' : '#50727088', .8);
-    } else if (pressed) this.round(x, y, w, h, 12, C.soft);
-    const size = w < 70 ? String(text).length > 1 ? 11 : 23 : quiet ? 13 : 15, weight = primary ? '700' : '500';
-    const lines = this.wrapLines(text, w - 32, size, weight), lineHeight = 20;
-    const textY = top + h / 2 - (lines.length - 1) * lineHeight / 2;
-    lines.forEach((line, i) => this.text(line, x + w / 2, textY + i * lineHeight, size, primary ? C.dark : C.ink, 'center', weight));
-    c.restore();
-    if (!disabled) this.hit(x, y, w, h, action);
+    drawButton(this, text, x, y, w, h, action, style);
   }
+  actionIcon(type, x, y, color) { drawUiIcon(this, type, x, y, color || C.green); }
   meter(x, y, w, value, target, color) {
     this.round(x, y, w, 5, 2.5, '#18383a');
     const filled = Math.max(0, Math.min(1, value / Math.max(1, target))) * w;
@@ -158,6 +146,7 @@ class Renderer {
       this.line([[-11, -3], [-4, -9], [4, -9], [11, -3]], color, 1.8);
     } else if (type === 'back') this.line([[4, -8], [-4, 0], [4, 8]], color, 1.8);
     else if (type === 'lock') { this.round(-6, -1, 12, 11, 2, color); this.line([[-4, -1], [-4, -6], [0, -9], [4, -6], [4, -1]], color, 1.7); this.circle(0, 4, 1.3, C.paper); }
+    else drawUiIcon(this, type, 0, 0, color, UI_ICON.viewBox);
     c.restore();
   }
   courier(x, y, size, ghost, pose) {
@@ -203,10 +192,14 @@ class Renderer {
     this.text('风 · 邮', x, y - 7, 10, color || C.muted, 'center'); this.text(label, x, y + 9, 10, color || C.muted, 'center');
   }
   header(title, subtitle, back) {
-    this.round(21, 15, 34, 34, 11, '#224348');
-    this.icon('back', 38, 32, 17, C.green); this.hit(16, 10, 44, 44, back);
+    this.button('', 16, 10, 44, CONTROL.compactHeight, back, { style: 'quiet', icon: 'back' });
     this.label(title, 69, 29, 291, 19, C.ink, 'left', '600'); this.label(subtitle, 69, 53, 291, 10, C.muted);
     this.line([[24, 77], [366, 77]], '#345254', .7);
+  }
+  scrim(color) {
+    this.ctx.fillStyle = color;
+    this.ctx.fillRect(-this.ox / this.scale, -this.oy / this.scale,
+      390 + this.ox * 2 / this.scale, this.H + (this.oy + this.safeBottom) / this.scale);
   }
   draw(game, now, metrics) {
     const c = this.ctx; const ratio = metrics.pixelRatio || 1;
@@ -234,12 +227,16 @@ class Renderer {
     if (game.modal) {
       this.hits = [];
       this.pointer = game.pointer;
-      const result = (game.modal.kind === 'win' || game.modal.kind === 'fail') &&
-        (game.moveEvents || []).some(event => event.type === 'win' || event.type === 'fail');
+      const kind = game.modal.kind;
+      const result = game.page === 'game' && game.state &&
+        ((kind === 'win' && game.state.status === 'won') || (kind === 'fail' && game.state.status === 'failed')) &&
+        Number.isFinite(game.transitionAt) && (game.moveEvents || []).some(event => event && event.type === kind);
+      // Outcome effects belong to the real turn, so reviewing a result cannot restart them.
+      const resultAge = result && !this.reducedMotion ? now - game.transitionAt - RESULT_DELAY_MS : null;
       if (game.modal.kind === 'developer-level') {
         if (game.development) modalBounds = drawDeveloperPicker(this, game);
       }
-      else if (!result || this.reducedMotion || now - game.transitionAt >= 400) modalBounds = this.modal(game.modal, now);
+      else if (resultAge === null || resultAge >= 0) modalBounds = this.modal(game.modal, now, resultAge);
       else this.modalAt = now;
     }
     if (game.toastUntil > now) {
@@ -258,6 +255,6 @@ class Renderer {
   levels(game) { drawLevels(this, game); }
   collection(game) { drawCollection(this, game); }
   game(game, now) { drawGame(this, game, now); }
-  modal(modal, now) { return drawModal(this, modal, now); }
+  modal(modal, now, resultAge = null) { return drawModal(this, modal, now, resultAge); }
 }
 module.exports = { Renderer };

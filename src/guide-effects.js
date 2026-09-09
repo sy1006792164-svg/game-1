@@ -6,9 +6,17 @@ const { INTRO_MS } = require('./camera');
 
 const COLORS = { move: C.gold, letter: C.gold, echo: C.blue, home: C.green };
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const overlaps = (a, b) => a && b && a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+const fits = (box, rect) => box.x >= rect.x + 4 && box.y >= rect.y + 4 && box.x + box.w <= rect.x + rect.w - 4 && box.y + box.h <= rect.y + rect.h - 4;
+
+function playerBounds(visual, p) {
+  if (!p.visible(visual.player)) return null;
+  const [x, y] = p.point(visual.player);
+  return { x: x - p.halfW * .8, y: y - p.halfW * 1.4, w: p.halfW * 1.6, h: p.halfW * 1.6 };
+}
 
 function guideOpacity(r, game, guide, now) {
-  if (!guide || game.modal || game.busy || game.hidden || (game.pointer && game.pointer.scene)) return 0;
+  if (!guide || game.modal || game.busy || game.hidden || (game.pointer && game.pointer.scene && game.pointer.dragging)) return 0;
   if (r.reducedMotion) return 1;
   return Math.min(clamp((now - game.camera.enteredAt - INTRO_MS) / 200, 0, 1),
     clamp((now - game.transitionAt - MOVE_MS) / 180, 0, 1),
@@ -38,7 +46,7 @@ function tapGesture(r, x, y, now, color) {
   c.restore();
 }
 
-function drawFocus(r, visual, p, rect, now) {
+function drawFocus(r, visual, p, rect, now, onTap) {
   const focus = visual.focus;
   if (!focus || !p.visible(focus.cell)) return null;
   const [x, y] = p.point(focus.cell), c = r.ctx, color = COLORS[focus.kind];
@@ -65,25 +73,58 @@ function drawFocus(r, visual, p, rect, now) {
   if (canTap) tapGesture(r, x, y, now, color);
   // Reserve the arrow's full travel so the echo badge never flips sides with its bounce.
   const boundsTop = clamp(arrowBaseY - arrowTravel, rect.y + 17, rect.y + rect.h - 17) - 17;
-  return { x: x - radius, y: boundsTop, w: radius * 2, h: y + radius - boundsTop };
+  const bounds = { x: x - radius, y: boundsTop, w: radius * 2, h: y + radius - boundsTop };
+  if (canTap) {
+    const label = visual.label || '点这里';
+    r.font(11, '600');
+    const w = clamp(c.measureText(label).width + 20, 58, 104), h = 24;
+    const left = clamp(x - w / 2, rect.x + 4, rect.x + rect.w - w - 4);
+    const actor = playerBounds(visual, p);
+    const badge = [y + radius + 7, boundsTop - h - 5]
+      .map(top => ({ x: left, y: top, w, h })).find(box => fits(box, rect) && !overlaps(box, actor));
+    if (badge) {
+      r.panel(badge.x, badge.y, w, h, { fill: '#17383a', stroke: color, radius: 8 });
+      r.label(label, badge.x + w / 2, badge.y + h / 2, w - 16, 11, C.white, 'center', '600');
+      r.hit(badge.x, badge.y, w, h, onTap);
+      const right = Math.max(bounds.x + bounds.w, badge.x + w), bottom = Math.max(bounds.y + bounds.h, badge.y + h);
+      bounds.x = Math.min(bounds.x, badge.x); bounds.w = right - bounds.x;
+      bounds.y = Math.min(bounds.y, badge.y); bounds.h = bottom - bounds.y;
+    }
+  }
+  return bounds;
 }
 
-function drawEchoCountdown(r, echo, p, rect, focusBounds) {
+function drawPlayerLabel(r, visual, p, rect, focusBounds) {
+  const actor = playerBounds(visual, p);
+  if (!actor) return null;
+  const badge = [actor.x - 32, actor.x + actor.w + 6]
+    .map(x => ({ x, y: actor.y + actor.h * .4, w: 26, h: 20 }))
+    .find(box => fits(box, rect) && !overlaps(box, focusBounds));
+  if (!badge) return null;
+  r.round(badge.x, badge.y, badge.w, badge.h, 7, C.dark, C.gold);
+  r.text('你', badge.x + badge.w / 2, badge.y + badge.h / 2, 11, C.gold, 'center', '600');
+  return badge;
+}
+
+function drawEchoCountdown(r, echo, p, rect, occupied) {
   if (!echo || !p.visible(echo.cell)) return;
   const [x, y] = p.point(echo.cell);
   if (x < rect.x || x > rect.x + rect.w || y < rect.y || y > rect.y + rect.h) return;
   const w = 70, h = 36, left = clamp(x - w / 2, rect.x + 4, rect.x + rect.w - w - 4);
-  let top = clamp(y - Math.max(40, p.halfW * .9) - h, rect.y + 4, rect.y + rect.h - h - 4);
-  if (focusBounds && left < focusBounds.x + focusBounds.w && left + w > focusBounds.x &&
-      top < focusBounds.y + focusBounds.h && top + h > focusBounds.y) {
-    top = clamp(y + 28, rect.y + 4, rect.y + rect.h - h - 4);
-  }
-  r.line([[x, y], [left + w / 2, top + h / 2]], C.blue, 1.6, [3, 3]);
-  r.panel(left, top, w, h, { fill: '#16383f', stroke: C.blue, radius: 10 });
-  r.icon('echo', left + 16, top + 15, 18, C.blue);
-  r.text(echo.turns + ' 拍', left + 44, top + 14, 13, C.white, 'center', '600');
+  const badge = [
+    { x: left, y: y - Math.max(40, p.halfW * .9) - h, w, h },
+    { x: left, y: y + 28, w, h },
+    { x: x - p.halfW - w, y: y - h / 2, w, h },
+    { x: x + p.halfW, y: y - h / 2, w, h }
+  ].find(box => fits(box, rect) && !occupied.some(bounds => overlaps(box, bounds)));
+  // The card always shows the countdown; omit the floating copy if space is tight.
+  if (!badge) return;
+  r.line([[x, y], [badge.x + w / 2, badge.y + h / 2]], C.blue, 1.6, [3, 3]);
+  r.panel(badge.x, badge.y, w, h, { fill: '#16383f', stroke: C.blue, radius: 10 });
+  r.icon('echo', badge.x + 16, badge.y + 15, 18, C.blue);
+  r.text(echo.turns + ' 次', badge.x + 44, badge.y + 14, 13, C.white, 'center', '600');
   for (let index = 0; index < 3; index++) {
-    r.circle(left + 25 + index * 11, top + 28, 2.7, index < 3 - echo.turns ? C.blue : C.dark, C.blue);
+    r.circle(badge.x + 25 + index * 11, badge.y + 28, 2.7, index < 3 - echo.turns ? C.blue : C.dark, C.blue);
   }
 }
 
@@ -94,8 +135,9 @@ function drawGuideOverlay(r, game, guide, now) {
   const c = r.ctx;
   c.save(); c.globalAlpha *= opacity;
   c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip();
-  const focusBounds = guide.control === 'wait' ? null : drawFocus(r, guide.visual, p, rect, now);
-  drawEchoCountdown(r, guide.visual.echo, p, rect, focusBounds);
+  const focusBounds = guide.control === 'wait' ? null : drawFocus(r, guide.visual, p, rect, now, () => game.act(guide.action));
+  const playerLabel = drawPlayerLabel(r, guide.visual, p, rect, focusBounds);
+  drawEchoCountdown(r, guide.visual.echo, p, rect, [focusBounds, playerBounds(guide.visual, p), playerLabel]);
   c.restore();
 }
 

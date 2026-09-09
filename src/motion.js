@@ -223,4 +223,4 @@ function drawEffects(renderer, game, now, point, unit, options = {}) {
   buffer.batches.forEach(batch => drawEffectBatch(renderer, batch, now, point, scale, showLabels));
 }
 
-module.exports = { MOVE_MS, actorFrame, drawEffects };
+module.exports = { MOVE_MS, actorFrame, drawEffects, drawBurst: burst };

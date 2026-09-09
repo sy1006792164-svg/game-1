@@ -1,13 +1,14 @@
 'use strict';
 
-const { DIRECTIONS, neighbor } = require('./engine');
+const { step } = require('./engine');
+const { guideRoute } = require('./guide-route');
 
 function canGuide(level, mode) {
   return mode === 'campaign' && !!level && level.id === 1;
 }
 
 function autoGuide(profile, level, mode) {
-  return canGuide(level, mode) && !profile.totalWins && !profile.guideDismissed;
+  return canGuide(level, mode) && !profile.completed['1'] && !profile.guideDismissed;
 }
 
 // Only the last three actual landing cells can still have an echo on the way.
@@ -19,64 +20,59 @@ function pendingSeals(state) {
   });
 }
 
-function guideVisual(level, state, lesson, pending) {
-  // Only point at a tap that lands on its marked tile; wind can carry a tap past it.
-  const direct = Object.keys(DIRECTIONS).map(action => {
-    const cell = neighbor(level, state.player, action, state);
-    if (cell === null) return null;
-    const wind = level.winds && level.winds[cell];
-    return wind && neighbor(level, cell, wind, state) !== null ? null : cell;
-  }).filter(cell => cell !== null);
-  let cells, kind;
-  if (lesson.step === 1) {
-    cells = direct; kind = 'move';
-  } else if (state.letters.length) {
-    cells = state.letters; kind = 'letter';
-  } else if (pending.every(item => item.turns !== null)) {
-    cells = [level.exit]; kind = 'home';
-  } else {
-    cells = pending.filter(item => item.turns === null).map(item => item.cell); kind = 'echo';
-  }
-  const nearby = cells.find(cell => direct.includes(cell));
-  const cell = nearby == null ? cells[0] : nearby;
-  const focus = cell == null ? null : { cell, kind };
-  const echo = pending.reduce((next, item) => item.turns !== null && (!next || item.turns < next.turns) ? item : next, null);
-  return { focus, tapCell: focus && direct.includes(focus.cell) ? focus.cell : null, echo };
-}
-
 // Derive the lesson from the route, so undo, retry and resume cannot leave a stale step.
 function guideStep(game, now) {
   const l = game.level, s = game.state;
   if (!game.guideEnabled || !canGuide(l, game.mode) || !s || s.status !== 'playing' || game.reviewing) return null;
-  const pending = pendingSeals(s), queued = pending.filter(item => item.turns !== null);
-  const countdown = queued.length ? Math.min(...queued.map(item => item.turns)) : null;
-  const allQueued = pending.length > 0 && queued.length === pending.length;
-  const markers = (cells, kind) => cells.map(cell => ({ cell, kind }));
-  let lesson;
-  if (!s.history.some(cell => cell !== l.start)) {
-    const adjacent = Object.keys(DIRECTIONS).map(action => neighbor(l, s.player, action, s)).filter(cell => cell !== null);
-    lesson = { step: 1, title: '先迈出一步',
-      text: '你是橙衣送信员，点相邻亮格移动。\n移动或等待耗 1 拍；没有倒计时。',
-      targets: markers(adjacent, 'move') };
-  } else if (s.letters.length) {
-    lesson = { step: 2, title: '你收信，回声收票',
-      text: '走到橙色信笺格收信。\n' + (!s.seals.length ? '蓝票已由回声收齐，收好信笺再回邮局。' : countdown !== null
-        ? '蓝票由回声收取，再行动 ' + countdown + ' 拍就会收起一枚。'
-        : '先停在蓝票格，三拍后的回声会替你收票。'),
-      targets: [...markers(s.letters, 'letter'), ...markers(s.seals, 'echo')] };
-  } else {
-    const ready = !s.seals.length;
-    lesson = { step: 3, title: ready ? '把信送到邮局' : '和回声一起完成投递',
-      text: ready ? '信笺和邮票已收齐。\n走到亮起的邮局，就能完成投递。' : allQueued
-        ? (s.player === l.exit ? '已到邮局，点“等一拍”等回声收齐蓝票。' : '向邮局走，回声会沿着你的脚步收蓝票。') + '\n再行动 ' + countdown + ' 拍会收起一枚；等待也会耗拍。'
-        : '橙色信笺已齐，先停在剩余蓝票格。\n回声晚三拍到达，收齐后再回邮局。',
-      targets: [...markers(s.seals, 'echo'), ...markers(ready || allQueued ? [l.exit] : [], 'home')],
-      control: allQueued && s.player === l.exit ? 'wait' : null };
+  const pending = pendingSeals(s);
+  const echo = pending.reduce((next, item) => item.turns !== null && (!next || item.turns < next.turns) ? item : next, null);
+  const route = guideRoute(l, s), action = route && route[0];
+  const next = action ? step(l, s, action) : null;
+  const first = !s.history.some(cell => cell !== l.start);
+  const collecting = next && next.events.some(event => event.type === 'letter');
+  const cell = next ? next.state.player : null;
+  const kind = cell === l.exit ? 'home' : collecting ? 'letter' : s.seals.includes(cell) ? 'echo' : 'move';
+  const focus = cell === null || action === 'wait' ? null : { cell, kind };
+  const lesson = {
+    step: first ? 1 : !s.letters.length ? 4 : collecting ? 3 : 2,
+    total: 4, action: action || null, control: action === 'wait' ? 'wait' : null,
+    visual: { focus, tapCell: focus ? cell : null, echo, player: s.player,
+      label: kind === 'home' ? '点邮局' : collecting ? '点信封' : '点这里' },
+    tip: '1 拍就是行动 1 次；不点就不会扣拍。'
+  };
+  if (!action) {
+    lesson.control = game.canUndo() ? 'undo' : 'restart';
+    lesson.title = lesson.control === 'undo' ? '拍数不够，先撤回一步' : '拍数不够，重新学一遍';
+    lesson.text = '剩余拍数不够完成这次投递。\n' + (lesson.control === 'undo' ? '点下方“撤回”，恢复上一步和拍数。' : '点下方“重新学一遍”，从起点跟着走。');
+    lesson.tip = '重新开始不会影响已获得的通关成绩。';
+    return lesson;
   }
-  lesson.visual = guideVisual(l, s, lesson, pending);
-  lesson.tip = game.blockedAt != null && now - game.blockedAt < 1400 ? '这边不通，点相邻的亮格试试。'
-    : s.energy <= 3 ? '只剩 ' + s.energy + ' 拍，移动和等待都会消耗灯火。'
-    : '双指捏合可放大棋盘；电脑滚轮缩放。';
+  if (first) {
+    lesson.title = '点亮格，先走一步';
+    lesson.text = '你是橙衣送信员，不用先点人物。\n直接点手指指向的格子，每次走一格。';
+  } else if (action === 'wait') {
+    lesson.title = '点“等一拍”，让回声跟上';
+    lesson.text = '你已到邮局，蓝票还在回声路上。\n等待也算一次行动，回声才会继续走。';
+  } else if (next.state.status === 'won') {
+    lesson.title = '点邮局，完成投递';
+    lesson.text = s.seals.length ? '信已收好！这一步回声会收齐蓝票。\n走进邮局，就能完成投递。'
+      : '信和蓝票都已收齐。\n点手指指向的邮局，就能过关。';
+  } else if (collecting) {
+    lesson.title = '点信封，把信收好';
+    lesson.text = (echo ? '蓝票还要 ' + echo.turns + ' 次行动才会收起。' : '橙色信封由你来收取。') + '\n走到信封所在格，就会自动收信。';
+  } else if (echo) {
+    lesson.title = '再点下一格，继续走';
+    lesson.text = (s.seals.includes(s.player) ? '已走上蓝票格！现在不会收起。' : '蓝票已在回声路上，不用回头。')
+      + '\n再行动 ' + echo.turns + ' 次，回声会来收票。';
+  } else if (s.seals.length) {
+    lesson.title = kind === 'echo' ? '点蓝票格，留下脚印' : '沿亮格走，先经过蓝票';
+    lesson.text = '蓝票由晚 3 次行动的回声收取。\n你先走过它，再继续走，回声会跟上。';
+  } else {
+    lesson.title = s.letters.length ? '沿亮格走，去收信' : '沿亮格走回邮局';
+    lesson.text = s.letters.length ? '蓝票已收好，继续沿亮格去拿信封。\n信和票收齐后，再回邮局。'
+      : '信和蓝票都已收齐。\n跟着手指逐格走回邮局。';
+  }
+  if (game.blockedAt != null && now - game.blockedAt < 1400) lesson.tip = '引导中跟着手指走；点“跳过”可自由操作。';
   return lesson;
 }
 
@@ -91,10 +87,19 @@ function playHint(game, now) {
   if (!s.letters.length && !s.seals.length) return '收集完成，' + (s.energy <= 3 ? '只剩 ' + s.energy + ' 拍，' : '') + '前往亮起的邮局。';
   const lowLight = s.energy <= 3 ? '只剩 ' + s.energy + ' 拍。' : '';
   const pending = pendingSeals(s);
+  const unvisited = pending.filter(item => item.turns === null);
+  if (s.player === l.exit) {
+    if (s.letters.length) return lowLight + '已到邮局，还差 ' + s.letters.length + ' 封信；收齐信和蓝票后回来投递。';
+    if (unvisited.length) return lowLight + '已到邮局，还有 ' + unvisited.length + ' 枚蓝票尚未经过；先走上蓝票格，再回来投递。';
+    const turns = Math.max(...pending.map(item => item.turns));
+    return lowLight + (s.energy >= turns
+      ? '已到邮局，再等 ' + turns + ' 拍，回声就会收齐蓝票。'
+      : '已到邮局，回声还需 ' + turns + ' 拍；当前拍数不够原地等齐。');
+  }
   const nextEcho = s.turn >= 2 ? s.history[s.turn - 2] : null;
-  if (nextEcho != null && s.seals.includes(nextEcho)) return lowLight + '下一步回声会收起蓝票，移动或等一拍都可以。';
-  if (!s.letters.length && pending.every(item => item.turns !== null)) {
-    return lowLight + (s.player === l.exit ? '已到邮局，等待回声收齐剩余蓝票。' : '蓝票已在回声路上，向邮局走或等一拍。');
+  if (nextEcho != null && s.seals.includes(nextEcho)) return lowLight + '下一步回声会收起蓝票，' + (s.letters.length ? '沿路收好剩余信笺。' : '继续前往邮局。');
+  if (!s.letters.length && !unvisited.length) {
+    return lowLight + '蓝票已在回声路上，不用折返，继续向邮局走。';
   }
   if (lowLight) return lowLight + '移动和等待都会耗灯；留好回邮局的路。';
   if (s.turn === 0) {

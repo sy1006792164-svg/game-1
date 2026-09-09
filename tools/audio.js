@@ -2,6 +2,7 @@
 // Original, deterministic synthesis. No recordings, downloads or dependencies.
 const fs = require('node:fs');
 const path = require('node:path');
+const { createAmbience } = require('./ambience');
 const RATE = 22050;
 const TAU = Math.PI * 2;
 
@@ -45,22 +46,7 @@ const sounds = {
   echo: { duration: .78, sample: t => note(t, 659.25, .35, 'soft') + note(t - .2, 987.77, .35, 'soft') * .5 + note(t - .43, 659.25, .35, 'soft') * .25 },
   fail: { duration: .86, sample: phrase([392, 329.63, 261.63], .18, .5, 'soft') },
   low: { duration: .62, sample: t => note(t, 261.63, .3, 'soft') * .7 + note(t - .31, 220, .3, 'soft') * .6 },
-  ambience: {
-    duration: 8,
-    rate: 16000,
-    sample(t) {
-      // Integer periods in eight seconds make the sample boundary continuous.
-      const breath = .78 + .22 * Math.cos(TAU * t / 8);
-      let value = 0;
-      [130.75, 196, 261.625, 392].forEach((frequency, index) => {
-        value += Math.sin(TAU * frequency * t + .18 * Math.sin(TAU * t / 8)) * .021 / (index + 1);
-      });
-      for (let i = 0; i < 16; i++) {
-        value += Math.sin(TAU * (740 + i * 42.125) * t + i * 1.7) * .0007;
-      }
-      return value * breath;
-    },
-  },
+  ambience: createAmbience(),
 };
 
 function writeWav(name, duration, sample, rate = RATE) {

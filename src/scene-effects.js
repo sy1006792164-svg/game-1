@@ -54,8 +54,7 @@ function drawDestination(r, game, now, projection, options = {}, action) {
   c.strokeStyle = '#ffdc8c'; c.lineWidth = 1.7; c.stroke(); c.restore();
   const top = y - unit * 1.68;
   r.round(x - 28, top - 8, 56, 16, 8, '#244c42', '#d6c68c');
-  r.icon('check', x - 18, top, 9, '#ffe7a4');
-  r.text(state.status === 'won' ? '已送达' : '可投递', x + 5, top, 10, '#ffe7a4', 'center', '600');
+  r.text(state.status === 'won' ? '已送达' : '可投递', x, top, 10, '#ffe7a4', 'center', '600');
   if (action) r.hit(x - 28, top - 8, 56, 16, action);
 }
 

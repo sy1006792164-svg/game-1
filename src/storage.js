@@ -110,15 +110,18 @@ function createStore(adapter, options = {}) {
   const runKey = options.development === true ? DEV_RUN_KEY : RUN_KEY;
   let profile = defaults(), run = null;
   let status = { persisted: true, message: '' };
-  // Bumped on every write so callers can cache snapshots between frames.
+  // Bumped on in-memory changes so callers can cache snapshots between frames.
   let revision = 0;
   const dirty = new Set();
   function failure(message) { status = { persisted: false, message }; }
-  function save(key, value) {
-    revision += 1;
-    dirty.add(key);
+  function writePending(key) {
     try {
-      adapter.set(key, cleanJson(value));
+      // Read current memory on every attempt; never replay an older queued save.
+      const value = key === profileKey ? profile : run;
+      if (key === runKey && value === null) {
+        try { adapter.remove(key); }
+        catch (_) { adapter.set(key, null); }
+      } else adapter.set(key, cleanJson(value));
       dirty.delete(key);
       if (!dirty.size) status = { persisted: true, message: '' };
       return true;
@@ -127,18 +130,17 @@ function createStore(adapter, options = {}) {
       return false;
     }
   }
-  function remove(key) {
+  function flush() {
+    // Each pending key gets one attempt, even if storage is still unavailable.
+    Array.from(dirty).forEach(writePending);
+    return !dirty.size;
+  }
+  function save(key) {
     revision += 1;
     dirty.add(key);
-    try {
-      adapter.remove(key);
-      dirty.delete(key);
-      if (!dirty.size) status = { persisted: true, message: '' };
-      return true;
-    } catch (_) {
-      // Writing null can repair a storage implementation with no working remove.
-      return save(key, null);
-    }
+    const saved = writePending(key);
+    if (saved) flush();
+    return saved;
   }
   try {
     const stored = adapter.get(profileKey);
@@ -146,32 +148,33 @@ function createStore(adapter, options = {}) {
       let clean;
       try { clean = cleanJson(stored); } catch (_) { clean = null; }
       profile = profileFrom(clean);
-      if (JSON.stringify(profile) !== JSON.stringify(clean)) save(profileKey, profile);
+      if (JSON.stringify(profile) !== JSON.stringify(clean)) save(profileKey);
     }
   } catch (_) {
     // JSON decode errors and denied storage both arrive here. A successful
     // replacement repairs corrupt bytes; a rejected write keeps memory usable.
-    save(profileKey, profile);
+    save(profileKey);
   }
   try {
     const stored = adapter.get(runKey);
     if (stored != null && stored !== '') {
       run = runFrom(stored);
-      if (!run) remove(runKey);
+      if (!run) save(runKey);
     }
   } catch (_) {
-    remove(runKey);
+    save(runKey);
   }
   function snapshot() { return cleanJson(profile); }
   return {
     getProfile: snapshot,
     revision: function () { return revision; },
     getStatus: function () { return Object.assign({}, status); },
+    flush,
     setGuideDismissed: function (dismissed) {
       if (typeof dismissed !== 'boolean') return false;
       if (dismissed) profile.guideDismissed = true;
       else delete profile.guideDismissed;
-      return save(profileKey, profile);
+      return save(profileKey);
     },
     recordWin: function (levelId, stars, turns, mode = 'campaign') {
       const id = typeof levelId === 'number' ? String(levelId) : levelId;
@@ -185,21 +188,21 @@ function createStore(adapter, options = {}) {
         bestTurns: Math.min(before ? before.bestTurns : Infinity, turns),
       };
       if (!before) profile.totalWins += 1;
-      save(profileKey, profile);
+      save(profileKey);
       return snapshot();
     },
     saveRun: function (value) {
       const next = runFrom(value);
       if (!next) return false;
       run = next;
-      return save(runKey, run);
+      return save(runKey);
     },
     loadRun: function () { return run ? cleanJson(run) : null; },
-    clearRun: function () { run = null; return remove(runKey); },
+    clearRun: function () { run = null; return save(runKey); },
     reset: function () {
       profile = defaults(); run = null;
-      const removed = remove(runKey);
-      const saved = save(profileKey, profile);
+      const removed = save(runKey);
+      const saved = save(profileKey);
       return removed && saved;
     },
   };

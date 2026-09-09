@@ -2,6 +2,7 @@
 
 const { CAMPAIGN } = require('./levels');
 const { C } = require('./theme');
+const { CONTROL } = require('./controls');
 const { drawVignette } = require('./scene');
 
 function layout(height) {
@@ -9,7 +10,7 @@ function layout(height) {
   // Keep the navigation above the bottom area reserved for transient notices.
   const heroY = 112 + top, heroH = Math.min(400, height - 383 - top);
   const routeY = heroY + heroH + 9, buttonY = routeY + 24;
-  return { top, heroY, heroH, routeY, buttonY, linksY: buttonY + 112 };
+  return { top, heroY, heroH, routeY, buttonY, linksY: buttonY + CONTROL.height + 24 };
 }
 
 function departure(next, saved, completed) {
@@ -28,12 +29,11 @@ function drawBrand(r, top) {
 
 function drawLinks(r, game, y) {
   [
-    { title: '选关', action: () => game.openPage('levels') },
-    { title: '邮票', action: () => game.openPage('collection') }
+    { title: '选关', icon: 'route', action: () => game.openPage('levels') },
+    { title: '邮票', icon: 'stamp', action: () => game.openPage('collection') }
   ].forEach((item, index) => {
     const x = 30 + index * 174;
-    r.button(item.title, x, y, 156, 46, item.action, 'quiet');
-    if (index === 0) r.line([[195, y + 17], [195, y + 29]], '#45615c', 1);
+    r.button(item.title, x, y, 156, CONTROL.compactHeight, item.action, { style: 'quiet', icon: item.icon, trailing: 'chevron' });
   });
 }
 
@@ -43,7 +43,7 @@ function drawHome(r, game, now) {
   drawBrand(r, ui.top);
   drawVignette(r, now, { x: -30, y: ui.heroY, w: 450, h: ui.heroH }, { reducedMotion: r.reducedMotion });
   r.label(route.detail, 195, ui.routeY, 324, 11, C.muted, 'center');
-  r.button(route.title, 30, ui.buttonY, 330, 56, () => game.primary(), 'primary');
+  r.button(route.title, 30, ui.buttonY, 330, CONTROL.height, () => game.primary(), { style: 'primary', icon: 'letter', trailing: 'chevron' });
   drawLinks(r, game, ui.linksY);
 }
 

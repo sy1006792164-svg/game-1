@@ -28,24 +28,28 @@ function stampOutline(c, x, y, w, h) {
 }
 
 function drawSummary(r, game, album) {
-  const next = album.next;
+  const next = album.next, contentX = 151, contentWidth = 195, contentRight = contentX + contentWidth;
   r.panel(24, 94, 342, 114, { fill: '#1e3b3d', stroke: '#43605b', accent: C.gold });
   r.text(album.ownedCount, 41, 129, 36, C.gold, 'left', '600');
   r.text('/ ' + album.stamps.length, 91, 136, 14, C.muted);
   r.text('枚已收藏', 42, 165, 10, C.muted);
   r.text(album.stars + ' 星的旅程', 42, 187, 9, '#96aea0');
   r.line([[130, 112], [130, 188]], '#49645c', 1);
-  r.text(next ? '下一枚收藏' : '全套珍藏已集齐', 148, 114, 10, next ? C.gold : C.green);
-  r.label(next ? next.name : '沿途的风，都在这里', 148, 140, 178, 16, C.ink, 'left', '600');
   if (next) {
-    r.text('再得 ' + (next.goal - next.current) + ' 星', 148, 165, 11, C.muted);
-    r.text(next.current + ' / ' + next.goal + ' 星', 346, 165, 10, C.gold, 'right');
-    r.meter(148, 187, 198, next.current, next.goal, C.gold);
-    r.icon('chevron', 348, 140, 13, C.gold);
+    const held = game.pointer && insideRect({ x: 139, y: 100, w: 220, h: 101 }, game.pointer.x, game.pointer.y);
+    r.round(139, 101, 219, 99, 9, held ? '#30544b' : '#24443e', held ? '#a8915f' : '#4f705c');
+  }
+  r.text(next ? '下一枚收藏 · 去送信' : '全套珍藏已集齐', contentX, 114, 10, next ? C.gold : C.green);
+  r.label(next ? next.name : '沿途的风，都在这里', contentX, 140, contentWidth - (next ? 32 : 0), 16, C.ink, 'left', '600');
+  if (next) {
+    r.text('再得 ' + (next.goal - next.current) + ' 星', contentX, 165, 11, C.muted);
+    r.text(next.current + ' / ' + next.goal + ' 星', contentRight, 165, 10, C.gold, 'right');
+    r.meter(contentX, 187, contentWidth, next.current, next.goal, C.gold);
+    r.actionIcon('arrow-right', contentRight - 10, 140, C.gold);
     r.hit(139, 100, 220, 101, () => game.openPage('levels'));
   } else {
-    r.text('每一次抵达，都成为珍藏', 148, 165, 10, C.muted);
-    r.meter(148, 187, 198, album.ownedCount, album.stamps.length, C.green);
+    r.text('每一次抵达，都成为珍藏', contentX, 165, 10, C.muted);
+    r.meter(contentX, 187, contentWidth, album.ownedCount, album.stamps.length, C.green);
   }
 }
 
@@ -67,11 +71,12 @@ function drawStamp(r, game, stamp, rect, viewport, now) {
   const scale = (.97 + ease * .03) * (held ? .97 : 1 + bounce);
   const owned = stamp.owned, ink = owned ? INKS[stamp.index % INKS.length] : next ? C.gold : '#78958a';
   const paper = owned ? '#e7dfc7' : next ? '#37493e' : '#1c3638';
+  const border = held ? owned ? '#658b65' : C.gold : owned ? '#b9c09d' : next ? '#d1a365' : '#3b5850';
   c.save();
   c.globalAlpha *= ease * Math.min(clamp((y + h - viewport.y) / 22), clamp((viewport.y + viewport.h - y) / 22));
   c.translate(middle, y + h / 2); c.scale(scale, scale); c.translate(-middle, -y - h / 2);
   stampOutline(c, x, y + 4, w, h); c.fillStyle = '#091f2666'; c.fill();
-  stampOutline(c, x, y, w, h); c.fillStyle = paper; c.fill(); c.strokeStyle = owned ? '#b9c09d' : next ? '#d1a365' : '#3b5850'; c.lineWidth = next ? 1.3 : .8; c.stroke();
+  stampOutline(c, x, y, w, h); c.fillStyle = paper; c.fill(); c.strokeStyle = border; c.lineWidth = held ? 1.8 : next ? 1.3 : .8; c.stroke();
   r.round(x + 6, y + 6, w - 12, h - 12, 2, null, owned ? '#b3bd9a' : next ? '#9b8754' : '#2e4b47');
   r.text(String(stamp.index + 1).padStart(2, '0'), x + 13, y + 17, 9, owned ? '#52674f' : '#94a99c');
   if (next) r.round(x + w - 56, y + 9, 45, 17, 5, '#755f36');

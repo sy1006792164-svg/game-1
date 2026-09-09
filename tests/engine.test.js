@@ -6,6 +6,7 @@ const { ACTIONS, createState, step, replay, revive, stars, STAR_TWO_MARGIN } = r
 const { CAMPAIGN, chapterNames, CONTENT_VERSION, PER_CHAPTER, reserveFor, undoFor } = require('../src/levels');
 const { solve } = require('../tools/solve');
 const { tier, bridgesRequired, HAND_MADE } = require('../tools/generate');
+const { playHint } = require('../src/play-guide');
 
 // The independent solver is slow on the big late boards, so it checks the hand-made routes plus every sixtieth generated route.
 const independentlySolved = level => level.id <= HAND_MADE || (level.id - 1 - HAND_MADE) % 60 === 0;
@@ -191,6 +192,58 @@ test('wait consumes light, advances echo and can complete a delivery', () => {
   assert.equal(state.status, 'won');
   assert.equal(state.energy, 0);
   assert.equal(state.echo, 1);
+});
+
+test('last-turn echo hints keep the courier heading home instead of recommending a losing wait', () => {
+  const level = CAMPAIGN[300], state = replay(level, level.solution.slice(0, -1));
+  assert.equal(state.energy, 1);
+  assert.notEqual(state.player, level.exit);
+  assert.equal(step(level, state, 'wait').state.status, 'failed');
+  assert.equal(step(level, state, level.solution[level.solution.length - 1]).state.status, 'won');
+  const hint = playHint({ level, state, mode: 'campaign' }, 0);
+  assert.match(hint, /只剩 1 拍.*回声会收起蓝票.*前往邮局/);
+  assert.doesNotMatch(hint, /等一拍|再等|等待/);
+});
+
+test('post office hints recommend only enough waiting to finish the real queued delivery', () => {
+  const level = CAMPAIGN[24], actions = level.solution.slice(0, 34);
+  const state = replay(level, actions);
+  assert.equal(state.player, level.exit);
+  assert.equal(state.letters.length, 0);
+  assert.match(playHint({ level, state, mode: 'campaign' }, 0), /已到邮局，再等 2 拍/);
+  assert.equal(replay(level, actions.concat('wait', 'wait')).status, 'won');
+
+  const short = replay(level, ['wait', 'wait'].concat(actions));
+  assert.equal(short.status, 'playing');
+  assert.equal(short.energy, 1);
+  assert.match(playHint({ level, state: short, mode: 'campaign' }, 0), /回声还需 2 拍.*拍数不够原地等齐/);
+  assert.doesNotMatch(playHint({ level, state: short, mode: 'campaign' }, 0), /再等/);
+  assert.equal(step(level, short, 'wait').state.status, 'failed');
+});
+
+test('waiting recommendations along all 999 real routes always complete the delivery', () => {
+  let checked = 0, finalEchoTurns = 0;
+  for (const level of CAMPAIGN) {
+    let state = createState(level);
+    for (const action of level.solution) {
+      const hint = playHint({ level, state, mode: 'campaign' }, 0);
+      assert.doesNotMatch(hint, /移动或等一拍都可以|向邮局走或等一拍/, level.id + ': waiting is never offered without a proven finish');
+      const waiting = hint.match(/再等 (\d+) 拍/);
+      if (waiting) {
+        let finish = state;
+        for (let turn = 0; turn < Number(waiting[1]); turn++) finish = step(level, finish, 'wait').state;
+        assert.equal(finish.status, 'won', level.id + ': the recommended waits must finish within the real light budget');
+        checked++;
+      }
+      if (state.energy === 1 && state.player !== level.exit && state.seals.includes(state.history[state.turn - 2])) {
+        assert.doesNotMatch(hint, /等一拍|再等|等待/, level.id + ': the final action must still deliver');
+        finalEchoTurns++;
+      }
+      state = step(level, state, action).state;
+    }
+  }
+  assert.ok(checked > 0, 'real routes exercise safe waiting at the post office');
+  assert.ok(finalEchoTurns > 100, 'the audit covers the late-route final-turn echo case');
 });
 
 test('wind pushes once; only final positions collect objects or enter history', () => {

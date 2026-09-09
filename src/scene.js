@@ -1,6 +1,6 @@
 'use strict';
 
-const { actorFrame, drawEffects } = require('./motion');
+const { MOVE_MS, actorFrame, drawEffects } = require('./motion');
 const { insideRect } = require('./board-projection');
 const { getBoardGeometry } = require('./board-geometry');
 const { OFFICE, officeFlag, hitPostOffice } = require('./post-office-geometry');
@@ -30,6 +30,20 @@ function glow(r, x, y, radius, color, alpha) {
   const c = r.ctx; c.save();
   for (let i = 3; i > 0; i--) { c.globalAlpha = alpha / i; r.circle(x, y, radius * i / 2, color); }
   c.restore();
+}
+
+// Pick the painted rounded shape after its local rotation, leaving empty corners clickable.
+function hitProp(r, x, y, width, height, radius, angle, action) {
+  if (!action) return;
+  const cos = Math.cos(angle), sin = Math.sin(angle), hw = width / 2, hh = height / 2;
+  const rx = Math.abs(cos) * hw + Math.abs(sin) * hh, ry = Math.abs(sin) * hw + Math.abs(cos) * hh;
+  radius = Math.min(radius, hw, hh);
+  r.hit(x - rx, y - ry, rx * 2, ry * 2, action, (hx, hy) => {
+    const dx = hx - x, dy = hy - y;
+    const px = Math.abs(dx * cos + dy * sin), py = Math.abs(dy * cos - dx * sin);
+    return px <= hw && py <= hh &&
+      Math.pow(Math.max(0, px - hw + radius), 2) + Math.pow(Math.max(0, py - hh + radius), 2) <= radius * radius;
+  });
 }
 
 function tree(r, x, y, size, now, distant) {
@@ -75,7 +89,7 @@ function postOffice(r, x, y, size, now, ready) {
   c.restore();
 }
 
-function lantern(r, x, y, size, now) {
+function lantern(r, x, y, size, now, action) {
   const c = r.ctx; c.save(); c.translate(x, y); c.scale(size / 24, size / 24);
   const sway = Math.sin(now / 870 + x) * .06;
   ellipse(r, 0, 2, 10, 3, '#2d4b3b29');
@@ -86,6 +100,13 @@ function lantern(r, x, y, size, now) {
   r.round(-4, 1, 8, 12, 2, '#bd934f'); r.round(-2.5, 3, 5, 7, 1, '#ffe6a2');
   r.line([[-5, 1], [5, 1]], '#57705a', 1.7); r.line([[-5, 13], [5, 13]], '#57705a', 1.7);
   c.restore(); c.restore();
+  const scale = size / 24, cos = Math.cos(sway), sin = Math.sin(sway);
+  const pick = (cx, cy, w, h, radius) => hitProp(r, x + (5 + cx * cos - cy * sin) * scale,
+    y + (-25 + cx * sin + cy * cos) * scale, w * scale, h * scale, radius * scale, sway, action);
+  hitProp(r, x - 6 * scale, y - 13.5 * scale, 2 * scale, 29 * scale, scale, 0, action);
+  hitProp(r, x - .5 * scale, y - 27 * scale, 13 * scale, 2 * scale, scale, 0, action);
+  pick(0, -.5, 1, 4, .5); pick(0, 7, 8, 12, 2);
+  pick(0, 1, 11.7, 1.7, .85); pick(0, 13, 11.7, 1.7, .85);
 }
 
 function diamond(r, x, y, hw, hh, fill, stroke, height) {
@@ -144,11 +165,12 @@ function floorLine(r, p, x, y, offsets, color, width) {
   r.line(offsets.map(([dx, dy]) => [x + dx, y + dy]), color, width);
 }
 
-function floatingMail(r, x, y, size, now, cell, seal) {
+function floatingMail(r, x, y, size, now, cell, seal, action) {
   const c = r.ctx, bob = Math.sin(now / 670 + cell * .7) * 2.2;
+  const floatY = y - size * .5 + bob, angle = Math.sin(now / 1500 + cell) * .09;
   ellipse(r, x, y + 1, size * .38, size * .12, seal ? '#659d9a38' : '#ae824530');
   glow(r, x, y - 10, size * .52, seal ? COLOR.teal : COLOR.gold, .055);
-  c.save(); c.translate(x, y - size * .5 + bob); c.rotate(Math.sin(now / 1500 + cell) * .09);
+  c.save(); c.translate(x, floatY); c.rotate(angle);
   if (seal) {
     r.round(-size * .36, -size * .43, size * .72, size * .86, 2, '#79c6c9', '#d0f0e5');
     r.round(-size * .23, -size * .29, size * .46, size * .57, 1, '#b3e0d9');
@@ -162,6 +184,8 @@ function floatingMail(r, x, y, size, now, cell, seal) {
   const sparkle = (now / 1800 + cell * .31) % 1;
   c.save(); c.globalAlpha = Math.sin(sparkle * Math.PI) * .7;
   r.circle(x + Math.sin(cell) * size * .6, y - 8 - sparkle * size, .9, seal ? '#c1f6ef' : '#fff1c6'); c.restore();
+  hitProp(r, x, floatY, size * (seal ? .72 : 20 / 24), size * (seal ? .86 : 14 / 24),
+    seal ? 2 : size * 3 / 24, angle, action);
 }
 
 function drawBoard(r, game, now, rect, guide) {
@@ -186,8 +210,12 @@ function drawBoard(r, game, now, rect, guide) {
   const { walls, adjacent, ordered } = geometry;
   const selectCell = cell => {
     const player = game.state.player, dx = cell % l.width - player % l.width, dy = Math.floor(cell / l.width) - Math.floor(player / l.width);
+    // A second tap on the destination during arrival is still a move intention.
+    if (cell === player && game.previousState && game.previousState.player !== player &&
+      game.platform.now() - game.transitionAt < MOVE_MS) return;
     if (!dx && !dy) game.act('wait');
     else if (Math.abs(dx) + Math.abs(dy) === 1) game.act(dx ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'down' : 'up');
+    else if (game.guideMisstep()) return;
     else if ((l.bridges || []).includes(cell) && !game.state.bridges.includes(cell)) game.toast('纸桥已碎，这里过不去了');
     else game.toast('点相邻格移动，点脚下格原地等一拍');
   };
@@ -217,14 +245,15 @@ function drawBoard(r, game, now, rect, guide) {
           hitPostOffice(r, { x, y, size: hw * 1.2, now: time }, enterOffice);
         } });
       }
-      if (!game.reviewing && s.status === 'playing' && adjacent.has(cell)) {
+      if (!game.reviewing && s.status === 'playing' && adjacent.has(cell) && (!guide || guide.visual.tapCell === cell)) {
         diamond(r, x, y, hw - 3, hh - 2, '#f8d68877', null);
         floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#edb457', 1.7);
         ellipse(r, x, y + hh * .43, hw * .15, hh * .17, '#e5ae52');
       }
-      if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, time) });
-      if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false) });
-      if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, time, cell, true) });
+      const selectProp = !game.reviewing && s.status === 'playing' ? () => selectCell(cell) : null;
+      if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, time, selectProp) });
+      if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false, selectProp) });
+      if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, time, cell, true, selectProp) });
     }
     // The courier remains visual only; uncovered floor tiles keep their normal actions.
     r.hit(x - hw, y - hh, hw * 2, hh * 2, () => selectCell(cell), (hx, hy) => p.contains(cell, hx, hy));

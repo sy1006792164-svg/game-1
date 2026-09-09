@@ -112,19 +112,105 @@ test('legacy profiles drop the retired expert table and recount unique wins from
 test('quota failures retain playable memory, with persistence status until all dirty keys recover', () => {
   const adapter = memory();
   const set = adapter.set;
-  let blocked = true;
-  adapter.set = (key, value) => { if (blocked) throw new Error('quota'); return set(key, value); };
+  const blocked = new Set([PROFILE_KEY, RUN_KEY]);
+  adapter.set = (key, value) => { if (blocked.has(key)) throw new Error('quota'); return set(key, value); };
   const store = createStore(adapter);
   store.recordWin('1', 1, 6, 'campaign');
   assert.equal(store.saveRun(run()), false);
   assert.equal(store.getProfile().totalWins, 1);
   assert.deepEqual(store.loadRun(), run());
   assert.equal(store.getStatus().persisted, false);
-  blocked = false;
+  blocked.delete(PROFILE_KEY);
   store.recordWin('1', 2, 5, 'campaign');
   assert.equal(store.getStatus().persisted, false, 'run remains unsaved');
+  blocked.delete(RUN_KEY);
   assert.equal(store.saveRun(run()), true);
   assert.equal(store.getStatus().persisted, true);
+});
+
+test('a later run save or flush recovers the latest scores after a temporary write failure', () => {
+  for (const recovery of ['saveRun', 'flush']) {
+    const adapter = memory(), set = adapter.set;
+    let blocked = true;
+    adapter.set = (key, value) => {
+      if (blocked && key === PROFILE_KEY) throw new Error('temporary storage failure');
+      return set(key, value);
+    };
+    const store = createStore(adapter);
+    store.recordWin(1, 1, 6);
+    store.recordWin(1, 3, 4);
+    assert.equal(store.getStatus().persisted, false);
+    assert.equal(adapter.get(PROFILE_KEY), null);
+    blocked = false;
+    const progress = { mode: 'campaign', levelId: 2, actions: ['right'], reviveAt: null };
+    assert.equal(recovery === 'saveRun' ? store.saveRun(progress) : store.flush(), true);
+    const reloaded = createStore(adapter);
+    assert.deepEqual(reloaded.getProfile().completed, { 1: { stars: 3, bestTurns: 4 } }, recovery);
+    assert.deepEqual(reloaded.loadRun(), recovery === 'saveRun' ? progress : null, recovery);
+    assert.deepEqual(store.getStatus(), { persisted: true, message: '' });
+  }
+});
+
+test('retrying a failed run deletion never restores its earlier pending route', () => {
+  for (const recovery of ['recordWin', 'flush']) {
+    const adapter = memory(), set = adapter.set, remove = adapter.remove;
+    let blocked = false;
+    adapter.set = (key, value) => {
+      if (blocked && key === RUN_KEY) throw new Error('temporary storage failure');
+      return set(key, value);
+    };
+    adapter.remove = key => {
+      if (blocked) throw new Error('temporary storage failure');
+      return remove(key);
+    };
+    const store = createStore(adapter);
+    store.saveRun(run());
+    blocked = true;
+    assert.equal(store.saveRun({ ...run(), levelId: 2 }), false);
+    assert.equal(store.clearRun(), false, 'both native removal and null replacement fail');
+    assert.equal(store.loadRun(), null);
+    assert.deepEqual(adapter.get(RUN_KEY), run());
+    blocked = false;
+    if (recovery === 'recordWin') store.recordWin(1, 3, 4);
+    else assert.equal(store.flush(), true);
+    assert.equal(createStore(adapter).loadRun(), null, recovery);
+    assert.equal(adapter.values.has(RUN_KEY), false, recovery);
+    assert.equal(store.getStatus().persisted, true);
+  }
+});
+
+test('a newer run replaces a pending deletion and failed flushes preserve memory without looping', () => {
+  const adapter = memory(), set = adapter.set, remove = adapter.remove;
+  let blocked = false, attempts = 0;
+  adapter.set = (key, value) => {
+    attempts += 1;
+    if (blocked) throw new Error('temporary storage failure');
+    return set(key, value);
+  };
+  adapter.remove = key => {
+    attempts += 1;
+    if (blocked) throw new Error('temporary storage failure');
+    return remove(key);
+  };
+  const store = createStore(adapter);
+  store.saveRun(run());
+  blocked = true;
+  store.clearRun();
+  const newerRun = { ...run(), levelId: 2 };
+  store.saveRun(newerRun);
+  store.recordWin(1, 3, 4);
+  attempts = 0;
+  assert.equal(store.flush(), false);
+  assert.equal(attempts, 2, 'each pending value is attempted once while storage stays unavailable');
+  assert.deepEqual(store.loadRun(), newerRun);
+  blocked = false;
+  assert.equal(store.flush(), true);
+  const reloaded = createStore(adapter);
+  assert.deepEqual(reloaded.loadRun(), newerRun);
+  assert.deepEqual(reloaded.getProfile().completed, { 1: { stars: 3, bestTurns: 4 } });
+  attempts = 0;
+  assert.equal(store.flush(), true);
+  assert.equal(attempts, 0, 'a clean store does not rewrite saved progress');
 });
 
 test('snapshots are isolated and run inputs reject cycles, accessors and oversized saves', () => {

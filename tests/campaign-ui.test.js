@@ -159,7 +159,7 @@ test('developer selection shows free level 999 and supports keyboard and keypad 
   for (let n = 0; n < 3; n++) h.tap(hit => hit.w === 86 && hit.x === 246 && hit.y === ninthKeyY);
   texts = h.draw();
   assert.ok(texts.includes('999'));
-  h.tap(hit => hit.w === 174 && hit.h === 48);
+  h.tap(hit => hit.w === 174);
   assert.equal(h.game.level.id, 999);
   assert.equal(h.game.page, 'game');
   assert.ok(h.draw().includes('开发试玩 · 独立存档'));
