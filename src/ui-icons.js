@@ -45,6 +45,8 @@ function drawUiGlyph(c, type) {
       line([[-10, y], [-7, y]]); line([[7, y], [10, y]]);
     }
     line([[-4, 5], [0, 0], [4, 5]]); circle(2, -4, 1);
+  } else if (type === 'ranking') {
+    box(-10, 0, 6, 10, 1); box(-3, -8, 6, 18, 1); box(4, 4, 6, 6, 1);
   } else if (type === 'community') {
     line([[-9, -8], [9, -8], [9, 5], [0, 5], [-6, 10], [-6, 5], [-9, 5]]);
     c.closePath(); line([[-5, -2], [5, -2]]);

@@ -1,16 +1,21 @@
 'use strict';
 
+function isAvailable(platform) {
+  if (platform.kind !== 'wechat') return false;
+  try {
+    const account = platform.wx.getAccountInfoSync();
+    return !!account && !!account.miniProgram && ['develop', 'trial'].includes(account.miniProgram.envVersion);
+  } catch (_) { return false; }
+}
+
 function createGameCircle(platform, openlink, notify) {
   const api = platform.wx;
+  const available = isAvailable(platform);
   let manager = null;
   let opening = false;
 
   async function open() {
-    if (opening) return;
-    if (platform.kind !== 'wechat') {
-      notify('请在微信内打开游戏圈');
-      return;
-    }
+    if (!available || opening) return;
     if (!api || typeof api.createPageManager !== 'function') {
       notify('当前微信版本不支持游戏圈，请更新微信');
       return;
@@ -29,7 +34,7 @@ function createGameCircle(platform, openlink, notify) {
     }
   }
 
-  return { open };
+  return Object.freeze({ available, open });
 }
 
 module.exports = { createGameCircle };

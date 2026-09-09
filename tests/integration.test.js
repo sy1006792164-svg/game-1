@@ -90,6 +90,7 @@ function harness(options = {}) {
     if (specifier === './play-guide' && options.guide !== true) return { ...actualRequire(specifier), autoGuide: () => false };
     return actualRequire(specifier);
   }, module, module.exports, ClockDate);
+  Object.defineProperties(platform.wx, Object.getOwnPropertyDescriptors(options.wx || {}));
   const game = new module.exports.Game(platform);
   function draw(ms = 200) { calls.length = 0; now += ms; game.renderer.draw(game, now, metrics); }
   return {
@@ -1355,13 +1356,45 @@ test('a current-version save resumes its exact actions without an upgrade notice
   h.destroy(); reloaded.destroy();
 });
 
-test('the fresh home offers delivery, selection, stamps and game circle links', () => {
+test('the fresh home offers delivery, selection, stamps and rankings without an unverified game circle', () => {
   const h = harness(); h.draw();
   const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
-  for (const label of ['开始送信', '选关', '邮票', '圈子']) assert.ok(texts.includes(label));
+  for (const label of ['开始送信', '选关', '邮票', '排行']) assert.ok(texts.includes(label));
+  assert.equal(texts.includes('圈子'), false);
   assert.equal(texts.some(text => /设置|每日|成长|LV\.|已走 0 拍|本周|下一小步/.test(text)), false);
-  assert.equal(h.game.renderer.hits.length, 4, 'delivery, selection, stamps and game circle are available');
+  assert.equal(h.game.renderer.hits.length, 4, 'delivery, selection, stamps and rankings are available');
   h.destroy();
+});
+
+test('home renders and opens the game circle only in WeChat develop and trial versions', async () => {
+  for (const kind of ['wechat', 'browser']) {
+    for (const envVersion of ['develop', 'trial', 'release', undefined]) {
+      const shown = [];
+      const h = harness({ kind, wx: {
+        getAccountInfoSync: () => ({ miniProgram: { envVersion } }),
+        createPageManager: () => ({ show: options => { shown.push(options); return Promise.resolve(); } })
+      } });
+      try {
+        h.draw();
+        const available = kind === 'wechat' && ['develop', 'trial'].includes(envVersion);
+        const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
+        assert.equal(texts.includes('圈子'), available, kind + '/' + envVersion);
+        const hits = h.game.renderer.hits;
+        assert.equal(hits.length, available ? 5 : 4, 'hidden circles have no hit target');
+        assert.equal(hits[1].x + hits.at(-1).x + hits.at(-1).w, 390, 'navigation stays centered');
+        if (available) {
+          await hits.at(-1).action();
+          assert.equal(shown.length, 1);
+        } else {
+          h.soundCalls.length = 0;
+          await h.game.openGameCircle();
+          await h.game.gameCircle.open();
+          assert.deepEqual(shown, []);
+          assert.deepEqual(h.soundCalls, [], 'disabled entry points have no tap sound');
+        }
+      } finally { h.destroy(); }
+    }
+  }
 });
 
 test('choosing each introductory route starts it directly without a launch or tutorial dialog', () => {
@@ -1711,5 +1744,196 @@ test('canvas shake is cleared by pausing, lifecycle changes, route recovery and 
       assert.equal(view.panY, camera.panY, transition.name + ' clears vertical feedback without a later replay');
     }
     h.destroy();
+  }
+});
+
+test('friend-only ranking navigation preserves the active route and has no world tab', () => {
+  for (const metrics of [{ width: 320, height: 568, pixelRatio: 2, safeTop: 20, safeBottom: 0 }, { width: 390, height: 844, pixelRatio: 3, safeTop: 50, safeBottom: 34 }]) {
+    const h = harness({ kind: 'browser', metrics }); h.start(); h.act('right');
+    const saved = clone(h.game.store.loadRun()); h.game.openPage('leaderboard'); h.draw();
+    const labels = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
+    assert.ok(labels.includes('好友排行榜')); assert.ok(!labels.includes('全服榜') && !labels.includes('世界榜'));
+    assert.equal(h.game.listScroll(), null); assert.equal(h.game.rankingAuthorization.getState().status, 'unavailable');
+    h.game.home(); assert.deepEqual(h.game.store.loadRun(), saved); h.destroy();
+  }
+});
+
+test('friend ranking uses existing local bests after native consent without login or cloud development', async () => {
+  const events = [], privacy = [], buttons = [], authorizations = [], messages = [];
+  const avatarUrl = 'https://thirdwx.qlogo.cn/mmopen/authorized/132';
+  const context = { canvas: { width: 1, height: 1 }, postMessage(message) { messages.push(message); } };
+  const h = harness({ development: true, wx: {
+    get cloud() { throw new Error('Cloud development must not be accessed'); },
+    get login() { throw new Error('Native friend ranking needs no login'); },
+    requirePrivacyAuthorize(options) { events.push('privacy'); privacy.push(options); },
+    getSetting(options) { options.success({ authSetting: {} }); },
+    getUserInfo(options) { assert.equal(options.withCredentials, false); options.success({ userInfo: { nickName: '微信邮差', avatarUrl } }); },
+    createUserInfoButton(options) {
+      assert.equal(options.withCredentials, false);
+      const button = { style: options.style, onTap(fn) { this.tap = fn; }, offTap() {}, show() {}, hide() {}, destroy() { this.destroyed = true; } };
+      buttons.push(button); return button;
+    },
+    authorize(options) { events.push('friend-permission'); authorizations.push(options); },
+    getOpenDataContext() { return context; }
+  } });
+  h.game.store.recordWin(2, 2, 6); // Pre-existing progress needs no replay upload.
+  h.start(); CAMPAIGN[0].solution.forEach(action => h.act(action));
+  h.callbacks.hide(); h.callbacks.show(); assert.deepEqual(events, []); assert.deepEqual(messages, []);
+  h.game.openPage('leaderboard'); privacy[0].fail({ errMsg: 'requirePrivacyAuthorize:fail auth deny' });
+  await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(messages, []);
+  h.game.home(); h.game.openPage('leaderboard'); privacy[1].success();
+  await new Promise(resolve => setImmediate(resolve)); h.draw();
+  assert.equal(buttons.length, 1); assert.equal(buttons[0].style.width, 280 * h.game.renderer.scale);
+  buttons[0].tap({ errMsg: 'getUserInfo:ok', userInfo: { nickName: '微信邮差', avatarUrl } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(authorizations[0].scope, 'scope.WxFriendInteraction'); assert.deepEqual(messages, []);
+  authorizations[0].success(); await new Promise(resolve => setImmediate(resolve)); h.draw();
+  const submitted = messages.find(message => message.action === 'submit');
+  assert.ok(submitted); assert.equal(submitted.key, 'wind_letter_rank_v1_development');
+  assert.deepEqual(submitted.score, { v: 2, stars: 5, completed: 2, turns: 10, name: '微信邮差', avatarUrl });
+  assert.equal(buttons[0].destroyed, true); assert.equal(h.game.friendLeaderboard.getState().status, 'ready');
+  h.game.home(); h.game.store.recordWin(2, 3, 5); h.game.syncFriendScore();
+  assert.equal(messages.filter(message => message.action === 'submit').at(-1).score.stars, 6);
+  assert.equal(Array.from(h.data.keys()).some(key => key.startsWith('wind-letter.ranking.')), false);
+  h.destroy();
+});
+
+function rankingHarness() {
+  const messages = [], authorizations = [], settings = [], checks = [];
+  let nickName = '微信邮差', holdChecks = false;
+  const permissions = { 'scope.userInfo': true, 'scope.WxFriendInteraction': true };
+  const context = { canvas: { width: 1, height: 1 }, postMessage: message => messages.push(message) };
+  const h = harness({ wx: {
+    requirePrivacyAuthorize: options => options.success(),
+    getSetting: options => { if (holdChecks) checks.push(options); else options.success({ authSetting: { ...permissions } }); },
+    getUserInfo: options => options.success({ userInfo: { nickName, avatarUrl: '' } }),
+    createUserInfoButton() { throw new Error('Already authorized profile needs no native button'); },
+    authorize: options => authorizations.push(options),
+    openSetting: options => settings.push(options),
+    getOpenDataContext: () => context,
+  } });
+  h.game.store.recordWin(1, 3, 4);
+  return { ...h, messages, authorizations, settings, checks, permissions,
+    rename: value => { nickName = value; }, holdChecks: value => { holdChecks = value; } };
+}
+const rankingTick = () => new Promise(resolve => setImmediate(resolve));
+
+test('revisiting rankings rechecks friend permission before a changed profile submits any score', async () => {
+  const h = rankingHarness();
+  try {
+    h.game.openPage('leaderboard'); await rankingTick(); h.authorizations[0].success(); await rankingTick();
+    h.game.home(); h.rename('新昵称'); h.messages.length = 0;
+    h.game.openPage('leaderboard'); await rankingTick();
+    assert.equal(h.authorizations.length, 2);
+    assert.equal(h.messages.some(message => message.action === 'submit'), false);
+    h.authorizations[1].fail({ errMsg: 'authorize:fail auth deny' }); await rankingTick();
+    assert.equal(h.messages.some(message => message.action === 'submit'), false);
+    assert.equal(h.game.friendLeaderboard.getState().status, 'denied');
+  } finally { h.game.home(); h.destroy(); }
+});
+
+test('a denied friend permission opens settings only from the visible authorization button', async () => {
+  const h = rankingHarness();
+  try {
+    h.game.openPage('leaderboard'); await rankingTick(); h.authorizations[0].fail(); await rankingTick();
+    h.game.home(); h.game.openPage('leaderboard'); await rankingTick(); h.draw();
+    assert.equal(h.settings.length, 0, 'reentering the page must leave the settings decision to the player');
+    assert.equal(h.game.friendLeaderboard.getState().status, 'denied');
+    const consent = h.game.renderer.hits.find(hit => hit.w === 206);
+    assert.ok(consent, 'friend authorization recovery remains available'); consent.action();
+    assert.equal(h.settings.length, 1, 'the button opens native settings synchronously');
+    h.settings[0].success({ authSetting: { 'scope.WxFriendInteraction': true } }); await rankingTick();
+    assert.equal(h.game.friendLeaderboard.getState().status, 'ready');
+    assert.ok(h.messages.some(message => message.action === 'submit'));
+  } finally { h.game.home(); h.destroy(); }
+});
+
+test('foreground recovery revalidates both permissions before resuming friend traffic', async () => {
+  for (const revoked of ['scope.userInfo', 'scope.WxFriendInteraction', null]) {
+    const h = rankingHarness();
+    try {
+      h.game.openPage('leaderboard'); await rankingTick(); h.authorizations[0].success(); await rankingTick();
+      h.callbacks.hide(); h.game.store.recordWin(2, 3, 5); h.messages.length = 0; h.holdChecks(true);
+      h.callbacks.show(); h.game.syncFriendScore();
+      assert.equal(h.checks.length, 1); assert.equal(h.game.rankingAuthorization.getState().enabled, false);
+      assert.deepEqual(h.messages, [], 'nothing is sent while permissions are being checked');
+      h.checks[0].success({ authSetting: { ...h.permissions, ...(revoked ? { [revoked]: false } : {}) } }); await rankingTick();
+      const traffic = h.messages.filter(message => ['submit', 'retry', 'refresh'].includes(message.action));
+      if (revoked) {
+        assert.deepEqual(traffic, []);
+        assert.equal(revoked === 'scope.userInfo' ? h.game.rankingAuthorization.getState().status : h.game.friendLeaderboard.getState().status, 'denied');
+      } else {
+        assert.equal(traffic.filter(message => message.action === 'submit').length, 1);
+        assert.equal(traffic.filter(message => message.action === 'refresh').length, 1);
+        assert.equal(traffic.find(message => message.action === 'submit').score.stars, 6);
+      }
+      assert.equal(h.authorizations.length, 1, 'returning to foreground does not open an authorization dialog');
+    } finally { h.game.home(); h.destroy(); }
+  }
+});
+
+test('late profile authorization in the background waits for the player to open friends in the foreground', async () => {
+  const h = rankingHarness();
+  try {
+    h.game.openPage('leaderboard'); h.callbacks.hide(); await rankingTick();
+    assert.equal(h.game.rankingAuthorization.getState().enabled, true);
+    assert.equal(h.authorizations.length, 0); assert.deepEqual(h.messages, []);
+    h.callbacks.show(); await rankingTick();
+    assert.equal(h.authorizations.length, 0); assert.deepEqual(h.messages, []);
+    h.game.openFriendLeaderboard(); assert.equal(h.authorizations.length, 1);
+    h.authorizations[0].success(); await rankingTick();
+    assert.ok(h.messages.some(message => message.action === 'submit'));
+  } finally { h.game.home(); h.destroy(); }
+});
+
+test('friend grants wait for foreground permission validation and cannot bypass a revoked profile', async () => {
+  for (const revoked of [false, true]) {
+    const h = rankingHarness();
+    try {
+      h.game.openPage('leaderboard'); await rankingTick();
+      h.callbacks.hide(); h.holdChecks(true); h.callbacks.show();
+      if (revoked) {
+        h.checks[0].success({ authSetting: { ...h.permissions, 'scope.userInfo': false } }); await rankingTick();
+        h.authorizations[0].success(); await rankingTick();
+        assert.equal(h.game.rankingAuthorization.getState().enabled, false);
+        assert.deepEqual(h.messages, [], 'the late friend grant cannot open the child after profile revocation');
+      } else {
+        h.authorizations[0].success(); await rankingTick();
+        assert.deepEqual(h.messages, [], 'no friend data is requested before the settings check completes');
+        h.checks[0].success({ authSetting: { ...h.permissions } }); await rankingTick();
+        assert.equal(h.game.friendLeaderboard.getState().status, 'ready');
+        assert.ok(h.messages.some(message => message.action === 'open'));
+        assert.ok(h.messages.some(message => message.action === 'submit'));
+      }
+    } finally { h.game.home(); h.destroy(); }
+  }
+});
+
+test('a background friend grant defers all open-data traffic until foreground consent is confirmed', async () => {
+  const h = rankingHarness();
+  try {
+    h.game.openPage('leaderboard'); await rankingTick(); h.callbacks.hide();
+    h.authorizations[0].success(); await rankingTick(); assert.deepEqual(h.messages, []);
+    h.callbacks.show(); await rankingTick();
+    assert.equal(h.game.friendLeaderboard.getState().status, 'ready');
+    assert.ok(h.messages.some(message => message.action === 'submit'));
+  } finally { h.game.home(); h.destroy(); }
+});
+
+test('a failed or page-cancelled foreground check can recover pending scores on a later foreground visit', async () => {
+  for (const outcome of ['failure', 'close']) {
+    const h = rankingHarness();
+    try {
+      h.game.openPage('leaderboard'); await rankingTick(); h.authorizations[0].success(); await rankingTick();
+      h.callbacks.hide(); h.game.store.recordWin(2, 3, 5); h.holdChecks(true); h.callbacks.show();
+      if (outcome === 'failure') h.checks[0].fail({ errMsg: 'getSetting:fail offline' }); else h.game.home();
+      await rankingTick(); assert.equal(h.game.rankingAuthorization.getState().enabled, false);
+      h.messages.length = 0; h.callbacks.hide(); h.callbacks.show();
+      assert.equal(h.checks.length, 2, 'temporary failure must not disable all subsequent checks');
+      h.checks[1].success({ authSetting: { ...h.permissions } }); await rankingTick();
+      assert.equal(h.game.rankingAuthorization.getState().enabled, true);
+      assert.equal(h.messages.find(message => message.action === 'submit').score.stars, 6);
+      assert.equal(h.authorizations.length, 1, 'recovery uses existing permissions without another prompt');
+    } finally { h.game.home(); h.destroy(); }
   }
 });

@@ -3,6 +3,9 @@ const { createPlatform } = require('./platform');
 const { createStore } = require('./storage');
 const { createAds } = require('./ads');
 const { createGameCircle } = require('./game-circle');
+const { createFriendLeaderboard } = require('./friend-leaderboard');
+const { createRankingAuthorization } = require('./ranking-authorization');
+const { campaignScore } = require('./friend-score');
 const { enableSharing } = require('./sharing');
 const { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, createState, step, replay, revive, stars } = require('./engine');
 const { CAMPAIGN } = require('./levels');
@@ -29,6 +32,18 @@ class Game {
     this.store = createStore(platform.storage, { development: this.development });
     this.sound = createSound(platform);
     this.gameCircle = createGameCircle(platform, config.GAME_CIRCLE_OPENLINK, message => this.toast(message));
+    this.rankingProfile = null; this.friendResumeRevision = 0;
+    const rankingAllowed = () => !this.hidden && !!this.rankingAuthorization && this.rankingAuthorization.getState().enabled;
+    this.friendLeaderboard = createFriendLeaderboard(platform, config,
+      { canSync: rankingAllowed, canShow: rankingAllowed });
+    this.rankingAuthorization = createRankingAuthorization(platform, {
+      onProfile: profile => { this.rankingProfile = profile; return true; },
+      onReady: () => {
+        if (this.hidden || this.page !== 'leaderboard') return;
+        // Recheck friend permission before a changed profile can dispatch a score.
+        this.openFriendLeaderboard({ automatic: true });
+      }
+    });
     this.ads = createAds(platform, config, active => {
       if (active) this.sound.suspend('ad');
       else { this.syncMusic(); this.sound.resume('ad'); }
@@ -64,6 +79,8 @@ class Game {
       else if (key === 'z' || key === 'Backspace') this.undo();
     });
     platform.onHide(() => {
+      this.friendResumeRevision++;
+      this.rankingAuthorization.hide();
       this.hidden = true; this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.persist();
       this.sound.suspend('hidden'); this.syncMusic();
       if (this.frameId != null) platform.cancelRaf(this.frameId);
@@ -72,7 +89,21 @@ class Game {
       if (this.page === 'game' && this.state.status === 'playing' && !this.modal && !this.busy) this.pause();
     });
     platform.onShow(() => {
-      this.hidden = false; this.pointer = null; this.metrics = platform.resize(); this.lastFrame = -Infinity;
+      this.hidden = false;
+      if (this.page === 'leaderboard') this.rankingAuthorization.show();
+      const token = ++this.friendResumeRevision;
+      this.rankingAuthorization.revalidate().then(settings => {
+        if (token !== this.friendResumeRevision || this.hidden) return;
+        if (!settings) {
+          if (this.rankingAuthorization.getState().status === 'error') this.friendLeaderboard.revalidate(null);
+          return;
+        }
+        if (!this.rankingAuthorization.getState().enabled) { this.friendLeaderboard.revalidate(null); return; }
+        if (!this.friendLeaderboard.revalidate(settings)) return;
+        this.syncFriendScore();
+        if (this.page === 'leaderboard') this.friendLeaderboard.refresh(); else this.friendLeaderboard.retry();
+      });
+      this.pointer = null; this.metrics = platform.resize(); this.lastFrame = -Infinity;
       this.syncMusic(); this.sound.resume('hidden');
       if (this.frameId == null) this.loop();
     });
@@ -297,6 +328,7 @@ class Game {
     const albumBefore = this.album();
     const rating = stars(this.level, this.state), before = this.record(this.level, this.mode);
     this.store.recordWin(this.level.id, rating, this.state.turn, this.mode);
+    this.syncFriendScore();
     this.store.clearRun();
     const index = CAMPAIGN.findIndex(l => l.id === this.level.id);
     const candidate = index >= 0 ? CAMPAIGN[index + 1] : null;
@@ -410,18 +442,33 @@ class Game {
     this.modal = { kind: 'help', title: '和回声一起送信', lines,
       buttons: [{ text: '明白了', primary: true, icon: 'check', action: () => { this.modal = old; } }] };
   }
-  home() { if (this.busy) return; this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
+  home() { if (this.busy) return; this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
   openGameCircle() {
-    if (this.page !== 'home' || this.busy || this.hidden || this.modal) return;
+    if (!this.gameCircle.available || this.page !== 'home' || this.busy || this.hidden || this.modal) return;
     this.cue('tap');
     return this.gameCircle.open();
   }
   openPage(page) {
-    if (this.busy || !['home', 'levels', 'collection'].includes(page)) return;
+    if (this.busy || !['home', 'levels', 'collection', 'leaderboard'].includes(page)) return;
+    this.rankingAuthorization.close();
+    this.friendLeaderboard.close();
     this.pendingAction = null; this.persist(); this.page = page; this.modal = null; this.reviewing = false; this.pointer = null; this.stopListScrolling();
     if (page === 'levels') this.scrollToProgress();
     if (page === 'collection') this.collectionScroll.reset(this.platform.now());
+    if (page === 'leaderboard') this.rankingAuthorization.open();
     this.cue('tap');
+  }
+  syncFriendScore() {
+    if (this.hidden || !this.rankingAuthorization.getState().enabled) return;
+    return this.friendLeaderboard.submit(campaignScore(this.profile(), this.rankingProfile));
+  }
+  openFriendLeaderboard(options) {
+    if (this.hidden || !this.rankingAuthorization.getState().enabled) return;
+    // openSetting must originate from the visible "去授权" button itself.
+    if (options && options.automatic && this.friendLeaderboard.getState().status === 'denied') return;
+    const opening = this.friendLeaderboard.open({ width: 354, height: Math.max(200, this.renderer.H - 242), pixelRatio: Math.min(2, (this.metrics.pixelRatio || 1) * this.renderer.scale) });
+    this.syncFriendScore();
+    return opening;
   }
   listScroll() { return this.page === 'collection' ? this.collectionScroll : this.page === 'levels' ? this.levelScroll : null; }
   listRect() { return this.page === 'collection' ? this.renderer.collectionRect : this.page === 'levels' ? this.renderer.levelRect : null; }

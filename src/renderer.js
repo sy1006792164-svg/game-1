@@ -6,6 +6,7 @@ const { drawHome } = require('./home-view');
 const { drawGame } = require('./game-view');
 const { drawLevels } = require('./level-view');
 const { drawCollection } = require('./collection-view');
+const { drawLeaderboard } = require('./leaderboard-view');
 const { drawModal } = require('./modal-view');
 const { RESULT_DELAY_MS } = require('./result-effects');
 const { drawDeveloperPicker } = require('./developer-view');
@@ -221,6 +222,7 @@ class Renderer {
     if (game.page === 'game') this.game(game, now);
     else if (game.page === 'levels') this.levels(game);
     else if (game.page === 'collection') this.collection(game);
+    else if (game.page === 'leaderboard') drawLeaderboard(this, game);
     else this.home(game, now);
     if (game.modal !== this.currentModal) { this.currentModal = game.modal; this.modalAt = now; }
     let modalBounds = null;

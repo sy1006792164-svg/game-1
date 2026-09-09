@@ -28,13 +28,16 @@ function drawBrand(r, top) {
 }
 
 function drawLinks(r, game, y) {
-  [
+  const links = [
     { title: '选关', icon: 'route', action: () => game.openPage('levels') },
     { title: '邮票', icon: 'stamp', action: () => game.openPage('collection') },
-    { title: '圈子', icon: 'community', action: () => game.openGameCircle() }
-  ].forEach((item, index) => {
-    const x = 30 + index * 114;
-    r.button(item.title, x, y, 102, CONTROL.compactHeight, item.action, { style: 'quiet', icon: item.icon });
+    { title: '排行', icon: 'ranking', action: () => game.openPage('leaderboard') }
+  ];
+  if (game.gameCircle.available) links.push({ title: '圈子', icon: 'community', action: () => game.openGameCircle() });
+  const startX = (390 - (links.length * 88 - 6)) / 2;
+  links.forEach((item, index) => {
+    const x = startX + index * 88;
+    r.button(item.title, x, y, 82, CONTROL.compactHeight, item.action, { style: 'quiet', icon: item.icon });
   });
 }
 

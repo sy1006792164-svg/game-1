@@ -12,7 +12,8 @@ let bytes = fs.statSync(path.join(root, 'game.js')).size + fs.statSync(path.join
 for (const file of fs.readdirSync(path.join(root, 'src')).filter(f => f.endsWith('.js'))) {
   const source = read('src/' + file);
   try { new vm.Script(source, { filename: file }); } catch (error) { check(false, error.message); }
-  check(!/wx\.(request|connectSocket|cloud|login|getUserInfo|getLocation)\b/.test(source), file + ': no business backend or personal information API.');
+  check(!/wx\.(request|connectSocket|getLocation|getFriendCloudStorage)\b/.test(source), file + ': no unrelated network, location or friend reads in the main domain.');
+  check(!/\.cloud\b|\bcallFunction\s*\(/.test(source), file + ': friend leaderboard has no cloud development dependency.');
   bytes += Buffer.byteLength(source);
 }
 for (const name of require('../src/sound').SOUND_TYPES) {
@@ -24,7 +25,15 @@ for (const name of require('../src/sound').SOUND_TYPES) {
 }
 bytes += fs.readdirSync(path.join(root, 'assets')).reduce((n, f) => n + fs.statSync(path.join(root, 'assets', f)).size, 0);
 const ignored = project.packOptions.ignore.filter(x => x.type === 'folder').map(x => x.value);
-check(['work', 'output', 'docs', 'tests', 'tools', 'preview'].every(x => ignored.includes(x)), 'Tooling, QA and generated content excluded from upload.');
+check(['work', 'output', 'docs', 'tests', 'tools', 'preview'].every(x => ignored.includes(x)), 'Tooling and QA excluded from game upload.');
+check(!project.cloudfunctionRoot && !config.CLOUD_ENV_ID && game.openDataContext === 'open-data', 'Only the native friend leaderboard is configured; no cloud environment required.');
+const authorization = read('src/ranking-authorization.js');
+check(authorization.includes("'requirePrivacyAuthorize'") && authorization.includes('api.createUserInfoButton(') && !authorization.includes('api.onNeedPrivacyAuthorization('), 'Ranking requests the real WeChat privacy dialog and native profile authorization button.');
+for (const file of fs.readdirSync(path.join(root, 'open-data')).filter(f => f.endsWith('.js'))) {
+  const source = read('open-data/' + file);
+  try { new vm.Script(source, { filename: 'open-data/' + file }); } catch (error) { check(false, error.message); }
+  bytes += Buffer.byteLength(source);
+}
 const { CAMPAIGN, chapterNames, PER_CHAPTER } = require('../src/levels');
 check(CAMPAIGN.length === 999 && chapterNames.length === Math.ceil(CAMPAIGN.length / PER_CHAPTER), '999 campaign routes across 167 chapters.');
 try {
