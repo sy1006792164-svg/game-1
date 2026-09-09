@@ -11,6 +11,7 @@ const { MOVE_MS } = require('../src/motion');
 const { drawResultHeader, drawResultStars } = require('../src/result-effects');
 const { C } = require('../src/theme');
 const { RUN_KEY, PROFILE_KEY, DEV_RUN_KEY, DEV_PROFILE_KEY } = require('../src/storage');
+const { StartupLoader } = require('../src/startup');
 
 const mainPath = path.join(__dirname, '../src/main.js');
 const source = fs.readFileSync(mainPath, 'utf8');
@@ -45,7 +46,7 @@ function harness(options = {}) {
   const audio = [];
   const { canvas, calls } = canvasMock();
   const closeListeners = new Set(); const errorListeners = new Set();
-  let now = 1000; let frame = 0; let showCount = 0;
+  let now = options.now ?? 1000; let frame = 0; let showCount = 0;
   const ad = {
     show: () => { showCount++; return Promise.resolve(); }, load: () => Promise.resolve(),
     onClose: handler => closeListeners.add(handler), offClose: handler => closeListeners.delete(handler),
@@ -84,17 +85,26 @@ function harness(options = {}) {
       unlock() { soundCalls.push(['unlock']); },
       suspend(reason) { soundCalls.push(['suspend', reason]); }, resume(reason) { soundCalls.push(['resume', reason]); },
     }) };
-    if (specifier === './config') return { REWARDED_AD_UNIT_ID: options.configured === false ? '' : 'adunit-integrationtest' };
+    if (specifier === './config') return {
+      ...actualRequire(specifier),
+      REWARDED_AD_UNIT_ID: options.configured === false ? '' : 'adunit-integrationtest',
+      ...(options.publicationInfo ? { PUBLICATION_INFO: options.publicationInfo } : {}),
+    };
     // Non-guide scenarios deliberately explore waits, failures and buffered input.
     // Keep their saved profiles intact while dedicated guide cases use the real policy.
     if (specifier === './play-guide' && options.guide !== true) return { ...actualRequire(specifier), autoGuide: () => false };
+    if (specifier === './mechanic-guide' && options.mechanics !== true) return { ...actualRequire(specifier), createMechanicGuide: () => null };
     return actualRequire(specifier);
   }, module, module.exports, ClockDate);
   Object.defineProperties(platform.wx, Object.getOwnPropertyDescriptors(options.wx || {}));
   const game = new module.exports.Game(platform);
+  if (options.startup !== true) {
+    for (let frame = 0; game.page !== 'home' && frame < 200; frame++) { now += 100; game.loop(); }
+    assert.equal(game.page, 'home', 'the real startup loop must automatically finish before gameplay tests');
+  }
   function draw(ms = 200) { calls.length = 0; now += ms; game.renderer.draw(game, now, metrics); }
   return {
-    game, data, clock, calls, callbacks, platform, draw, soundCalls, audio, ad, frameRates,
+    game, data, clock, calls, callbacks, platform, draw, soundCalls, audio, ad, frameRates, metrics,
     get showCount() { return showCount; },
     advance(ms, runLoop = true) { now += ms; if (runLoop) game.loop(); },
     act(action) { now += 200; game.act(action); },
@@ -103,6 +113,380 @@ function harness(options = {}) {
     destroy() { game.ads.destroy(); game.sound.release(); }
   };
 }
+
+test('new mechanics use two actual board taps on small phones without spending a turn or accepting stray input', t => {
+  for (const [id, seen] of [[13, {}], [16, { wind: true }], [19, { wind: true, bridge: true }]]) {
+    const h = harness({ mechanics: true, development: true,
+      metrics: { width: 320, height: 568, pixelRatio: 2, safeTop: 70, safeBottom: 20 } });
+    t.after(() => h.destroy());
+    Object.keys(seen).forEach(key => h.game.store.markMechanicSeen(key));
+    h.start(CAMPAIGN[id - 1]); h.advance(1200, false); h.draw();
+    const original = clone(h.game.state), undos = h.game.undosUsed;
+    assert.equal(h.game.guideStep().kind, 'mechanic');
+    h.act(h.game.level.solution[0]); h.callbacks.key(' '); h.game.undo();
+    assert.deepEqual(h.game.state, original);
+    assert.equal(h.game.undosUsed, undos);
+    assert.equal(h.game.pendingAction, null);
+    for (let phase = 0; phase < 2; phase++) {
+      h.draw();
+      const guide = h.game.guideStep();
+      assert.equal(guide.step, phase + 1);
+      const point = h.game.renderer.boardProjection.point(guide.visual.tapCell);
+      tapBoardPoint(h, point);
+      assert.deepEqual(h.game.state, original, 'inspection spends no energy or history');
+      assert.equal(h.game.actions.length, 0);
+    }
+    assert.equal(h.game.guideStep(), null);
+    assert.equal(h.game.profile().mechanicGuides[{ 13: 'wind', 16: 'bridge', 19: 'light' }[id]], true);
+    h.act(h.game.level.solution[0]);
+    assert.equal(h.game.state.turn, 1, 'normal movement resumes immediately after the explanation');
+  }
+});
+
+test('new mechanic stages restore, retry and skip independently of first-route preferences', t => {
+  const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
+  h.game.store.setGuideDismissed(true); h.start(CAMPAIGN[19]);
+  assert.deepEqual(h.game.mechanicGuide.ids, ['wind', 'bridge', 'light']);
+  h.game.advanceMechanicGuide();
+  const resumed = harness({ mechanics: true, development: true, data: h.data }); t.after(() => resumed.destroy());
+  assert.equal(resumed.game.restore(), true);
+  assert.equal(resumed.game.guideStep().step, 2);
+  assert.equal(resumed.game.guideStep().mechanic, 'wind');
+  resumed.game.start(resumed.game.level);
+  assert.equal(resumed.game.guideStep().step, 1, 'retry restarts an uncompleted inspection');
+  resumed.game.dismissGuide();
+  assert.equal(resumed.game.guideStep().mechanic, 'bridge', 'skip marks only the displayed mechanic');
+  assert.deepEqual(resumed.game.profile().mechanicGuides, { wind: true });
+  resumed.game.advanceMechanicGuide(); resumed.game.advanceMechanicGuide();
+  assert.equal(resumed.game.guideStep().mechanic, 'light');
+  resumed.game.advanceMechanicGuide(); resumed.game.advanceMechanicGuide();
+  assert.equal(resumed.game.guideStep(), null);
+  resumed.game.start(resumed.game.level);
+  assert.equal(resumed.game.guideStep(), null, 'confirmed mechanics do not reopen on retry');
+  assert.equal(resumed.game.profile().guideDismissed, true, 'first-route preference is independent');
+});
+
+test('manual mechanic review survives relaunch at its current item and preserves an existing route through undo', t => {
+  const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
+  ['wind', 'bridge', 'light'].forEach(id => h.game.store.markMechanicSeen(id));
+  h.start(CAMPAIGN[19]); h.act(h.game.level.solution[0]);
+  const route = clone(h.game.state);
+  h.game.pause(); h.game.modal.buttons.find(button => button.text === '操作引导').action();
+  h.game.advanceMechanicGuide(); h.game.advanceMechanicGuide(); h.game.advanceMechanicGuide();
+  assert.equal(h.game.guideStep().mechanic, 'bridge'); assert.equal(h.game.guideStep().step, 2);
+  const resumed = harness({ mechanics: true, development: true, data: h.data }); t.after(() => resumed.destroy());
+  assert.equal(resumed.game.restore(), true);
+  assert.equal(resumed.game.guideStep().mechanic, 'bridge'); assert.equal(resumed.game.guideStep().step, 2);
+  assert.deepEqual(resumed.game.state, route);
+  resumed.game.advanceMechanicGuide(); resumed.game.dismissGuide();
+  assert.equal(resumed.game.guideStep(), null);
+  resumed.game.undo();
+  assert.equal(resumed.game.state.turn, 0);
+  assert.equal(resumed.game.guideStep(), null, 'undo preserves acquired knowledge without consuming extra undo credit');
+  assert.equal(resumed.game.undosUsed, 1);
+});
+
+test('mechanic inspection on a legacy mid-route save uses the replayed state and survives background pause', t => {
+  const level = CAMPAIGN[18], data = new Map([[DEV_RUN_KEY, { mode: 'campaign', levelId: level.id,
+    revision: level.revision || '1', actions: level.solution.slice(0, 3), reviveAt: null, undosUsed: 0 }]]);
+  const h = harness({ mechanics: true, development: true, data }); t.after(() => h.destroy());
+  assert.equal(h.game.restore(), true);
+  const state = clone(h.game.state);
+  h.game.dismissGuide();
+  assert.equal(h.game.guideStep().mechanic, 'light');
+  assert.ok(state.lights.includes(h.game.guideStep().visual.tapCell), 'prefer a lamp that has not already been used');
+  h.game.advanceMechanicGuide(); h.callbacks.hide();
+  assert.equal(h.game.advanceMechanicGuide(), false, 'hidden or paused inspection cannot acknowledge a rule');
+  h.callbacks.show(); h.game.modal.buttons.find(button => button.text === '继续投递').action();
+  assert.equal(h.game.guideStep().step, 2);
+  h.game.advanceMechanicGuide();
+  assert.deepEqual(h.game.state, state);
+  assert.equal(h.game.store.loadRun().mechanicGuide, undefined);
+});
+
+const startupAdvice = [
+  '抵制不良游戏，拒绝盗版游戏。',
+  '注意自我保护，谨防受骗上当。',
+  '适度游戏益脑，沉迷游戏伤身。',
+  '合理安排时间，享受健康生活。',
+];
+
+test('home and loading decoration keeps hit geometry and real preparation state stable across animation frames', t => {
+  const geometry = r => r.hits.map(({ x, y, w, h }) => ({ x, y, w, h }));
+  for (const metrics of [
+    { width: 320, height: 568, pixelRatio: 2, safeTop: 72, safeBottom: 0 },
+    { width: 390, height: 844, pixelRatio: 3, safeTop: 96, safeBottom: 34 },
+  ]) {
+    const home = harness({ metrics }); t.after(() => home.destroy());
+    home.draw(0);
+    const r = home.game.renderer, homeHits = geometry(r);
+    const entry = r.hits.find(hit => hit.x === 42 && hit.w === 306 && hit.h === 52);
+    assert.ok(entry, 'the existing primary button remains the departure target');
+    for (const ms of [400, 1000]) { home.draw(ms); assert.deepEqual(geometry(r), homeHits); }
+    let departures = 0;
+    home.game.primary = () => { departures++; };
+    const x = (entry.x + entry.w / 2) * r.scale + r.ox, y = (entry.y + entry.h / 2) * r.scale + r.oy;
+    home.game.pointerEvent(x, y, 'start');
+    home.draw(400);
+    assert.deepEqual(geometry(r), homeHits, 'the pressed visual state cannot move or add a hit region');
+    home.game.pointerEvent(x, y, 'end'); home.game.pointerEvent(x, y, 'end');
+    assert.equal(departures, 1, 'a release across an animation frame starts exactly one departure');
+
+    const loading = harness({ startup: true, metrics }); t.after(() => loading.destroy());
+    const startup = loading.game.startup;
+    for (const progress of [0, .4, 1]) {
+      startup.progress = progress; startup.completed = Math.ceil(progress * startup.tasks.length);
+      startup.settledMs = progress === 1 ? 180 : 0;
+      const before = { progress, completed: startup.completed, settledMs: startup.settledMs,
+        ready: startup.ready, pending: startup.pending, page: loading.game.page, lastAt: loading.game.startupLastAt };
+      for (const ms of [0, 400, 1000]) {
+        loading.draw(ms);
+        assert.deepEqual({ progress: startup.progress, completed: startup.completed, settledMs: startup.settledMs,
+          ready: startup.ready, pending: startup.pending, page: loading.game.page, lastAt: loading.game.startupLastAt }, before,
+        'drawing the scan never advances real preparation or changes the automatic-entry timing');
+        assert.deepEqual(geometry(loading.game.renderer), [], 'loading decoration creates no invisible input target');
+      }
+    }
+    startup.error = new Error('preparation unavailable'); loading.draw(0);
+    const retryHits = geometry(loading.game.renderer);
+    assert.equal(retryHits.length, 1);
+    for (const ms of [400, 1000]) { loading.draw(ms); assert.deepEqual(geometry(loading.game.renderer), retryHits); }
+  }
+});
+
+function startupText(h) {
+  return h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0])).join('').replace(/\s+/g, '');
+}
+function startupPointer(h, x, y, phase) {
+  const r = h.game.renderer;
+  h.callbacks.pointer(x * r.scale + r.ox, y * r.scale + r.oy, phase);
+}
+function completeStartup(h, target = 'home') {
+  for (let frame = 0; h.game.page !== target && frame < 200; frame++) {
+    h.calls.length = 0; h.advance(100);
+  }
+  assert.equal(h.game.page, target, 'startup must finish through the real frame loop without an entry action');
+}
+function assertStartupContentFits(h) {
+  const r = h.game.renderer;
+  for (const call of h.calls.filter(call => call.method === 'fillText')) {
+    const size = Number((call.font.match(/([\d.]+)px/) || [0, 0])[1]);
+    assert.ok(call.args[2] - size / 2 >= 0, 'startup text stays below the top safe area: ' + call.args[0]);
+    assert.ok(call.args[2] + size / 2 <= r.H, 'startup text stays above the bottom safe area: ' + call.args[0]);
+  }
+  for (const hit of r.hits) {
+    assert.ok(hit.x >= 0 && hit.x + hit.w <= 390);
+    assert.ok(hit.y >= 0 && hit.y + hit.h <= r.H);
+  }
+}
+
+test('cold launch shows the full health notice and real progress, then automatically enters home without starting a route', t => {
+  const h = harness({ startup: true, withAudio: true }); t.after(() => h.destroy());
+  assert.equal(h.game.page, 'startup');
+  assert.equal(h.game.state, null);
+  const text = startupText(h);
+  const brandStart = h.calls.findIndex(call => call.method === 'fillText' && call.args[0] === '风 起 · 信 至');
+  const brandEnd = h.calls.findIndex(call => call.method === 'fillText' && call.args[0] === '一封信，一段与回声同行的邮路。');
+  assert.ok(brandStart >= 0 && brandEnd > brandStart);
+  assert.equal(h.calls.slice(brandStart + 1, brandEnd).filter(call => call.method === 'fill').length, 4,
+    'cold launch paints all four title glyphs as outlines before the subtitle');
+  assert.ok(text.includes('健康游戏忠告'));
+  for (const line of startupAdvice) assert.ok(text.includes(line), line);
+  assert.equal(/适龄提示|8\+/.test(text), false);
+  assert.equal(/进入回廊/.test(text), false);
+  assert.ok(text.includes('%'), 'loading progress is visible');
+  assert.equal(h.game.renderer.hits.length, 0, 'loading has no entry button');
+  assert.ok(h.game.startup.progress < 1);
+  assert.ok(h.audio.every(voice => !voice.playing));
+  const data = clone(Array.from(h.data));
+  h.game.unlockAudio(); h.game.cue('tap');
+  for (const key of ['Enter', ' ', 'Space', 'ArrowRight', 'Escape', 'z']) h.callbacks.key(key);
+  startupPointer(h, 195, 400, 'start');
+  assert.equal(h.game.finishStartup(), false, 'entry is gated by completed loading');
+  assert.equal(h.game.page, 'startup', 'game controls cannot skip loading');
+  assert.equal(h.game.state, null);
+  assert.ok(h.audio.every(voice => !voice.playing));
+  assert.deepEqual(clone(Array.from(h.data)), data);
+  let previous = h.game.startup.progress, paintedFull = false;
+  for (let frame = 0; h.game.page === 'startup' && frame < 100; frame++) {
+    h.calls.length = 0;
+    h.advance(100);
+    assert.ok(h.game.startup.progress >= previous, 'displayed loading progress never goes backwards');
+    if (h.game.page === 'startup' && startupText(h).includes('100%')) paintedFull = true;
+    previous = h.game.startup.progress;
+  }
+  assert.equal(h.game.page, 'home');
+  assert.equal(paintedFull, true, '100 percent is visibly painted before automatic entry');
+  assert.equal(h.game.startup.progress, 1);
+  assert.equal(h.game.startup.ready, true);
+  assert.equal(h.game.state, null, 'entering the home page does not start a route');
+  assert.equal(h.game.pointer, null);
+  assert.deepEqual(clone(Array.from(h.data)), data);
+  h.draw();
+  for (const hit of h.game.renderer.hits) startupPointer(h, hit.x + hit.w / 2, hit.y + hit.h / 2, 'end');
+  assert.equal(h.game.page, 'home', 'the same touch release cannot click the home page');
+  assert.equal(h.game.state, null);
+  assert.equal(h.audio.filter(voice => voice.loop && voice.playing).length, 1);
+});
+
+test('a zero-based platform clock paints the initial 0 percent before starting preparation', t => {
+  const h = harness({ startup: true, now: 0 }); t.after(() => h.destroy());
+  assert.ok(startupText(h).includes('0%'));
+  assert.equal(h.game.startup.completed, 0);
+  assert.equal(h.game.startup.progress, 0);
+  assert.equal(h.game.page, 'startup');
+  completeStartup(h);
+  assert.equal(h.game.state, null);
+});
+
+test('startup survives backgrounding and resizing without accepting stale touches or replaying on return', t => {
+  const h = harness({ startup: true, withAudio: true }); t.after(() => h.destroy());
+  h.advance(100);
+  startupPointer(h, 195, 400, 'start');
+  h.callbacks.hide(); h.game.finishStartup(); h.callbacks.key('Enter');
+  const progress = h.game.startup.progress, completed = h.game.startup.completed;
+  h.advance(120000);
+  assert.equal(h.game.startup.progress, progress, 'time spent hidden cannot fill the progress bar');
+  assert.equal(h.game.startup.completed, completed, 'hidden frames do not start more preparation tasks');
+  startupPointer(h, 195, 400, 'end');
+  assert.equal(h.game.page, 'startup');
+  assert.ok(h.audio.every(voice => !voice.playing));
+  h.callbacks.show(); startupPointer(h, 195, 400, 'end');
+  assert.equal(h.game.startup.progress, progress, 'returning to the foreground resets the startup clock');
+  assert.equal(h.game.page, 'startup');
+  startupPointer(h, 195, 400, 'start');
+  h.metrics.width = 320; h.metrics.height = 568; h.metrics.safeTop = 60; h.metrics.safeBottom = 24;
+  h.callbacks.resize(); h.game.loop(); startupPointer(h, 195, 400, 'end');
+  assert.equal(h.game.page, 'startup');
+  h.draw(0); assertStartupContentFits(h); completeStartup(h);
+  assert.equal(h.game.page, 'home');
+  h.callbacks.hide(); h.callbacks.show(); h.callbacks.resize(); h.game.loop();
+  assert.equal(h.game.page, 'home', 'returning to a running game does not repeat the startup notice');
+});
+
+test('the notice preserves an ongoing saved route until the player explicitly restores it', t => {
+  const original = harness(); t.after(() => original.destroy()); original.start(); original.act('right');
+  const state = clone(original.game.state), run = clone(original.game.savedRun()), data = clone(Array.from(original.data));
+  const h = harness({ startup: true, data: original.data }); t.after(() => h.destroy());
+  assert.equal(h.game.page, 'startup'); assert.equal(h.game.state, null);
+  h.callbacks.hide(); h.callbacks.show(); h.advance(10000);
+  assert.deepEqual(clone(h.game.savedRun()), run);
+  assert.deepEqual(clone(Array.from(h.data)), data);
+  completeStartup(h);
+  assert.equal(h.game.page, 'home');
+  assert.equal(h.game.restore(), true);
+  assert.deepEqual(clone(h.game.state), state);
+  assert.deepEqual(clone(h.game.savedRun()), run);
+});
+
+test('configured publication information automatically shows every complete page before home, including small screens', t => {
+  const publicationInfo = {
+    copyrightHolder: '用于自动化测试的完整游戏著作权人名称北京示例科技有限公司',
+    publisher: '用于自动化测试的完整出版服务单位名称上海示例数字出版有限公司',
+    approvalNumber: '自动化测试批准文号〔2026〕123456789号',
+    publicationNumber: '自动化测试出版物号ISBN978-7-000-12345-6',
+  };
+  for (const metrics of [
+    { width: 320, height: 568, pixelRatio: 2, safeTop: 70, safeBottom: 24 },
+    { width: 390, height: 844, pixelRatio: 3, safeTop: 60, safeBottom: 34 },
+    { width: 768, height: 1024, pixelRatio: 2, safeTop: 24, safeBottom: 20 },
+  ]) {
+    const h = harness({ startup: true, publicationInfo, metrics, withAudio: true }); t.after(() => h.destroy());
+    assertStartupContentFits(h);
+    const first = startupText(h);
+    for (const line of startupAdvice) assert.ok(first.includes(line));
+    assert.equal(Object.values(publicationInfo).some(value => first.includes(value)), false);
+    completeStartup(h, 'publication');
+    assert.equal(h.game.page, 'publication'); assert.equal(h.game.state, null);
+    assert.ok(h.audio.every(voice => !voice.playing));
+    const pages = new Map();
+    h.draw(0); assertStartupContentFits(h);
+    pages.set(h.game.startupPublicationPage || 0, startupText(h));
+    assert.equal(h.game.renderer.hits.length, 0, 'publication pages advance automatically');
+    h.callbacks.hide(); h.game.finishStartup();
+    h.advance(120000);
+    assert.equal(h.game.page, 'publication');
+    h.callbacks.show();
+    assert.equal(h.game.page, 'publication', 'background time cannot consume a publication page');
+    assert.equal(h.game.startupPublicationPage || 0, 0);
+    for (let frame = 0; h.game.page === 'publication' && frame < 200; frame++) {
+      const page = h.game.startupPublicationPage || 0;
+      for (const key of ['Enter', ' ', 'Space']) h.callbacks.key(key);
+      assert.equal(h.game.page, 'publication');
+      assert.equal(h.game.startupPublicationPage || 0, page, 'keys cannot skip a publication page');
+      h.draw(0); assertStartupContentFits(h);
+      pages.set(page, startupText(h));
+      h.advance(100);
+    }
+    assert.equal(h.game.page, 'home'); assert.equal(h.game.state, null);
+    const allText = Array.from(pages.values()).join('');
+    for (const value of Object.values(publicationInfo)) {
+      for (const line of h.game.renderer.wrapLines(value, 302, 14)) assert.ok(allText.includes(line), 'publication text cannot be truncated: ' + line);
+    }
+    assert.equal(h.audio.filter(voice => voice.loop && voice.playing).length, 1);
+  }
+});
+
+test('asynchronous preparation keeps loading below 100 percent until the real operation completes', async t => {
+  const h = harness({ startup: true, kind: 'web' }); t.after(() => h.destroy());
+  let resolve;
+  h.game.startup = new StartupLoader([{ label: '读取游戏资源', run: () => new Promise(done => { resolve = done; }) }]);
+  h.advance(100);
+  assert.equal(h.game.startup.pending, true);
+  for (let frame = 0; frame < 50; frame++) h.advance(100);
+  for (const key of ['Enter', ' ', 'Space']) h.callbacks.key(key);
+  assert.equal(h.game.page, 'startup'); assert.equal(h.game.state, null);
+  assert.ok(h.game.startup.progress < 1, 'elapsed time cannot claim unfinished resources are loaded');
+  resolve(); await new Promise(done => setImmediate(done));
+  completeStartup(h);
+  assert.equal(h.game.startup.progress, 1); assert.equal(h.game.state, null);
+  assert.equal(h.soundCalls.some(call => call[0] === 'unlock'), false, 'automatic browser entry does not impersonate an audio-unlocking gesture');
+});
+
+test('resizing publication information restarts pagination so every line remains visible before automatic entry', t => {
+  const publicationInfo = {
+    copyrightHolder: '自动化测试完整著作权人名称北京示例科技有限公司'.repeat(10),
+    publisher: '自动化测试完整出版服务单位名称上海示例数字出版有限公司'.repeat(10),
+    approvalNumber: '自动化测试批准文号〔2026〕123456789号',
+    publicationNumber: '自动化测试出版物号ISBN978-7-000-12345-6',
+  };
+  const h = harness({ startup: true, publicationInfo }); t.after(() => h.destroy());
+  completeStartup(h, 'publication');
+  for (let frame = 0; h.game.startupPublicationPage === 0 && frame < 100; frame++) h.advance(100);
+  assert.equal(h.game.startupPublicationPage, 1);
+  h.metrics.width = 320; h.metrics.height = 568; h.metrics.safeTop = 70; h.metrics.safeBottom = 24;
+  h.callbacks.resize(); h.game.loop();
+  assert.equal(h.game.startupPublicationPage, 0, 'new wrapping starts from the first page');
+  assert.equal(h.game.startupPublicationMs, 0, 'the resized first page gets its full reading time');
+  const pages = new Map(), pageCount = h.game.startupPublicationPages;
+  for (let frame = 0; h.game.page === 'publication' && frame < 500; frame++) {
+    h.draw(0); assertStartupContentFits(h);
+    pages.set(h.game.startupPublicationPage, startupText(h));
+    h.advance(100);
+  }
+  assert.equal(h.game.page, 'home'); assert.equal(h.game.state, null);
+  assert.equal(pages.size, pageCount, 'automatic entry waits for every resized page');
+  const allText = Array.from(pages.values()).join('');
+  for (const value of Object.values(publicationInfo)) {
+    for (const line of h.game.renderer.wrapLines(value, 302, 14)) assert.ok(allText.includes(line), line);
+  }
+});
+
+test('failed loading exposes a retry action and automatically continues after the real task recovers', t => {
+  const h = harness({ startup: true }); t.after(() => h.destroy());
+  let attempts = 0;
+  h.game.startup = new StartupLoader([{ label: '读取游戏资源', run: () => { if (++attempts === 1) throw new Error('offline'); } }]);
+  h.advance(100); h.draw(0);
+  assert.equal(h.game.page, 'startup'); assert.equal(h.game.startup.ready, false);
+  assert.equal(h.game.renderer.hits.length, 1);
+  assert.ok(startupText(h).includes('重新加载'));
+  const hit = h.game.renderer.hits[0];
+  startupPointer(h, hit.x + hit.w / 2, hit.y + hit.h / 2, 'start');
+  startupPointer(h, hit.x + hit.w / 2, hit.y + hit.h / 2, 'end');
+  assert.equal(h.game.startup.error, null);
+  completeStartup(h);
+  assert.equal(attempts, 2); assert.equal(h.game.state, null);
+});
 
 test('selecting the ongoing level resumes its route and guide while explicit restart begins again', () => {
   const h = harness({ guide: true }); h.start();
@@ -455,7 +839,8 @@ test('a complete first delivery records three stars, unlocks the next level and 
 
 test('all 999 campaign routes clear with three stars through the real next-level flow without revives', t => {
   assert.equal(CAMPAIGN.length, 999);
-  const h = harness({ configured: false });
+  const h = harness({ configured: false, mechanics: true });
+  const introductions = [];
   t.after(() => h.destroy());
   assert.equal(h.game.development, false);
   assert.equal(h.game.completion(), 0);
@@ -470,6 +855,14 @@ test('all 999 campaign routes clear with three stars through the real next-level
     assert.equal(h.game.state.energy, level.budget, label + ' uses its original budget');
     assert.equal(h.game.unlocked(index), true, label);
     if (index + 1 < CAMPAIGN.length) assert.equal(h.game.unlocked(index + 1), false, label + ' has not unlocked its successor early');
+
+    for (let inspected = 0; h.game.mechanicGuide && inspected < 6; inspected++) {
+      const lesson = h.game.guideStep(), before = clone(h.game.state);
+      if (lesson.step === 1) introductions.push([level.id, lesson.mechanic]);
+      assert.equal(h.game.inspectGuideCell(lesson.visual.tapCell), true);
+      assert.deepEqual(h.game.state, before, label + ' teaches without spending a turn or inventing a state');
+    }
+    assert.equal(h.game.mechanicGuide, null, label + ' returns to normal controls after inspection');
 
     for (const [stepIndex, action] of level.solution.entries()) {
       assert.equal(h.game.state.status, 'playing', `${label} before step ${stepIndex + 1}`);
@@ -506,6 +899,7 @@ test('all 999 campaign routes clear with three stars through the real next-level
   assert.equal(h.game.page, 'home');
   assert.equal(h.game.completion(), 999);
   assert.equal(h.game.starCount(), 2997);
+  assert.deepEqual(introductions, [[13, 'wind'], [16, 'bridge'], [19, 'light']]);
   assert.equal(h.game.unlocked(999), false, 'there is no thousandth campaign level');
   const reloaded = harness({ data: h.data, configured: false });
   t.after(() => reloaded.destroy());
@@ -1639,11 +2033,11 @@ test('visible mail and lantern shapes select their own cells across animation fr
     { id: 1, turn: 2, cell: 16, kind: 'letter', action: 'right' },
     { id: 19, turn: 2, cell: 31, kind: 'light', action: 'left' },
   ];
-  for (const sample of samples) for (const now of [3200, 3400, 3600, 3800, 4000]) for (const view of [
+  for (const sample of samples) for (const elapsed of [2200, 2400, 2600, 2800, 3000]) for (const view of [
     { zoom: .7, panX: 0, panY: 0 }, { zoom: 1, panX: 0, panY: 0 }, { zoom: 1.4, panX: .02, panY: -.01 },
   ]) {
-    const h = harness(), level = CAMPAIGN[sample.id - 1], actions = level.solution.slice(0, sample.turn);
-    h.start(level); actions.forEach(action => h.act(action)); Object.assign(h.game.camera, view); h.draw(now - h.platform.now());
+    const h = harness(), level = CAMPAIGN[sample.id - 1], actions = level.solution.slice(0, sample.turn), enteredAt = h.platform.now();
+    h.start(level); actions.forEach(action => h.act(action)); Object.assign(h.game.camera, view); h.draw(enteredAt + elapsed - h.platform.now());
     tapBoardPoint(h, propPoint(h, sample.cell, sample.kind));
     assert.equal(h.game.state.player, sample.cell, sample.kind + ' selects its painted object instead of the floor behind it');
     assert.deepEqual(h.game.state, replayed(level, [...actions, sample.action]));

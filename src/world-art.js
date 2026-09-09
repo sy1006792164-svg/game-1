@@ -101,8 +101,8 @@ function drawHomeArchitecture(r, now) {
   polygon(r, [point(-49, 14, 5), point(-32, 14, 5), point(-32, 50, 5), point(-49, 50, 5)], '#86b9ad');
   polygon(r, [point(-48, 15, 5), point(-35, 15, 5), point(-35, 45, 5), point(-48, 39, 5)], '#aad3c6');
   for (let i = 0; i < 3; i++) {
-    const [x, y] = point(-42, 21 + i * 10, 5);
-    r.line([[x - 3, y], [x + 3 + Math.sin(now / 2400 + i), y + 2]], '#eff4dc99', .9);
+    const drift = Math.sin(now / 1700 + i), [x, y] = point(-42 + drift * 2, 21 + i * 10, 5);
+    r.line([[x - 3 - drift, y], [x + 3 + drift, y + 2]], '#eff4dc99', .9);
   }
 
   // The light comes from the upper left; every built volume casts the same direction.
@@ -136,8 +136,8 @@ function drawHomeArchitecture(r, now) {
   roof(r, 5, -49, 36, 36, 100, 17);
   const [flagX, flagY] = point(23, -31, 121);
   r.line([[flagX, flagY + 8], [flagX, flagY - 14]], '#657e6b', 1.1);
-  const flap = Math.sin(now / 1400) * 1.5;
-  polygon(r, [[flagX + .5, flagY - 13], [flagX + 15, flagY - 10 + flap], [flagX + 12, flagY - 3 + flap], [flagX + .5, flagY - 6]], '#d79177');
+  const flap = Math.sin(now / 850) * 3.2;
+  polygon(r, [[flagX + .5, flagY - 13], [flagX + 15 + Math.sin(now / 1100), flagY - 10 + flap], [flagX + 12, flagY - 3 + flap * .65], [flagX + .5, flagY - 6]], '#d79177');
   const [signX, signY] = point(23, -16, 45);
   r.circle(signX, signY, 5, '#e1ba83'); r.icon('letter', signX, signY, 6, '#fff9df');
 

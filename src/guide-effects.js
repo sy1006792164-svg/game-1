@@ -4,7 +4,7 @@ const { C } = require('./theme');
 const { MOVE_MS } = require('./motion');
 const { INTRO_MS } = require('./camera');
 
-const COLORS = { move: C.gold, letter: C.gold, echo: C.blue, home: C.green };
+const COLORS = { move: C.gold, letter: C.gold, echo: C.blue, home: C.green, wind: C.green, light: C.gold, bridge: C.gold };
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const overlaps = (a, b) => a && b && a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const fits = (box, rect) => box.x >= rect.x + 4 && box.y >= rect.y + 4 && box.x + box.w <= rect.x + rect.w - 4 && box.y + box.h <= rect.y + rect.h - 4;
@@ -136,7 +136,18 @@ function drawGuideOverlay(r, game, guide, now) {
   const c = r.ctx;
   c.save(); c.globalAlpha *= opacity;
   c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip();
-  const focusBounds = guide.control === 'wait' ? null : drawFocus(r, guide.visual, p, rect, now, () => game.act(guide.action));
+  const from = guide.visual.fromCell;
+  if (from != null && p.visible(from) && guide.visual.focus) {
+    r.line([p.point(from), p.point(guide.visual.focus.cell)], C.green, 2.5, [5, 4]);
+  }
+  const focusBounds = guide.control === 'wait' ? null : drawFocus(r, guide.visual, p, rect, now,
+    () => guide.kind === 'mechanic' ? game.advanceMechanicGuide() : game.act(guide.action));
+  if (guide.kind === 'mechanic' && guide.visual.focus && p.visible(guide.visual.focus.cell)) {
+    // The highlighted floor wins over neighboring props during inspection only.
+    const cell = guide.visual.focus.cell, [x, y] = p.point(cell);
+    r.hit(x - p.halfW, y - p.halfH, p.halfW * 2, p.halfH * 2,
+      Object.assign(() => game.inspectGuideCell(cell), { boardCell: cell }), (hx, hy) => p.contains(cell, hx, hy));
+  }
   const playerLabel = drawPlayerLabel(r, guide.visual, p, rect, focusBounds);
   drawEchoCountdown(r, guide.visual.echo, p, rect, [focusBounds, playerBounds(guide.visual, p), playerLabel]);
   c.restore();
@@ -144,7 +155,7 @@ function drawGuideOverlay(r, game, guide, now) {
 
 function drawGuideWait(r, game, guide, button, now) {
   const opacity = guideOpacity(r, game, guide, now);
-  if (!opacity || guide.control !== 'wait') return;
+  if (!opacity || !['wait', 'mechanic-next'].includes(guide.control)) return;
   const pulse = r.reducedMotion ? .5 : (Math.sin(now / 320) + 1) / 2;
   r.ctx.save(); r.ctx.globalAlpha *= opacity;
   const spread = 2 + pulse * 3;

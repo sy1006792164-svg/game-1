@@ -31,7 +31,6 @@ function air(t, duration) {
 
 const sounds = {
   move: { duration: .16, sample: phrase([523.25], 0, .16, 'soft') },
-  collect: { duration: .58, sample: phrase([659.25, 987.77], .11, .46) },
   start: { duration: .72, sample: phrase([392, 523.25, 659.25], .13, .46, 'soft') },
   win: { duration: 1.12, sample: phrase([523.25, 659.25, 783.99, 1046.5], .17, .6, 'soft') },
   letter: { duration: .66, sample: phrase([783.99, 1046.5, 1318.51], .08, .49, 'soft') },

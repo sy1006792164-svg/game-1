@@ -192,6 +192,7 @@ function drawBoard(r, game, now, rect, guide) {
   drawIslandSurface(r, corners, 26, time);
   const { walls, adjacent, ordered } = geometry;
   const selectCell = cell => {
+    if (game.inspectGuideCell(cell)) return;
     const player = game.state.player, dx = cell % l.width - player % l.width, dy = Math.floor(cell / l.width) - Math.floor(player / l.width);
     // A second tap on the destination during arrival is still a move intention.
     if (cell === player && game.previousState && game.previousState.player !== player &&
@@ -202,8 +203,9 @@ function drawBoard(r, game, now, rect, guide) {
     else if ((l.bridges || []).includes(cell) && !game.state.bridges.includes(cell)) game.toast('纸桥已碎，这里过不去了');
     else game.toast('点相邻格移动，点脚下格原地等一拍');
   };
+  const cellAction = cell => Object.assign(() => selectCell(cell), { boardCell: cell });
   const enterOffice = !game.reviewing && s.status === 'playing' && (adjacent.has(l.exit) || s.player === l.exit)
-    ? () => selectCell(l.exit) : null;
+    ? cellAction(l.exit) : null;
   const actors = [];
   for (const cell of ordered) {
     const [x, y] = point(cell), wall = walls.has(cell);
@@ -236,13 +238,13 @@ function drawBoard(r, game, now, rect, guide) {
         floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#c69755', 1.45);
         ellipse(r, x, y + hh * .43, hw * .12, hh * .14, '#b68b52');
       }
-      const selectProp = !game.reviewing && s.status === 'playing' ? () => selectCell(cell) : null;
+      const selectProp = !game.reviewing && s.status === 'playing' ? cellAction(cell) : null;
       if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, time, selectProp) });
       if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false, selectProp) });
       if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, time, cell, true, selectProp) });
     }
     // The courier remains visual only; uncovered floor tiles keep their normal actions.
-    r.hit(x - hw, y - hh, hw * 2, hh * 2, () => selectCell(cell), (hx, hy) => p.contains(cell, hx, hy));
+    r.hit(x - hw, y - hh, hw * 2, hh * 2, cellAction(cell), (hx, hy) => p.contains(cell, hx, hy));
   }
   if (game.reviewing) r.line((s.history || []).map(point), '#c8874eca', 2, [3, 4]);
   const forecast = (s.history || []).slice(-3); while (forecast.length < 3) forecast.unshift(null);
@@ -313,14 +315,16 @@ function drawVignette(r, now, rect, options = {}) {
   c.save(); c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip(); c.translate(x, y); c.scale(scale, scale);
   drawHomeArchitecture(r, now);
   r.line([[-28, 36], [-9, 45], [11, 35], [26, 27]], '#5a9f9c99', 1.3, [2, 5]);
-  const bob = Math.sin(now / 1350) * .8;
-  r.courier(-31, 25 + bob, 25, true, { alpha: .66, stride: 0, facing: 1 });
-  r.courier(4, 29 + Math.sin(now / 1600) * .35, 33, false, { alpha: 1, stride: Math.sin(now / 1400) * .05, facing: 1 });
-  floatingMail(r, -100, -53, 19, now, 5, false);
-  floatingMail(r, -69, -83, 13, now, 2, true);
+  const bob = Math.sin(now / 1150) * 3.2, breath = Math.sin(now / 1500);
+  r.courier(-31 + Math.sin(now / 2100), 25 + bob, 25, true, { alpha: .66 + breath * .07, stride: 0, facing: 1 });
+  c.save(); c.translate(4, 29); c.scale(1, 1 + breath * .022);
+  r.courier(0, 0, 33, false, { alpha: 1, stride: Math.sin(now / 1400) * .05, facing: 1 });
+  c.restore();
+  floatingMail(r, -100 + Math.sin(now / 1800) * 3.5, -53 + Math.sin(now / 1200) * 3, 19, now, 5, false);
+  floatingMail(r, -69 + Math.sin(now / 1700 + 1) * 2.5, -83 + Math.sin(now / 1300) * 4, 13, now, 2, true);
   // Two distant swifts add life without competing with the architectural silhouette.
   [-1, 1].forEach((side, i) => {
-    const sx = side * 120, sy = -105 + i * 16, flap = Math.sin(now / 650 + i) * 1.1;
+    const sx = side * 120 + Math.sin(now / 2300 + i) * 4, sy = -105 + i * 16 + Math.sin(now / 1500 + i) * 2, flap = Math.sin(now / 500 + i) * 2.1;
     r.line([[sx - 5, sy - 2 - flap], [sx, sy], [sx + 5, sy - 3 + flap]], '#7d9f945b', 1.15);
   });
   c.restore();

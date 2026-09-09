@@ -1,8 +1,15 @@
 'use strict';
 module.exports = Object.freeze({
   APP_ID: 'wxee6289f904a5d625',
-  VERSION: '1.8.0',
+  VERSION: '1.9.1',
   GAME_NAME: '风笺回廊',
+  // 仅填写本游戏真实获批资料。填入后在健康忠告之后单独展示；不使用示例证号。
+  PUBLICATION_INFO: Object.freeze({
+    copyrightHolder: '',
+    publisher: '',
+    approvalNumber: '',
+    publicationNumber: ''
+  }),
   SHARE_COVER_URLS: Object.freeze([
     'https://mmocgame.qpic.cn/wechatgame/wmgTzBmfDomLdQxyCoSaooOsnPCzfiaayIFlWngMTDJjRMyygFCljancxhBc5Setf/0',
     'https://mmocgame.qpic.cn/wechatgame/wmgTzBmfDokgmH2diaiabQDVetQAIFxS4vG9AEcrzLSzyNIQVC7iawvfXKrsxOpiahMM/0',

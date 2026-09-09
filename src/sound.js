@@ -3,7 +3,6 @@
 // Quiet, short cues can overlap without building an unlimited native audio pool.
 const CUES = {
   move: { volume: .17, gap: 90, duration: .16, priority: 0 },
-  collect: { volume: .29, gap: 150, duration: .58, priority: 2 },
   start: { volume: .25, gap: 400, duration: .72, priority: 2 },
   win: { volume: .3, gap: 700, duration: 1.12, priority: 3 },
   letter: { volume: .29, gap: 150, duration: .66, priority: 2 },

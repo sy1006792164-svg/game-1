@@ -4,6 +4,7 @@ const { drawCourier } = require('./courier-art');
 const { CONTROL, drawButton } = require('./controls');
 const { drawUiIcon, UI_ICON } = require('./ui-icons');
 const { drawHome } = require('./home-view');
+const { drawStartup, drawPublication } = require('./startup-view');
 const { drawGame } = require('./game-view');
 const { drawLevels } = require('./level-view');
 const { drawCollection } = require('./collection-view');
@@ -188,7 +189,9 @@ class Renderer {
     c.globalAlpha = game.page === 'game' ? .08 : game.page === 'home' ? .02 : .87;
     this.scrim(C.paper);
     c.restore();
-    if (game.page === 'game') this.game(game, now);
+    if (game.page === 'startup') drawStartup(this, game, now);
+    else if (game.page === 'publication') drawPublication(this, game);
+    else if (game.page === 'game') this.game(game, now);
     else if (game.page === 'levels') this.levels(game);
     else if (game.page === 'collection') this.collection(game);
     else if (game.page === 'leaderboard') drawLeaderboard(this, game);

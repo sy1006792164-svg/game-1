@@ -5,6 +5,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/^\u
 let errors = 0;
 function check(ok, label) { console.log((ok ? 'PASS ' : 'FAIL ') + label); if (!ok) errors++; }
 const project = JSON.parse(read('project.config.json')), game = JSON.parse(read('game.json')), config = require('../src/config');
+const excludedFiles = new Set(project.packOptions.ignore.filter(item => item.type === 'file').map(item => item.value.replace(/\\/g, '/')));
 check(project.appid === 'wxee6289f904a5d625' && project.appid === config.APP_ID, 'AppID matches requested project.');
 check(project.compileType === 'game' && game.deviceOrientation === 'portrait', 'Native portrait WeChat Mini Game.');
 check(read('game.js').includes("require('./src/main')"), 'Native entry points to the new game.');
@@ -17,13 +18,18 @@ for (const file of fs.readdirSync(path.join(root, 'src')).filter(f => f.endsWith
   bytes += Buffer.byteLength(source);
 }
 for (const name of require('../src/sound').SOUND_TYPES) {
+  check(!excludedFiles.has('assets/' + name + '.wav'), name + ' audio is included in the native package.');
   const file = path.join(root, 'assets', name + '.wav');
   const audio = fs.existsSync(file) ? fs.readFileSync(file) : null;
   check(audio && audio.length >= 44 && audio.subarray(0, 4).toString() === 'RIFF' &&
     audio.subarray(8, 12).toString() === 'WAVE' && audio.readUInt32LE(40) === audio.length - 44,
   'Original ' + name + ' audio exists with a complete WAV payload.');
 }
-bytes += fs.readdirSync(path.join(root, 'assets')).reduce((n, f) => n + fs.statSync(path.join(root, 'assets', f)).size, 0);
+// The account icon is uploaded as platform metadata, never loaded by the game.
+// Keep it available for account setup without including it in the runtime package.
+bytes += fs.readdirSync(path.join(root, 'assets')).filter(f => !excludedFiles.has('assets/' + f))
+  .reduce((n, f) => n + fs.statSync(path.join(root, 'assets', f)).size, 0);
+check(!excludedFiles.has('assets/title-font.LICENSE.txt') && fs.existsSync(path.join(root, 'assets/title-font.LICENSE.txt')), 'Title outline license is included in the native package.');
 const ignored = project.packOptions.ignore.filter(x => x.type === 'folder').map(x => x.value);
 check(['work', 'output', 'docs', 'tests', 'tools', 'preview'].every(x => ignored.includes(x)), 'Tooling and QA excluded from game upload.');
 check(!project.cloudfunctionRoot && !config.CLOUD_ENV_ID && game.openDataContext === 'open-data', 'Only the native friend leaderboard is configured; no cloud environment required.');

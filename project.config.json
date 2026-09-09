@@ -50,6 +50,10 @@
   "packOptions": {
     "ignore": [
       {
+        "value": "assets/icon.png",
+        "type": "file"
+      },
+      {
         "value": "work",
         "type": "folder"
       },

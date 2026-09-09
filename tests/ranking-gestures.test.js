@@ -41,6 +41,8 @@ function harness(t) {
   const module = { exports: {} };
   factory(specifier => specifier === './sound' ? { createSound: () => ({ play: noop, stop: noop, release: noop, ambience: noop, unlock: noop, suspend: noop, resume: noop }) } : actualRequire(specifier), module, module.exports);
   const game = new module.exports.Game(platform);
+  for (let frame = 0; game.page !== 'home' && frame < 200; frame++) { now += 100; game.loop(); }
+  assert.equal(game.page, 'home', 'the real startup loop must automatically finish before ranking gesture tests');
   t.after(() => { game.home(); game.ads.destroy(); game.sound.release(); });
   const css = (x, y) => [x * game.renderer.scale + game.renderer.ox, y * game.renderer.scale + game.renderer.oy];
   return { game, messages, callbacks, permissions, frameRates, metrics, css,

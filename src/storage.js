@@ -47,6 +47,11 @@ function profileFrom(value) {
   const next = defaults();
   if (!plain(value) || value.version !== 1) return next;
   if (value.guideDismissed === true) next.guideDismissed = true;
+  if (plain(value.mechanicGuides)) {
+    const seen = {};
+    ['wind', 'bridge', 'light'].forEach(id => { if (value.mechanicGuides[id] === true) seen[id] = true; });
+    if (Object.keys(seen).length) next.mechanicGuides = seen;
+  }
   // Retain historical daily scores only for save compatibility; no active mode writes them.
   [['completed', safeId], ['daily', dateId]].forEach(function (pair) {
     const name = pair[0], valid = pair[1];
@@ -174,6 +179,12 @@ function createStore(adapter, options = {}) {
       if (typeof dismissed !== 'boolean') return false;
       if (dismissed) profile.guideDismissed = true;
       else delete profile.guideDismissed;
+      return save(profileKey);
+    },
+    markMechanicSeen: function (id) {
+      if (!['wind', 'bridge', 'light'].includes(id)) return false;
+      if (!profile.mechanicGuides) profile.mechanicGuides = {};
+      profile.mechanicGuides[id] = true;
       return save(profileKey);
     },
     recordWin: function (levelId, stars, turns, mode = 'campaign') {

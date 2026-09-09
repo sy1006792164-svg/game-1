@@ -43,6 +43,8 @@ function harness(options = {}) {
     return require(path.join(__dirname, '..', 'src', specifier.replace('./', '')));
   }, module, module.exports);
   const game = new module.exports.Game(platform);
+  for (let frame = 0; game.page !== 'home' && frame < 200; frame++) { now += 100; game.loop(); }
+  assert.equal(game.page, 'home', 'the real startup loop must automatically finish before campaign UI tests');
   const draw = () => { calls.length = 0; game.renderer.draw(game, now, metrics); return calls.filter(call => call.method === 'fillText').map(call => String(call.args[0])); };
   const tap = predicate => {
     const hit = game.renderer.hits.find(predicate);

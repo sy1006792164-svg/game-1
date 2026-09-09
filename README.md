@@ -1,5 +1,13 @@
 # 风笺回廊
 
+v1.9.1 已增强加载页与主页动效：信笺、邮票与回声轻浮，人物呼吸，旗帜和水纹随风轻动，主页按钮呼吸光与加载条扫光。按钮位置和加载完成时机保持原样。说明见 [首页与加载动效](docs/HOME-MOTION.md)。
+
+v1.9.0 已加入风口、纸桥、风灯首次出现的两步实物引导，并修复小屏轻微手指抖动导致格子点击被当作拖动的问题。详见 [机制引导](docs/MECHANIC-GUIDES.md)、[小屏点击修复](docs/SMALL-SCREEN-INPUT.md)。
+
+启动页与主页的“风笺回廊”标题使用随包提供的宋体矢量字形，手机与开发者工具不再依赖各自安装的系统字体。字形来源、许可证和重建方式见 [标题字形说明](docs/TITLE-TYPOGRAPHY.md)。
+
+冷启动先展示游戏名称、完整《健康游戏忠告》与准备进度条，本地进度、续玩路线、邮票册和首页准备完成后自动进入首页。进度按实际完成任务数推进，使用短暂平滑过渡；无需点击，不增加联网资源，返回前台不重复展示。自绘启动页不显示适龄文字，官方适龄标识由微信后台配置和平台展示管理。真实出版信息可在 `src/config.js` 配置后，于忠告之后单独展示并自动翻页。官方要求、后台适龄配置和验收说明见 [启动页说明](docs/STARTUP.md)。
+
 画面已更新为晨雾中的立体邮路：拱廊邮局、象牙石台、珊瑚屋顶、纸质菜单与邮戳回执；移动和镜头操作期间启用微信 60 FPS 绘制。详见 [画面与体验更新、验收记录](docs/VISUAL-UPGRADE.md)。
 
 顶部/底部安全区背景已统一；好友榜每次进入自动更新，支持上下惯性滚动和相对上次查看名次的升降落位动效。排行榜移除“继续送信”和“定位我”，通过顶部返回离开。详见 [好友榜体验更新](docs/LEADERBOARD.md#本次体验更新)。
@@ -93,6 +101,7 @@ npm.cmd run release:check
 | --- | --- |
 | src/engine.js、src/levels.js、src/levels-extra.js | 规则、30 关手绘 + 969 关生成的主线与章节名 |
 | src/main.js | 页面流程、输入、动作缓冲、存档恢复、结算 |
+| src/startup.js、src/startup-view.js | 启动准备进度、完整健康忠告、出版信息分页与自动进入首页 |
 | src/runtime-environment.js、src/developer-view.js | 开发环境识别、开发专用数字选关面板 |
 | src/play-guide.js、src/guide-route.js、src/guide-view.js、src/guide-effects.js、src/feedback.js | 局面提示、首关实际路线引导、可点击目标与回声倒数、音效选择 |
 | src/renderer.js、src/theme.js、src/modal-view.js、src/result-effects.js | Canvas 绘图、通用控件、配色、弹窗与结算动效 |

@@ -5,7 +5,6 @@ const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { guideCardLayout, drawGuideCard } = require('./guide-view');
 const { drawGuideOverlay, drawGuideWait } = require('./guide-effects');
-const { canGuide } = require('./play-guide');
 const { chapterNames } = require('./levels');
 
 function drawObjectives(r, game, now) {
@@ -74,10 +73,13 @@ function drawControls(r, game, layout, now) {
     r.button('重新学一遍', 24, buttonY, 165, CONTROL.height, () => game.restartGuide(), { style: 'primary', icon: 'restart', disabled: !canAct });
   } else {
     r.button('撤回（' + remaining + '）', 24, buttonY, 165, CONTROL.height, () => game.undo(), {
-      style: guide && guide.control === 'undo' ? 'primary' : 'secondary', icon: 'undo', disabled: !canUndo
+      style: guide && guide.control === 'undo' ? 'primary' : 'secondary', icon: 'undo', disabled: !canUndo || !!guide && guide.kind === 'mechanic'
     });
   }
-  r.button('等一拍', 201, buttonY, 165, CONTROL.height, () => game.act('wait'), {
+  if (guide && guide.kind === 'mechanic') r.button(guide.buttonLabel, 201, buttonY, 165, CONTROL.height, () => game.advanceMechanicGuide(), {
+    style: 'primary', icon: 'arrow-right', disabled: !canAct
+  });
+  else r.button('等一拍', 201, buttonY, 165, CONTROL.height, () => game.act('wait'), {
     style: guide && guide.control === 'wait' ? 'primary' : 'secondary', icon: 'hourglass', disabled: !canAct || !!guide && guide.action !== 'wait'
   });
   drawGuideWait(r, game, guide, { x: 201, y: buttonY, w: 165, h: CONTROL.height }, now);
@@ -85,7 +87,7 @@ function drawControls(r, game, layout, now) {
 
 function drawGame(r, game, now) {
   const layout = controlLayout(r, game);
-  const showGuideEntry = !layout.guide && canGuide(game.level, game.mode) && game.state.status === 'playing' && !game.reviewing;
+  const showGuideEntry = !layout.guide && game.canShowGuide() && game.state.status === 'playing' && !game.reviewing;
   r.label(game.level.title, 24, 32, showGuideEntry ? 138 : 254, 24, C.ink, 'left', '600');
   if (game.reviewing) r.text('路线回顾 · 可拖动查看', 24, 60, 11, C.muted);
   else if (game.development) r.text('开发试玩 · 独立存档', 24, 63, 10, '#925e37');

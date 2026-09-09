@@ -4,6 +4,7 @@ const { CAMPAIGN } = require('./levels');
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { drawVignette } = require('./scene');
+const { drawTitle } = require('./brand-title');
 
 function layout(height) {
   const top = Math.max(0, (height - 844) / 2);
@@ -25,12 +26,7 @@ function drawBrand(r, top) {
   r.line([[137, top + 29], [157, top + 29]], '#90ac99', .8);
   r.text('风 起 · 信 至', 195, top + 29, 9, C.green, 'center');
   r.line([[233, top + 29], [253, top + 29]], '#90ac99', .8);
-  // A quiet book-cover title, with generous tracking and a native serif face.
-  const c = r.ctx; c.save();
-  c.font = '500 39px "Songti SC","STSong","SimSun",serif';
-  c.fillStyle = C.ink; c.textAlign = 'center'; c.textBaseline = 'middle';
-  Array.from('风笺回廊').forEach((char, i) => c.fillText(char, 120 + i * 50, top + 76));
-  c.restore();
+  drawTitle(r, 195, top + 76, 39, 50);
   r.text('和三拍后的自己，走一程山间邮路。', 195, top + 121, 11, C.muted, 'center');
 }
 
@@ -56,6 +52,12 @@ function drawHome(r, game, now) {
   r.line([[171, ui.routeY - 13], [219, ui.routeY - 13]], '#a6bfa6', .8);
   r.label(route.detail, 195, ui.routeY + 6, 324, 12, C.ink, 'center', '600');
   r.text(saved ? '路线已留好，随时接着走' : '你拾起信笺 · 回声收集邮票', 195, ui.routeY + 28, 10, C.muted, 'center');
+  if (!r.reducedMotion) {
+    const breath = (1 + Math.sin(now / 1200)) / 2;
+    const alpha = Math.round(12 + breath * 16).toString(16).padStart(2, '0');
+    r.round(38 - breath * 2, ui.buttonY - 4 - breath * 2, 314 + breath * 4,
+      CONTROL.height + 8 + breath * 4, 17, C.green + alpha);
+  }
   r.button(route.title, 42, ui.buttonY, 306, CONTROL.height, () => game.primary(), { style: 'primary' });
   drawLinks(r, game, ui.linksY);
   const footerY = ui.linksY + CONTROL.compactHeight + 32;

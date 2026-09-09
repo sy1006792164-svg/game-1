@@ -18,10 +18,13 @@ const { Renderer } = require('./renderer');
 const { MOVE_MS } = require('./motion');
 const { SceneCamera, INTRO_MS, SHAKE_MS } = require('./camera');
 const { insideRect } = require('./board-projection');
+const { BOARD_DRAG_SLOP, containsHit, captureBoardTap } = require('./board-input');
 const { playHint, canGuide, autoGuide, guideStep } = require('./play-guide');
+const { NAMES, availableMechanics, createMechanicGuide, mechanicStep } = require('./mechanic-guide');
 const { createSound } = require('./sound');
 const { turnFeedback } = require('./feedback');
 const config = require('./config');
+const { publicationLines, StartupLoader } = require('./startup');
 
 // Undos per run come from the route itself (levels.undoFor): three on the first chapter, one from route 19 on.
 const DEFAULT_UNDO = 3;
@@ -54,16 +57,27 @@ class Game {
     this.renderer = new Renderer(platform.canvas);
     this.camera = new SceneCamera();
     this.cameraMovedAt = -Infinity;
-    this.page = 'home'; this.collectionScroll = new ListScroll(); this.levelScroll = new ListScroll(); this.modal = null; this.reviewing = false;
+    this.startupPublication = publicationLines(config.PUBLICATION_INFO);
+    this.startup = new StartupLoader([
+      { label: '正在整理本机进度', run: () => this.profile() },
+      { label: '正在准备上次路线', run: () => this.savedRun() },
+      { label: '正在整理邮票收藏', run: () => this.album() },
+      { label: '正在准备首页', run: () => this.nextLevel() }
+    ]);
+    this.startupLastAt = null; this.startupPublicationMs = 0;
+    this.startupPublicationPage = 0; this.startupPublicationPages = 0;
+    this.page = 'startup'; this.collectionScroll = new ListScroll(); this.levelScroll = new ListScroll(); this.modal = null; this.reviewing = false;
     this.guideEnabled = false;
+    this.mechanicGuide = null;
     this.level = null; this.state = null; this.actions = []; this.reviveAt = null; this.undosUsed = 0;
     this.mode = 'campaign'; this.session = 0;
     this.toastText = ''; this.toastUntil = 0; this.transitionAt = 0; this.motionPath = null;
-    this.busy = false; this.hidden = false; this.lastFrame = 0; this.pointer = null; this.pendingAction = null; this.blockedAt = null;
-    this.metrics = platform.resize();
-    platform.onResize(() => { this.cancelRankingPointer(); this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.metrics = platform.resize(); this.lastFrame = -Infinity; });
+    this.busy = false; this.hidden = false; this.lastFrame = -Infinity; this.pointer = null; this.pendingAction = null; this.blockedAt = null;
+    this.metrics = { ...platform.resize() };
+    platform.onResize(() => { this.cancelRankingPointer(); this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.setMetrics(platform.resize()); this.lastFrame = -Infinity; });
     platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor, pan) => this.zoomScene(x, y, factor, pan), (x, y, delta) => this.scrollList(x, y, delta));
     platform.onKey(key => {
+      if (this.startupActive()) return;
       this.unlockAudio();
       if (this.development && this.modal && this.modal.kind === 'developer-level') { this.developmentKey(key); return; }
       if (this.rankingInteractive()) {
@@ -92,6 +106,7 @@ class Game {
       else if (key === 'z' || key === 'Backspace') this.undo();
     });
     platform.onHide(() => {
+      this.startupLastAt = null;
       this.friendResumeRevision++;
       this.cancelRankingPointer();
       this.friendLeaderboard.suspend();
@@ -104,6 +119,7 @@ class Game {
       if (this.page === 'game' && this.state.status === 'playing' && !this.modal && !this.busy) this.pause();
     });
     platform.onShow(() => {
+      this.startupLastAt = null;
       this.hidden = false;
       if (this.page === 'leaderboard') this.rankingAuthorization.show();
       const token = ++this.friendResumeRevision;
@@ -120,7 +136,7 @@ class Game {
         this.syncFriendScore();
         if (this.page === 'leaderboard') this.friendLeaderboard.refresh(); else this.friendLeaderboard.retry();
       });
-      this.pointer = null; this.metrics = platform.resize(); this.lastFrame = -Infinity;
+      this.pointer = null; this.setMetrics(platform.resize()); this.lastFrame = -Infinity;
       this.syncMusic(); this.sound.resume('hidden');
       if (this.frameId == null) this.loop();
     });
@@ -135,6 +151,49 @@ class Game {
     });
     enableSharing(platform, config);
     this.loop();
+  }
+  startupActive() { return this.page === 'startup' || this.page === 'publication'; }
+  setMetrics(metrics) {
+    if (this.page === 'publication' && ['width', 'height', 'safeTop', 'safeBottom'].some(key => metrics[key] !== this.metrics[key])) {
+      // A new line wrap can redistribute text across pages; show all of it again.
+      this.startupPublicationPage = 0; this.startupPublicationPages = 0;
+      this.startupPublicationMs = 0; this.startupLastAt = null;
+    }
+    this.metrics = { ...metrics };
+  }
+  updateStartup(now) {
+    if (!this.startupActive()) return;
+    // Never count time in the background or skip the initial 0% paint.
+    if (this.startupLastAt === null) { this.startupLastAt = now; return; }
+    const dt = Math.max(0, Math.min(100, now - this.startupLastAt));
+    this.startupLastAt = now;
+    if (this.page === 'startup') {
+      this.startup.update(dt);
+      if (this.startup.ready) this.finishStartup();
+    } else if (this.startupPublicationPages > 0) {
+      this.startupPublicationMs += dt;
+      if (this.startupPublicationMs >= 2500) {
+        if (this.startupPublicationPage + 1 < this.startupPublicationPages) {
+          this.startupPublicationPage++; this.startupPublicationMs = 0;
+        }
+        else this.finishStartup();
+      }
+    }
+  }
+  retryStartup() {
+    if (this.page !== 'startup' || this.hidden || !this.startup.error) return;
+    this.startup.retry(); this.startupLastAt = null;
+    this.pointer = null; this.renderer.hits = []; this.lastFrame = -Infinity;
+  }
+  finishStartup() {
+    if (!this.startupActive() || this.hidden || this.busy || !this.startup.ready) return false;
+    if (this.page === 'publication' && (this.startupPublicationMs < 2500 || this.startupPublicationPage + 1 < this.startupPublicationPages)) return false;
+    this.page = this.page === 'startup' && this.startupPublication.length ? 'publication' : 'home';
+    // The same pointer release must never activate a button on the next page.
+    this.pointer = null; this.pendingAction = null; this.renderer.hits = [];
+    this.lastFrame = -Infinity;
+    if (!this.startupActive()) this.syncMusic();
+    return true;
   }
   /** Snapshots are cloned by the store; reuse one per store revision so a frame never clones the save hundreds of times. */
   profile() {
@@ -153,16 +212,43 @@ class Game {
     return this.albumCache.value;
   }
   playHint() { return playHint(this, this.platform.now()); }
-  guideStep() { return guideStep(this, this.platform.now()); }
+  guideStep() { return mechanicStep(this) || guideStep(this, this.platform.now()); }
+  canShowGuide() { return canGuide(this.level, this.mode) || availableMechanics(this.level, this.mode).length > 0; }
+  advanceMechanicGuide(skip = false) {
+    if (this.page !== 'game' || this.modal || this.busy || this.hidden || !mechanicStep(this)) return false;
+    const lesson = this.mechanicGuide, id = lesson.ids[0];
+    this.pendingAction = null; this.pointer = null; this.blockedAt = null; this.toastUntil = 0;
+    if (lesson.phase === 0 && !skip) lesson.phase = 1;
+    else {
+      this.store.markMechanicSeen(id);
+      lesson.ids.shift(); lesson.phase = 0;
+      if (!lesson.ids.length) this.mechanicGuide = null;
+      if (skip) this.toast('已跳过' + NAMES[id] + '讲解，可从“操作引导”重看');
+    }
+    this.renderer.hits = []; this.persist(); this.lastFrame = -Infinity;
+    return true;
+  }
+  inspectGuideCell(cell) {
+    const guide = mechanicStep(this);
+    if (!guide || this.modal || this.busy || this.hidden) return false;
+    if (cell === guide.visual.tapCell) this.advanceMechanicGuide();
+    else this.guideMisstep();
+    return true;
+  }
   dismissGuide() {
+    if (mechanicStep(this)) { this.advanceMechanicGuide(true); return; }
     this.pendingAction = null; this.guideEnabled = false;
     this.store.setGuideDismissed(true);
     this.persist();
     this.toast('已跳过引导，点上方“操作引导”可重新开启');
   }
   showGuide() {
-    if (!canGuide(this.level, this.mode) || this.page !== 'game' || this.busy || !this.state || this.state.status !== 'playing') return;
+    if (!this.canShowGuide() || this.page !== 'game' || this.busy || !this.state || this.state.status !== 'playing') return;
     this.pendingAction = null; this.pointer = null; this.blockedAt = null; this.toastUntil = 0;
+    if (!canGuide(this.level, this.mode)) {
+      this.mechanicGuide = createMechanicGuide(this.profile(), this.level, this.mode, null, true);
+      this.modal = null; this.reviewing = false; this.persist(); this.syncMusic(); return;
+    }
     this.store.setGuideDismissed(false);
     this.guideEnabled = true; this.modal = null; this.reviewing = false; this.persist(); this.syncMusic();
   }
@@ -174,6 +260,7 @@ class Game {
     const guide = this.guideStep();
     if (!guide) return false;
     this.pendingAction = null; this.blockedAt = this.platform.now();
+    if (guide.kind === 'mechanic') { this.toast('先点手指指向的道具或下方按钮；讲解不扣拍。'); return true; }
     this.toast(guide.control === 'undo' ? '先点下方“撤回”，恢复拍数后继续学。'
       : guide.control === 'restart' ? '点下方“重新学一遍”，从起点跟着走。'
       : guide.control === 'wait' ? '点下方“等一拍”，让回声继续走。'
@@ -227,22 +314,24 @@ class Game {
   toast(message) { this.toastText = message; this.toastUntil = this.platform.now() + 2600; }
   cue(type) {
     this.cueCount++;
-    if (!this.hidden && !this.busy) this.sound.play(type);
+    if (!this.hidden && !this.busy && !this.startupActive()) this.sound.play(type);
   }
   unlockAudio() {
-    if (this.hidden || this.busy) return;
+    if (this.hidden || this.busy || this.startupActive()) return;
     this.syncMusic(true); this.sound.unlock();
   }
   syncMusic(force = false) {
-    const enabled = !this.hidden && !this.busy && !this.modal;
+    const enabled = !this.hidden && !this.busy && !this.modal && !this.startupActive();
     if (force || enabled !== this.musicActive) { this.musicActive = enabled; this.sound.ambience(enabled); }
   }
   persist() {
     if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', actions: this.actions.slice(), reviveAt: this.reviveAt, undosUsed: this.undosUsed,
+      ...(this.mechanicGuide ? { mechanicGuide: { id: this.mechanicGuide.ids[0], phase: this.mechanicGuide.phase, repeat: this.mechanicGuide.repeat } } : {}),
       ...(this.guideEnabled ? { guide: true } : {}) });
     else this.store.flush();
   }
   restore() {
+    if (this.startupActive()) return false;
     this.cancelRankingPointer();
     this.pendingAction = null; this.blockedAt = null;
     const run = this.store.loadRun();
@@ -268,6 +357,8 @@ class Game {
       this.mode = run.mode; this.page = 'game'; this.session++;
       this.guideEnabled = autoGuide(this.profile(), level, this.mode) ||
         (canGuide(level, this.mode) && run.guide === true && !this.profile().guideDismissed);
+      this.mechanicGuide = createMechanicGuide(this.profile(), level, this.mode, run.mechanicGuide,
+        !!run.mechanicGuide && run.mechanicGuide.repeat === true);
       this.pointer = null; this.camera.enter(this.platform.now());
       this.modal = null; this.reviewing = false;
       if (state.status === 'failed') this.failure();
@@ -276,13 +367,14 @@ class Game {
     } catch (_) { this.store.clearRun(); this.toast('旧进度无法恢复，已保留通关记录'); return false; }
   }
   start(level, mode = 'campaign') {
-    if (this.busy || mode !== 'campaign') return;
+    if (this.busy || this.startupActive() || mode !== 'campaign') return;
     this.cancelRankingPointer();
     const keepGuide = this.guideEnabled && this.level === level && this.state && this.state.status !== 'won';
     this.stopListScrolling(); this.pointer = null;
     this.pendingAction = null; this.blockedAt = null;
     this.level = level; this.mode = mode || 'campaign';
     this.guideEnabled = canGuide(level, this.mode) && (keepGuide || autoGuide(this.profile(), level, this.mode));
+    this.mechanicGuide = createMechanicGuide(this.profile(), level, this.mode);
     this.state = createState(level); this.previousState = null; this.moveEvents = []; this.motionPath = null; this.actions = []; this.reviveAt = null; this.undosUsed = 0;
     this.page = 'game'; this.modal = null; this.reviewing = false; this.session++; this.transitionAt = this.platform.now() - MOVE_MS; this.toastUntil = 0;
     this.pointer = null; this.camera.enter(this.platform.now());
@@ -330,6 +422,7 @@ class Game {
   /** Take back the last turn. The route is rebuilt from history, so undo never invents a state the rules did not produce. */
   undo() {
     this.pendingAction = null; this.blockedAt = null;
+    if (mechanicStep(this)) { this.guideMisstep(); return; }
     if (this.page !== 'game' || this.modal || this.busy || this.reviewing || !this.state || this.state.status !== 'playing') return;
     if (this.undoLeft() <= 0) { this.toast('本程的 ' + this.undoLimit() + ' 次回溯已用完'); return; }
     if (!this.actions.length) { this.toast('已经在起点了'); return; }
@@ -441,7 +534,7 @@ class Game {
     this.modal = { kind: 'pause', title: '歇一会', lines: [saveLine], buttons: [
       { text: '继续投递', primary: true, action: () => { this.modal = null; this.syncMusic(); } },
       { text: '重新开始', icon: 'restart', action: () => this.start(this.level, this.mode) },
-      ...(canGuide(this.level, this.mode) ? [{ text: '操作引导', textOnly: true, icon: 'route', action: () => this.showGuide() }] : []),
+      ...(this.canShowGuide() ? [{ text: '操作引导', textOnly: true, icon: 'route', action: () => this.showGuide() }] : []),
       { text: '玩法说明', textOnly: true, icon: 'book', action: () => this.help() },
       { text: '返回邮局', textOnly: true, action: () => this.home() }
     ] };
@@ -463,14 +556,14 @@ class Game {
     this.modal = { kind: 'help', title: '和回声一起送信', lines,
       buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
   }
-  home() { if (this.busy) return; this.cancelRankingPointer(); this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
+  home() { if (this.busy || this.startupActive()) return; this.cancelRankingPointer(); this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
   openGameCircle() {
     if (!this.gameCircle.available || this.page !== 'home' || this.busy || this.hidden || this.modal) return;
     this.cue('tap');
     return this.gameCircle.open();
   }
   openPage(page) {
-    if (this.busy || !['home', 'levels', 'collection', 'leaderboard'].includes(page)) return;
+    if (this.busy || this.startupActive() || !['home', 'levels', 'collection', 'leaderboard'].includes(page)) return;
     this.cancelRankingPointer();
     this.rankingAuthorization.close();
     this.friendLeaderboard.close();
@@ -583,8 +676,12 @@ class Game {
       const rect = this.listRect(), scroll = this.listScroll();
       const list = scroll && !this.modal && !this.busy && rect && insideRect(rect, p.x, p.y) ? this.page : null;
       if (list) scroll.begin(p.y, this.platform.now());
-      this.pointer = { ...p, list, lastX: p.x, lastY: p.y, time: this.platform.now(), dragging: false,
+      this.pointer = { ...p, deviceX: x, deviceY: y, list, lastX: p.x, lastY: p.y, time: this.platform.now(), dragging: false,
         scene: this.page === 'game' && !this.modal && !this.busy && !this.hidden && b && insideRect(b, p.x, p.y) };
+      if (this.pointer.scene) {
+        this.pointer.boardTap = captureBoardTap(this.renderer, p);
+        this.pointer.boardState = this.state;
+      }
       return;
     }
     if (this.pointer && this.pointer.list && (type === 'move' || type === 'end')) {
@@ -598,7 +695,7 @@ class Game {
     if (this.pointer && this.pointer.scene && (type === 'move' || type === 'end')) {
       const origin = this.pointer, b = this.renderer.boardRect;
       if (!b || this.modal || this.busy || this.hidden || this.page !== 'game') { this.pointer = null; return; }
-      if (origin.dragging || Math.hypot(p.x - origin.x, p.y - origin.y) > 8) {
+      if (origin.dragging || Math.hypot(x - origin.deviceX, y - origin.deviceY) > BOARD_DRAG_SLOP) {
         origin.dragging = true; this.pendingAction = null;
         this.camera.pan((p.x - origin.lastX) / b.w, (p.y - origin.lastY) / b.h);
         this.cameraMovedAt = this.platform.now();
@@ -610,9 +707,12 @@ class Game {
     if (type !== 'end' || !this.pointer) return;
     const origin = this.pointer; this.pointer = null;
     const dx = p.x - origin.x, dy = p.y - origin.y;
-    if (Math.max(Math.abs(dx), Math.abs(dy)) > 25) return;
-    const inside = (h, point) => point.x >= h.x && point.x <= h.x + h.w && point.y >= h.y && point.y <= h.y + h.h && (!h.contains || h.contains(point.x, point.y));
-    const hit = this.renderer.hits.slice().reverse().find(h => inside(h, p) && inside(h, origin));
+    if (!origin.scene && Math.max(Math.abs(dx), Math.abs(dy)) > 25) return;
+    // A short finger release retains its pressed cell even if the floor or prop
+    // moved during a draw. A queued turn changing the board cancels stale presses.
+    if (origin.scene && origin.boardState !== this.state) return;
+    const pressed = origin.scene && origin.boardTap && insideRect(this.renderer.boardRect, p.x, p.y) ? origin.boardTap : null;
+    const hit = pressed || this.renderer.hits.slice().reverse().find(h => containsHit(h, p) && containsHit(h, origin));
     if (hit) {
       const cues = this.cueCount;
       hit.action(p, origin);
@@ -627,6 +727,7 @@ class Game {
       this.friendLeaderboard.revalidate(null);
     if (this.pointer && this.pointer.ranking && !this.rankingInteractive()) this.cancelRankingPointer();
     const now = this.platform.now();
+    this.updateStartup(now);
     this.syncMusic();
     if (this.pendingAction && now - this.transitionAt >= MOVE_MS) {
       const pending = this.pendingAction; this.pendingAction = null;

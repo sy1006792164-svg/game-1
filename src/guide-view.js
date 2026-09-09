@@ -8,7 +8,10 @@ const MARKERS = {
   move: { color: C.gold },
   letter: { color: C.gold, icon: 'letter' },
   echo: { color: C.blue, icon: 'echo' },
-  home: { color: C.green, icon: 'home' }
+  home: { color: C.green, icon: 'home' },
+  wind: { color: C.green, icon: 'arrow-right' },
+  light: { color: C.gold, icon: 'lamp' },
+  bridge: { color: C.gold }
 };
 
 function guideCardLayout(r, guide) {
