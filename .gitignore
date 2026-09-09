@@ -1,5 +1,6 @@
 # Development scratch files and machine-specific settings
 /work/
+/output/
 /project.private.config.json
 
 # Dependencies and generated browser bundle

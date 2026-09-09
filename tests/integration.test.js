@@ -1355,12 +1355,12 @@ test('a current-version save resumes its exact actions without an upgrade notice
   h.destroy(); reloaded.destroy();
 });
 
-test('the fresh home offers one delivery action and only selection and stamp links', () => {
+test('the fresh home offers delivery, selection, stamps and game circle links', () => {
   const h = harness(); h.draw();
   const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
-  for (const label of ['开始送信', '选关', '邮票']) assert.ok(texts.includes(label));
+  for (const label of ['开始送信', '选关', '邮票', '圈子']) assert.ok(texts.includes(label));
   assert.equal(texts.some(text => /设置|每日|成长|LV\.|已走 0 拍|本周|下一小步/.test(text)), false);
-  assert.equal(h.game.renderer.hits.length, 3, 'only delivery, selection and stamps remain');
+  assert.equal(h.game.renderer.hits.length, 4, 'delivery, selection, stamps and game circle are available');
   h.destroy();
 });
 

@@ -2,6 +2,8 @@
 const { createPlatform } = require('./platform');
 const { createStore } = require('./storage');
 const { createAds } = require('./ads');
+const { createGameCircle } = require('./game-circle');
+const { enableSharing } = require('./sharing');
 const { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, createState, step, replay, revive, stars } = require('./engine');
 const { CAMPAIGN } = require('./levels');
 const { getAlbum } = require('./stamp-album');
@@ -26,6 +28,7 @@ class Game {
     Object.defineProperty(this, 'development', { value: platform.isDevelopment === true });
     this.store = createStore(platform.storage, { development: this.development });
     this.sound = createSound(platform);
+    this.gameCircle = createGameCircle(platform, config.GAME_CIRCLE_OPENLINK, message => this.toast(message));
     this.ads = createAds(platform, config, active => {
       if (active) this.sound.suspend('ad');
       else { this.syncMusic(); this.sound.resume('ad'); }
@@ -81,6 +84,7 @@ class Game {
       this.profileCache = null; this.runCache = null; this.albumCache = null;
       this.metrics = platform.reduceMemory(); this.lastFrame = -Infinity;
     });
+    enableSharing(platform, config);
     this.loop();
   }
   /** Snapshots are cloned by the store; reuse one per store revision so a frame never clones the save hundreds of times. */
@@ -407,6 +411,11 @@ class Game {
       buttons: [{ text: '明白了', primary: true, icon: 'check', action: () => { this.modal = old; } }] };
   }
   home() { if (this.busy) return; this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
+  openGameCircle() {
+    if (this.page !== 'home' || this.busy || this.hidden || this.modal) return;
+    this.cue('tap');
+    return this.gameCircle.open();
+  }
   openPage(page) {
     if (this.busy || !['home', 'levels', 'collection'].includes(page)) return;
     this.pendingAction = null; this.persist(); this.page = page; this.modal = null; this.reviewing = false; this.pointer = null; this.stopListScrolling();

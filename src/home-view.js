@@ -30,10 +30,11 @@ function drawBrand(r, top) {
 function drawLinks(r, game, y) {
   [
     { title: '选关', icon: 'route', action: () => game.openPage('levels') },
-    { title: '邮票', icon: 'stamp', action: () => game.openPage('collection') }
+    { title: '邮票', icon: 'stamp', action: () => game.openPage('collection') },
+    { title: '圈子', icon: 'community', action: () => game.openGameCircle() }
   ].forEach((item, index) => {
-    const x = 30 + index * 174;
-    r.button(item.title, x, y, 156, CONTROL.compactHeight, item.action, { style: 'quiet', icon: item.icon, trailing: 'chevron' });
+    const x = 30 + index * 114;
+    r.button(item.title, x, y, 102, CONTROL.compactHeight, item.action, { style: 'quiet', icon: item.icon });
   });
 }
 

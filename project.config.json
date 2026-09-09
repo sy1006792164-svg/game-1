@@ -54,6 +54,10 @@
         "type": "folder"
       },
       {
+        "value": "output",
+        "type": "folder"
+      },
+      {
         "value": "docs",
         "type": "folder"
       },
