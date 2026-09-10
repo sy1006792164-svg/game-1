@@ -3,13 +3,14 @@
 const { C } = require('./theme');
 const { CONTROL, buttonLayout } = require('./controls');
 const { drawResultHeader, drawResultStars } = require('./result-effects');
+const { layoutHelp, drawHelp } = require('./help-view');
 
 // Measure each block before drawing so titles, paragraphs and actions keep
 // their own space, including when a longer label wraps onto another line.
 function modalLayout(r, modal) {
   const x = 22, w = 346, inset = 24, width = w - inset * 2;
   const titleSize = 20, titleHeight = 28, lineHeight = 22;
-  let cursor = 96;
+  let cursor = modal.sections ? 24 : 96;
   const kickerY = modal.kicker ? cursor + 5 : null;
   if (modal.kicker) cursor += 22;
   const title = r.wrapLines(modal.title, width, titleSize, '600');
@@ -17,6 +18,9 @@ function modalLayout(r, modal) {
   cursor += title.length * titleHeight;
   let starsY = null;
   if (modal.stars) { cursor += 16; starsY = cursor + 18; cursor += 36; }
+  const help = modal.sections ? layoutHelp(r, modal.sections, width) : null;
+  const helpY = help ? cursor + 22 : null;
+  if (help) cursor = helpY + help.height;
   const paragraphs = [];
   if (modal.lines.length) cursor += 18;
   modal.lines.forEach((text, index) => {
@@ -38,7 +42,7 @@ function modalLayout(r, modal) {
     return result;
   });
   const h = cursor + 24;
-  return { x, y: Math.max(24, (r.H - h) / 2), w, h, width, kickerY, title, titleY, titleSize, titleHeight, starsY, paragraphs, lineHeight, buttons };
+  return { x, y: Math.max(24, (r.H - h) / 2), w, h, width, kickerY, title, titleY, titleSize, titleHeight, starsY, help, helpY, paragraphs, lineHeight, buttons };
 }
 
 function drawModal(r, modal, now, resultAge = null) {
@@ -54,7 +58,7 @@ function drawModal(r, modal, now, resultAge = null) {
   r.line([[ui.x + 42, ui.y + 2], [ui.x + ui.w - 42, ui.y + 2]], accent, 2);
   // Small cancellation marks turn the result into a paper receipt without
   // adding height or moving its text and actions on compact screens.
-  [ui.x + 48, ui.x + ui.w - 89].forEach(left => {
+  if (!ui.help) [ui.x + 48, ui.x + ui.w - 89].forEach(left => {
     for (let line = 0; line < 3; line++) {
       const y = ui.y + 46 + line * 6;
       r.line([[left, y + 2], [left + 12, y], [left + 26, y + 2], [left + 40, y]], '#c7d4be', 1);
@@ -62,7 +66,7 @@ function drawModal(r, modal, now, resultAge = null) {
   });
   const help = modal.kind === 'help';
   if (result) drawResultHeader(r, modal.kind, ui, resultAge);
-  else {
+  else if (!ui.help) {
     r.circle(195, ui.y + 52, 29, '#f5ecd5', '#d6c5a5');
     r.circle(195, ui.y + 52, 23, '#fffaf0', '#e6d8bb');
     r.icon(help ? 'echo' : 'wind', 195, ui.y + 52, 28, help ? C.blue : C.gold);
@@ -70,6 +74,7 @@ function drawModal(r, modal, now, resultAge = null) {
   if (modal.kicker) r.label(modal.kicker, 195, ui.y + ui.kickerY, ui.width, 10, C.muted, 'center');
   ui.title.forEach((line, i) => r.text(line, 195, ui.y + ui.titleY + i * ui.titleHeight, ui.titleSize, C.ink, 'center', '600'));
   if (ui.starsY != null) drawResultStars(r, modal.stars, ui.y + ui.starsY, resultAge);
+  if (ui.help) drawHelp(r, ui.help, ui.x + 24, ui.y + ui.helpY);
   ui.paragraphs.forEach(paragraph => paragraph.lines.forEach((line, i) => {
     r.text(line, help ? ui.x + 24 : 195, ui.y + paragraph.y + i * ui.lineHeight, 13, C.muted, help ? 'left' : 'center');
   }));

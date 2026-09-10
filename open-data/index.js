@@ -1,6 +1,6 @@
 'use strict';
 
-const { DEFAULT_KEY, buildRows } = require('./leaderboard-data');
+const { DEFAULT_KEY, isKVDataList, buildRows } = require('./leaderboard-data');
 const { createHostedScoreSync } = require('./hosted-score');
 const { leaderboardLayout, paintLeaderboard } = require('./leaderboard-view');
 const { createRankMotion } = require('./rank-motion');
@@ -12,11 +12,11 @@ function createOpenDataLeaderboard(api) {
   let width = 354, height = 400, ratio = 1, visible = false, request = 0, timer = null;
   let key = DEFAULT_KEY, status = 'idle', rows = [], self = null, notice = '';
   let identity = null, refreshing = false, refreshQueued = false, updatedAt = null, hits = [], syncSnapshot = '';
-  let suspended = false, cacheOnly = false, frameTimer = null, pointer = null;
+  let suspended = false, cacheOnly = false, syncEnabled = true, frameTimer = null, pointer = null;
   let visitBaseline = null, visitSettled = false, observationOk = false, rankChange = null;
   const motion = createRankMotion();
   const history = createRankHistory(api, target => target === key && visible && !suspended && !cacheOnly && status !== 'denied');
-  const hostedSync = createHostedScoreSync(api, { key: () => key, onChange: sync => {
+  const hostedSync = createHostedScoreSync(api, { key: () => key, canSync: () => syncEnabled && !suspended && !cacheOnly, onChange: sync => {
     const snapshot = sync.status === 'saved' ? key + JSON.stringify(hostedSync.getState().hosted) : '';
     const changed = snapshot && snapshot !== syncSnapshot;
     if (snapshot) syncSnapshot = snapshot;
@@ -97,8 +97,7 @@ function createOpenDataLeaderboard(api) {
   }
   function refresh(afterSave) {
     if (!visible || suspended || cacheOnly || status === 'denied') return;
-    // Repeated taps share the active read. A completed hosted write alone may
-    // request one follow-up, since the active read can predate that write.
+    // Coalesce reads; a completed upload may request one fresh read.
     if (refreshing) { if (afterSave === true) refreshQueued = true; return; }
     const token = ++request;
     refreshing = true; notice = '';
@@ -132,7 +131,7 @@ function createOpenDataLeaderboard(api) {
     function fail(error, own) {
       if (finished || !active()) return;
       if (error && /auth|deny|denied|permission/i.test(error.errMsg || '')) {
-        denied = true; finished = true; stop(); rows = []; self = null; identity = null; updatedAt = null;
+        denied = true; finished = true; syncEnabled = false; hostedSync.pause(); stop(); rows = []; self = null; identity = null; updatedAt = null;
         notice = ''; status = 'denied'; rankChange = null; cancelMotion(); history.pause(); paint(); return;
       }
       if (own) { ownFailed = true; mine = []; }
@@ -142,8 +141,7 @@ function createOpenDataLeaderboard(api) {
     function identify(value) {
       if (!active()) return;
       identity = value;
-      // Identity enriches an already useful result; it never blocks scores.
-      // No nickname/score matching is used by buildRows, even on a late reply.
+      // Late identity may label rows; never infer it from names or scores.
       if (finished) { applyData(); observeRank(); paint(); }
     }
     timer = setTimeout(function () {
@@ -161,7 +159,8 @@ function createOpenDataLeaderboard(api) {
       } catch (_) { identify(null); }
       api.getUserCloudStorage({ keyList: [key, historyKey(key)].filter(Boolean), success: function (result) {
         if (!active() || finished) return;
-        mine = result && result.KVDataList || [];
+        if (!result || !isKVDataList(result.KVDataList)) { fail(new Error('INVALID_HISTORY_RESPONSE'), true); return; }
+        mine = result.KVDataList;
         const previous = history.load(key, mine);
         if (!visitSettled && !visitBaseline) visitBaseline = previous;
         finish();
@@ -171,7 +170,11 @@ function createOpenDataLeaderboard(api) {
     try {
       api.getFriendCloudStorage({ keyList: [key], success: function (result) {
         if (!active() || finished) return;
-        friends = result && Array.isArray(result.data) ? result.data : []; finish();
+        if (!result || !Array.isArray(result.data) || result.data.some(friend =>
+          !friend || typeof friend.openid !== 'string' || !isKVDataList(friend.KVDataList))) {
+          fail(new Error('INVALID_FRIEND_RESPONSE'), false); return;
+        }
+        friends = result.data; finish();
       }, fail: error => fail(error, false) });
     } catch (error) { fail(error, false); }
   }
@@ -208,29 +211,29 @@ function createOpenDataLeaderboard(api) {
   api.onMessage(function (message) {
     if (!message || message.channel !== CHANNEL) return;
     if (typeof message.key === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(message.key) && message.key !== key) {
-      history.pause(); key = message.key; stop(); cancelMotion(); rows = []; self = null; identity = null; notice = ''; status = 'idle'; updatedAt = null; hits = []; enter();
+      history.pause(); hostedSync.pause(); key = message.key; stop(); cancelMotion(); rows = []; self = null; identity = null; notice = ''; status = 'idle'; updatedAt = null; hits = []; enter();
       if (visible && !['open', 'refresh', 'close', 'hide', 'preview'].includes(message.action)) refresh();
     }
-    if (message.action === 'submit') { if (!cacheOnly && !suspended) hostedSync.submit(message.score); return; }
-    if (message.action === 'retry') { if (!cacheOnly && !suspended) hostedSync.retry(); return; }
+    if (message.action === 'submit') { if (syncEnabled && !cacheOnly && !suspended) hostedSync.submit(message.score); return; }
+    if (message.action === 'retry') { if (syncEnabled && !cacheOnly && !suspended) hostedSync.retry(); return; }
     if (message.action === 'open') {
       const previewing = visible && cacheOnly;
-      visible = true; suspended = false; cacheOnly = false;
+      visible = true; suspended = false; cacheOnly = false; syncEnabled = true;
       if (!previewing) enter();
       if (status === 'denied') status = 'idle';
       resize(message); requestRefresh();
     }
     else if (message.action === 'preview') {
-      stop(); history.pause(); visible = true; suspended = false; cacheOnly = true; enter(); resize(message);
+      stop(); history.pause(); hostedSync.pause(); visible = true; suspended = false; cacheOnly = true; enter(); resize(message);
     }
     else if (message.action === 'resize') resize(message);
-    else if (message.action === 'validated') { cacheOnly = false; suspended = false; }
+    else if (message.action === 'validated') { cacheOnly = false; suspended = false; syncEnabled = true; }
     else if (message.action === 'refresh') {
       if (suspended || cacheOnly) { suspended = false; cacheOnly = false; enter(); }
       requestRefresh();
     }
     else if (message.action === 'hide') { visible = false; stop(); cancelMotion(); history.pause(); paint(); }
-    else if (message.action === 'suspend') { suspended = true; stop(); cancelMotion(); history.pause(); }
+    else if (message.action === 'suspend') { suspended = true; stop(); cancelMotion(); history.pause(); hostedSync.pause(); }
     else if (message.action === 'pointer' && visible && !suspended) gesture(message);
     else if (message.action === 'wheel' && visible && !suspended && Number.isFinite(message.delta)) { pointer = null; motion.wheel(message.delta, Date.now()); paint(); }
     else if (message.action === 'scroll' && visible && !suspended && ['start', 'end'].includes(message.edge)) {
@@ -238,12 +241,11 @@ function createOpenDataLeaderboard(api) {
     }
     else if (message.action === 'tap' && visible && !suspended && Number.isFinite(message.x) && Number.isFinite(message.y)) tap(message.x, message.y);
     else if (message.action === 'close') {
-      visible = false; suspended = false; cacheOnly = false; stop(); cancelMotion(); history.pause(); rows = []; self = null; identity = null; updatedAt = null; notice = ''; status = 'idle'; rankChange = null;
+      visible = false; suspended = false; cacheOnly = false; syncEnabled = false; stop(); cancelMotion(); history.pause(); hostedSync.pause(); rows = []; self = null; identity = null; updatedAt = null; notice = ''; status = 'idle'; rankChange = null;
       avatars.forEach(entry => { if (entry.image) { entry.image.onload = null; entry.image.onerror = null; } }); avatars.clear(); paint();
     }
   });
 }
 
-// WeChat loads this entry independently because game.json points here.
 if (typeof wx !== 'undefined' && typeof wx.getSharedCanvas === 'function') createOpenDataLeaderboard(wx);
 module.exports = { createOpenDataLeaderboard };

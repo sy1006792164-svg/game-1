@@ -17,7 +17,15 @@ test('first appearance follows the actual three mechanic types across all shippe
   assert.deepEqual(availableMechanics(CAMPAIGN[19], 'daily'), []);
   assert.equal(createMechanicGuide({ mechanicGuides: { wind: true, bridge: true, light: true } }, CAMPAIGN[19], 'campaign'), null);
   assert.deepEqual(createMechanicGuide({ completed: { 999: {} }, guideDismissed: true }, CAMPAIGN[19], 'campaign').ids, ['wind', 'bridge', 'light'],
-    'old progress, skipped chapters and first-route dismissal cannot suppress an unseen mechanic');
+    'invalid records and first-route dismissal cannot suppress an unseen mechanic');
+  const oldProgress = { completed: { 13: { stars: 3, bestTurns: CAMPAIGN[12].par } } };
+  assert.equal(createMechanicGuide(oldProgress, CAMPAIGN[13], 'campaign'), null, 'a completed wind map proves the player has already encountered wind');
+  assert.deepEqual(createMechanicGuide(oldProgress, CAMPAIGN[19], 'campaign'), { ids: ['bridge', 'light'], phase: 0 },
+    'later maps introduce only new types from the first explanation stage');
+  assert.equal(createMechanicGuide(oldProgress, CAMPAIGN[1], 'campaign'), null, 'a map without new props has no mechanic guide');
+  const displayed = { mechanicGuides: { wind: true } };
+  assert.equal(createMechanicGuide(displayed, CAMPAIGN[12], 'campaign'), null, 'an already displayed type never creates another introduction');
+  assert.equal(createMechanicGuide({}, CAMPAIGN[19], 'daily'), null);
 });
 
 test('wind inspection targets the real one-push landing and explains blocked and non-chained winds', () => {

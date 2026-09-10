@@ -5,7 +5,10 @@ const { insideRect } = require('./board-projection');
 const { getBoardGeometry } = require('./board-geometry');
 const { OFFICE, officeFlag, hitPostOffice } = require('./post-office-geometry');
 const { drawIslandSurface } = require('./island-surface');
-const { drawAtmosphere, drawActorTrails, drawDestination } = require('./scene-effects');
+const { drawActorTrails, drawDestination } = require('./scene-effects');
+const { drawDistantAtmosphere, windState } = require('./ambient-effects');
+const { chapterMood } = require('./chapter-atmosphere');
+const { drawHomeDelivery } = require('./page-atmosphere');
 const { drawGuideTargets } = require('./guide-view');
 const { drawHomeArchitecture } = require('./world-art');
 
@@ -47,18 +50,23 @@ function hitProp(r, x, y, width, height, radius, angle, action) {
   });
 }
 
-function tree(r, x, y, size, now, distant) {
-  const sway = Math.sin(now / 2600 + x) * size * .012;
+function tree(r, x, y, size, now, distant, mood = chapterMood(0)) {
+  const wind = windState(now);
+  const slowSway = distant ? .01 : .012;
+  const impulse = distant ? 0 : Math.max(0, Number(r.ambientImpulse) || 0);
+  const gustSway = distant ? .008 + wind.gust * .025 : .015 + wind.strength * .012 + wind.gust * .045 + impulse * .035;
+  const sway = (Math.sin(now / 2600 + x) * slowSway + Math.sin(now / 680 + x * .13) * gustSway) * size;
   polygon(r, [[x - size * .15, y], [x + size * .08, y - 2], [x + size * .74, y + size * .13], [x + size * .39, y + size * .22]], distant ? '#70938209' : '#577c6724');
-  r.line([[x, y], [x, y - size * .72]], distant ? '#9ab7a5' : '#7f8163', Math.max(1, size * .045));
-  ellipse(r, x + sway, y - size * .62, size * .27, size * .48, distant ? '#b3cdbb' : '#7fa589');
-  ellipse(r, x - size * .08 + sway, y - size * .71, size * .19, size * .35, distant ? '#c0d4c3' : '#adc69a');
-  ellipse(r, x + size * .1 + sway, y - size * .61, size * .12, size * .32, distant ? '#adc7b5' : '#73997e');
-  if (!distant) r.line([[x - size * .09 + sway, y - size * .94], [x - size * .16 + sway, y - size * .83]], '#e0e8ba88', .85);
+  r.line([[x, y], [x, y - size * .72]], distant ? mood.treeFar : mood.treeNear, Math.max(1, size * .045));
+  ellipse(r, x + sway, y - size * .62, size * .27, size * .48, distant ? mood.treeFar : mood.leaves[1]);
+  ellipse(r, x - size * .08 + sway, y - size * .71, size * .19, size * .35, distant ? mood.fogNear : mood.leaves[2]);
+  ellipse(r, x + size * .1 + sway, y - size * .61, size * .12, size * .32, distant ? mood.treeFar : mood.leaves[0]);
+  if (!distant) r.line([[x - size * .09 + sway, y - size * .94], [x - size * .16 + sway, y - size * .83]], mood.celestialGlow, .85);
 }
 
 function grass(r, x, y, size, now, color) {
-  const sway = Math.sin(now / 1300 + x) * 1.5;
+  const wind = windState(now), impulse = Math.max(0, Number(r.ambientImpulse) || 0);
+  const sway = Math.sin(now / 1100 + x) * (1.4 + wind.strength * .6 + wind.gust * 2 + impulse * 1.5);
   r.line([[x - size * .6, y - size * .45], [x, y + 1], [x - size * .12 + sway, y - size]], color || '#91b68a', 1.4);
   r.line([[x, y + 1], [x + size * .6 + sway, y - size * .6]], color || '#91b68a', 1.2);
 }
@@ -172,8 +180,12 @@ function floatingMail(r, x, y, size, now, cell, seal, action) {
 }
 
 function drawBoard(r, game, now, rect, guide) {
-  const options = { reducedMotion: false }, time = now;
-  const l = game.level, s = game.state, view = game.camera.frame(now);
+  const options = { reducedMotion: !!r.reducedMotion };
+  const time = options.reducedMotion ? 0 : Number.isFinite(r.ambientNow) ? r.ambientNow : now;
+  const l = game.level, s = game.state;
+  const view = options.reducedMotion
+    ? { scale: game.camera.zoom, panX: game.camera.panX, panY: game.camera.panY }
+    : game.camera.frame(now);
   const geometry = getBoardGeometry(r, l, s, rect, view);
   const p = geometry.projection, { halfW: hw, halfH: hh, point, corners } = p;
   r.boardRect = rect;
@@ -219,7 +231,7 @@ function drawBoard(r, game, now, rect, guide) {
       } });
       // Trees only line the rear rim, so they never hide a floor tile.
       const onRim = Math.floor(cell / l.width) === p.bounds.minRow || cell % l.width === p.bounds.minCol;
-      if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false) });
+      if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false, r.atmosphereMood) });
       else if (cell % 2) actors.push({ y, draw: () => grass(r, x + 5, y - 4, 6, time, '#b1c293') });
     } else {
       // Shallow bevels keep the original tappable floor plane exact.
@@ -277,36 +289,38 @@ function drawBoard(r, game, now, rect, guide) {
 function drawBackdrop(r, now, chapter, options = {}) {
   if (options.reducedMotion) now = 0;
   const H = r.H, c = r.ctx;
+  const mood = options.mood || chapterMood(chapter, options.totalChapters);
   const bounds = r.viewport || { x: 0, y: 0, w: 390, h: H };
   const mapX = x => bounds.x + x * bounds.w / 390, spread = bounds.w / 390;
-  c.fillStyle = COLOR.sky; c.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
+  c.fillStyle = mood.skyMid; c.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
   // Canvas gradients extend their end colors beyond these stops, so the safe areas
   // continue the same sky without changing the artwork's position inside the page.
   const sky = c.createLinearGradient(0, 0, 0, H);
   if (sky && typeof sky.addColorStop === 'function') {
-    sky.addColorStop(0, '#f6f3e8'); sky.addColorStop(.5, '#e3eee3'); sky.addColorStop(1, '#d8e5d8');
+    sky.addColorStop(0, mood.skyTop); sky.addColorStop(.5, mood.skyMid); sky.addColorStop(1, mood.skyBottom);
     c.fillStyle = sky; c.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
   }
   const drift = Math.sin(now / 15000) * 2;
-  glow(r, mapX(310), H * .225, 35, '#fff7d7', .17);
-  r.circle(mapX(310), H * .225, 24, '#f6e8bd');
-  r.circle(mapX(310) - 7, H * .216, 18, '#f9edcf55');
+  glow(r, mapX(310), H * .225, 35, mood.celestialGlow, .17);
+  r.circle(mapX(310), H * .225, 24, mood.celestial);
+  if (mood.id === 'moon-path') r.circle(mapX(302), H * .216, 20, mood.skyMid);
+  else r.circle(mapX(303), H * .216, 18, mood.celestialGlow);
   // Broad, soft ridge lines recede into the mist; they stay quieter than the board.
   c.beginPath(); c.moveTo(mapX(0), H * .46); c.lineTo(mapX(0), H * .34);
   c.bezierCurveTo(mapX(45 + drift), H * .25, mapX(57), H * .28, mapX(112), H * .37);
   c.bezierCurveTo(mapX(173), H * .4, mapX(207), H * .23, mapX(266), H * .31);
   c.bezierCurveTo(mapX(320), H * .39, mapX(346), H * .27, mapX(390), H * .31);
-  c.lineTo(mapX(390), H * .56); c.closePath(); c.fillStyle = '#d0dfd1'; c.fill();
+  c.lineTo(mapX(390), H * .56); c.closePath(); c.fillStyle = mood.ridgeFar; c.fill();
   c.beginPath(); c.moveTo(mapX(0), H * .59); c.lineTo(mapX(0), H * .42);
   c.bezierCurveTo(mapX(59), H * .33, mapX(88), H * .47, mapX(157), H * .45);
   c.bezierCurveTo(mapX(205), H * .42, mapX(260), H * .34, mapX(310), H * .43);
   c.bezierCurveTo(mapX(343), H * .48, mapX(359), H * .4, mapX(390), H * .39);
-  c.lineTo(mapX(390), H * .64); c.closePath(); c.fillStyle = '#c1d6c5'; c.fill();
-  ellipse(r, mapX(167 + drift), H * .49, 247 * spread, 31, '#e7efe5b8');
-  ellipse(r, mapX(272 - drift), H * .58, 216 * spread, 35, '#e0ebdfad');
-  [-20, 403].forEach((x, i) => tree(r, mapX(x), H * .69, 96 + i * 19, now, true));
-  ellipse(r, mapX(195), H * .77, 235 * spread, 53, '#e2ecdf55');
-  drawAtmosphere(r, now, { x: bounds.x, y: 64, w: bounds.w, h: H - 130 }, options);
+  c.lineTo(mapX(390), H * .64); c.closePath(); c.fillStyle = mood.ridgeNear; c.fill();
+  ellipse(r, mapX(167 + drift), H * .49, 247 * spread, 31, mood.fogFar);
+  ellipse(r, mapX(272 - drift), H * .58, 216 * spread, 35, mood.fogNear);
+  [-20, 403].forEach((x, i) => tree(r, mapX(x), H * .69, 96 + i * 19, now, true, mood));
+  ellipse(r, mapX(195), H * .77, 235 * spread, 53, mood.fogFar);
+  drawDistantAtmosphere(r, now, { x: bounds.x, y: 64, w: bounds.w, h: H - 130 }, { ...options, mood });
 }
 
 function drawVignette(r, now, rect, options = {}) {
@@ -322,6 +336,7 @@ function drawVignette(r, now, rect, options = {}) {
   c.restore();
   floatingMail(r, -100 + Math.sin(now / 1800) * 3.5, -53 + Math.sin(now / 1200) * 3, 19, now, 5, false);
   floatingMail(r, -69 + Math.sin(now / 1700 + 1) * 2.5, -83 + Math.sin(now / 1300) * 4, 13, now, 2, true);
+  if (options.deliveryStory) drawHomeDelivery(r, now, options.mood || chapterMood(0), .9, options.reducedMotion);
   // Two distant swifts add life without competing with the architectural silhouette.
   [-1, 1].forEach((side, i) => {
     const sx = side * 120 + Math.sin(now / 2300 + i) * 4, sy = -105 + i * 16 + Math.sin(now / 1500 + i) * 2, flap = Math.sin(now / 500 + i) * 2.1;

@@ -2,31 +2,6 @@
 
 const { actorFrame, MOVE_MS } = require('./motion');
 
-// Keep atmosphere sparse and deterministic: no frame-dependent particle allocation.
-function drawAtmosphere(r, now, rect, options = {}) {
-  const c = r.ctx, time = options.reducedMotion ? 0 : now;
-  for (let i = 0; i < 7; i++) {
-    const phase = i * 2.4, drift = time / (4600 + i * 240);
-    const x = rect.x + ((i * .271 + .08) % 1) * rect.w + Math.sin(drift + phase) * 8;
-    const y = rect.y + ((i * .383 + .12) % 1) * rect.h + Math.cos(drift * .71 + phase) * 11;
-    const brightness = .16 + (1 + Math.sin(time / 2300 + phase)) * .08;
-    const color = i % 3 ? '#ffffff' : '#dac18c';
-    c.save(); c.globalAlpha *= brightness;
-    r.circle(x, y, i % 3 ? 1.8 : 2.2, color);
-    c.globalAlpha *= .28; r.circle(x, y, 4, color);
-    c.globalAlpha /= .28; r.circle(x, y, .75, '#fffaf0'); c.restore();
-  }
-  if (options.reducedMotion) return;
-  // Three slow, faint ribbons sit behind the island and never cover its controls.
-  for (let i = 0; i < 3; i++) {
-    const phase = (now / 14000 + i / 3) % 1;
-    const x = rect.x + phase * (rect.w + 110) - 90, y = rect.y + rect.h * (.26 + i * .24);
-    c.save(); c.globalAlpha *= Math.sin(phase * Math.PI) * .15;
-    c.beginPath(); c.moveTo(x, y); c.bezierCurveTo(x + 24, y - 10, x + 55, y + 7, x + 78, y - 2);
-    c.strokeStyle = '#fffdf2'; c.lineWidth = 1; c.stroke(); c.restore();
-  }
-}
-
 function drawActorTrails(r, game, now, point, unit, options = {}) {
   if (options.reducedMotion || game.reviewing || now < game.transitionAt || now - game.transitionAt > MOVE_MS + 90) return;
   const c = r.ctx;
@@ -58,4 +33,4 @@ function drawDestination(r, game, now, projection, options = {}, action) {
   if (action) r.hit(x - 28, top - 8, 56, 16, action);
 }
 
-module.exports = { drawAtmosphere, drawActorTrails, drawDestination };
+module.exports = { drawActorTrails, drawDestination };

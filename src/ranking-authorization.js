@@ -1,8 +1,6 @@
 'use strict';
 
-// No privacy listener or local consent flag is installed here. WeChat owns the
-// privacy dialog and the visible avatar/nickname button. Public userInfo stays
-// in this game session; no login, cloud function or credential is needed.
+// WeChat owns consent; only the public profile stays in this session.
 function createRankingAuthorization(platform, callbacks) {
   const api = platform && platform.kind === 'wechat' && platform.wx;
   const handlers = callbacks || {};
@@ -99,8 +97,7 @@ function createRankingAuthorization(platform, callbacks) {
     const nickName = Array.from(userInfo.nickName.slice(0, 2048)
       .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').trim()).slice(0, 20).join('');
     if (!nickName) return null;
-    // WeChat avatars use qlogo.cn. Keep only a bounded public image URL; other
-    // profile fields, encryptedData, signatures and identifiers are discarded.
+    // Keep only bounded WeChat avatar URLs, discarding credentials and IDs.
     const source = typeof userInfo.avatarUrl === 'string' ? userInfo.avatarUrl : '';
     const avatarUrl = source.length <= 2048 && /^https?:\/\/(?:[a-z0-9-]+\.)*qlogo\.cn\/[^\s#]*$/i.test(source) ? source.replace(/^http:/i, 'https:') : '';
     return { nickName, avatarUrl };
@@ -141,8 +138,7 @@ function createRankingAuthorization(platform, callbacks) {
     }
     return true;
   }
-  // Invoke only from the player's ranking/retry button. The native privacy API
-  // starts synchronously here, before reading the current userInfo permission.
+  // Privacy requests must start directly from the player's ranking/retry tap.
   function open() {
     if (flight) return flight;
     if (profileFlight) return profileFlight.then(getState);
@@ -155,8 +151,7 @@ function createRankingAuthorization(platform, callbacks) {
       flight = revalidate().then(function () {
         if (current(token) && sessionEnabled) {
           notifyReady();
-          // Refresh changed public names without delaying cached ranks or
-          // reopening the child a second time when the profile arrives.
+          // Refresh public names without reopening or delaying the cached list.
           saveProfile(token, undefined, true).catch(function (error) {
             if (current(token) && !error.cancelled && denial(error)) {
               sessionEnabled = false; profileRevoked = true;
@@ -172,7 +167,6 @@ function createRankingAuthorization(platform, callbacks) {
     return authorize();
   }
   function authorize() {
-    // First use and explicit recovery still complete the native consent flow.
     sessionConfirmed = false; sessionEnabled = false; active = true; destroyButton();
     authSetting = null; checking = false;
     const token = ++revision;
@@ -182,8 +176,7 @@ function createRankingAuthorization(platform, callbacks) {
     flight = (async function () {
       let stage = 'privacy';
       try {
-        // A player may read the platform dialog for as long as needed. close()
-        // cancels this wait; a background transition must not cancel consent.
+        // Consent has no timeout; only closing the page cancels it.
         await native(token, 'requirePrivacyAuthorize', {}, 0);
         check(token);
         stage = 'profile'; setState('authorizing', '正在检查微信头像昵称授权…');
@@ -215,10 +208,16 @@ function createRankingAuthorization(platform, callbacks) {
     } else { rect = null; wantsButton = false; }
     reconcileButton(); return getState();
   }
-  function hide() { foreground = false; reconcileButton(); }
+  function hide() {
+    foreground = false;
+    if (!sessionConfirmed && validationFlight) {
+      revision++; Array.from(cancellations).forEach(cancel => cancel());
+      validationFlight = null; checking = false;
+    }
+    reconcileButton();
+  }
   function show() { foreground = true; reconcileButton(); }
-  // Call from a deliberate "go to settings" tap. The native settings API is
-  // invoked before any await; returning rechecks privacy and userInfo afresh.
+  // Open settings directly from a tap, then recheck consent.
   function openSettings() {
     if (flight) return flight;
     if (!active || !settingsAllowed) return Promise.resolve(getState());
@@ -238,17 +237,28 @@ function createRankingAuthorization(platform, callbacks) {
     }).finally(function () { if (current(token)) flight = null; });
     return flight;
   }
-  // Foreground refreshes only read existing permissions. A confirmed session
-  // can also sync after leaving rankings, so this request may outlive the page.
-  // A failed read disables uploads but keeps that session eligible for another
-  // read; starting a new explicit authorization discards the old confirmation.
+  // Read-only checks may outlive the page. Failure disables sync until rechecked.
   function revalidate() {
     if (validationFlight) return validationFlight;
-    if (!sessionConfirmed || flight || profileFlight) return Promise.resolve(null);
+    if (flight || profileFlight) return Promise.resolve(null);
+    if (!sessionConfirmed) return restore();
     const token = revision;
     sessionEnabled = false; checking = true;
-    validationFlight = native(token, 'getSetting', {}, 20000, true).then(function (result) {
+    // Retain both outcomes: a failed request must not hide an explicit revocation
+    // returned by the other request, or leave its callback in the next check.
+    const outcome = task => task.then(value => ({ value }), error => ({ error }));
+    const privacy = typeof api.getPrivacySetting === 'function' ? native(token, 'getPrivacySetting', {}, 20000, true) : Promise.resolve(null);
+    validationFlight = Promise.all([outcome(native(token, 'getSetting', {}, 20000, true)), outcome(privacy)]).then(function ([settingResult, privacyResult]) {
       if (!current(token, true)) throw cancelled();
+      const result = settingResult.value, privacySetting = privacyResult.value;
+      if (privacySetting && privacySetting.needAuthorization === true) {
+        sessionConfirmed = false; profileRevoked = true; authSetting = null;
+        if (active) setState('denied', '微信隐私授权需要重新确认，请点击重试', false, false);
+        return null;
+      }
+      if (result && result.authSetting && result.authSetting['scope.userInfo'] === false) profileRevoked = true;
+      if (settingResult.error || privacyResult.error) throw settingResult.error || privacyResult.error;
+      if (typeof api.getPrivacySetting === 'function' && (!privacySetting || privacySetting.needAuthorization !== false)) throw new Error('PRIVACY_UNAVAILABLE');
       if (!result || !result.authSetting || typeof result.authSetting !== 'object' || Array.isArray(result.authSetting)) throw new Error('SETTING_UNAVAILABLE');
       authSetting = { ...result.authSetting };
       sessionEnabled = authSetting['scope.userInfo'] === true;
@@ -262,6 +272,30 @@ function createRankingAuthorization(platform, callbacks) {
       if (current(token, true) && !error.cancelled && active) setState('error', '微信授权状态暂未确认，请点击重试');
       return null;
     }).finally(function () { if (current(token, true)) { validationFlight = null; checking = false; } });
+    return validationFlight;
+  }
+  // Cold launches recover existing consent without opening any native dialog.
+  function restore() {
+    if (!foreground || active || sessionProfile || profileRevoked || !api ||
+        ['getPrivacySetting', 'getSetting', 'getUserInfo'].some(name => typeof api[name] !== 'function')) return Promise.resolve(null);
+    const token = revision;
+    checking = true;
+    validationFlight = (async () => {
+      const privacy = await native(token, 'getPrivacySetting', {}, 20000, true);
+      if (!privacy || privacy.needAuthorization !== false) return null;
+      const result = await native(token, 'getSetting', {}, 20000, true);
+      const settings = result && result.authSetting;
+      if (!settings || settings['scope.userInfo'] !== true || settings['scope.WxFriendInteraction'] !== true) return null;
+      const profile = publicProfile(await native(token, 'getUserInfo', { withCredentials: false, lang: 'zh_CN' }, 20000, true));
+      if (!profile || !current(token, true) || !foreground) return null;
+      if (typeof handlers.onProfile === 'function' && await handlers.onProfile({ ...profile }) === false) return null;
+      if (!current(token, true) || !foreground) return null;
+      sessionProfile = profile; sessionConfirmed = true; sessionEnabled = true;
+      authSetting = { ...settings };
+      return { ...authSetting };
+    })().catch(() => null).finally(() => {
+      if (current(token, true)) { validationFlight = null; checking = false; }
+    });
     return validationFlight;
   }
   function close() {

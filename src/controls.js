@@ -62,11 +62,22 @@ function drawButton(r, text, x, y, w, h, action, style) {
   plaque(r, x, top, w, faceH, cut, notch, pressed ? tone.held : tone.face, tone.edge);
   r.line([[x + cut + 3, top + 2], [x + w - cut - 3, top + 2]], tone.shine, 1);
   const middle = top + faceH / 2;
+  const feedbackAge = Number.isFinite(options.feedbackAt) ? r.now - options.feedbackAt : -1;
+  const feedback = !disabled && !r.reducedMotion && feedbackAge >= 0 && feedbackAge < 650;
+  const response = feedback ? Math.sin(feedbackAge / 650 * Math.PI) : 0;
+  if (response) {
+    c.save(); c.globalAlpha *= response * .55;
+    plaque(r, x + 2, top + 2, w - 4, faceH - 4, Math.max(4, cut - 2), false, null, C.green);
+    c.restore();
+  }
   const groupX = x + ui.inset + (w - ui.inset * 2 - ui.trailing - ui.leading - ui.textSpan) / 2;
   if (options.icon) {
     const iconOnly = String(text).length === 0;
     const iconX = iconOnly ? x + w / 2 : groupX + CONTROL.icon / 2;
-    drawUiIcon(r, options.icon, iconX, middle, tone.icon);
+    c.save(); c.translate(iconX, middle);
+    if (feedback) c.rotate(options.icon === 'hourglass' ? Math.PI * (1 - (1 - feedbackAge / 650) ** 3) : -.18 * response);
+    drawUiIcon(r, options.icon, 0, 0, tone.icon);
+    c.restore();
   }
   const textX = groupX + ui.leading + ui.textSpan / 2;
   const textY = middle - (ui.lines.length - 1) * ui.lineHeight / 2;
@@ -76,4 +87,4 @@ function drawButton(r, text, x, y, w, h, action, style) {
   if (!disabled) r.hit(x, y, w, h, action);
 }
 
-module.exports = { CONTROL, drawButton, buttonLayout };
+module.exports = { CONTROL, drawButton, buttonLayout, drawPaperPlaque: plaque };

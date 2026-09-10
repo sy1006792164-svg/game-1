@@ -10,7 +10,7 @@ function settle(loader) {
   assert.equal(loader.ready, true);
 }
 
-test('loading starts one real task per frame, displays monotonic progress and holds 100 percent before entry', () => {
+test('loading starts one real task per frame and enters at 2500 ms after showing full progress', () => {
   const calls = [];
   const loader = new StartupLoader(['profile', 'saved route', 'album', 'home'].map(label => ({ label, run: () => calls.push(label) })));
   let previous = 0;
@@ -24,8 +24,8 @@ test('loading starts one real task per frame, displays monotonic progress and ho
     previous = loader.progress;
   }
   assert.equal(loader.progress, 1);
-  loader.update(100); assert.equal(loader.ready, false);
-  loader.update(80); assert.equal(loader.ready, true);
+  loader.update(99); assert.equal(loader.ready, false, '2499 ms is still the loading page');
+  loader.update(1); assert.equal(loader.ready, true, '2500 ms completes the fixed loading duration');
   loader.update(100); assert.equal(calls.length, 4, 'completed preparation never replays');
 });
 

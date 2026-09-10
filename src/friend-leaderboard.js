@@ -1,7 +1,6 @@
 'use strict';
 
-// Only our own local aggregate enters the isolated open data context. Native
-// hosted reads/merges/writes and WeChat friend identities stay inside it.
+// Only our score enters the child; hosted records and friend identities stay there.
 const FRIEND_STORAGE_KEY = 'wind_letter_rank_v1';
 const CHANNEL = 'wind-letter-friends-v1';
 const FRIEND_SCOPE = 'scope.WxFriendInteraction';
@@ -90,8 +89,7 @@ function createFriendLeaderboard(platform, config, options) {
     if (checked && checked[FRIEND_SCOPE] === false) {
       post('close'); return Promise.resolve(setState('denied', '好友互动权限尚未开启\n点击授权按钮可前往设置开启'));
     }
-    // Recheck even after a previous visit: permission may have been revoked in
-    // WeChat settings. authorize does not prompt again while permission remains.
+    // Recheck permission on every visit; prior consent suppresses the native prompt.
     const useSettings = state.status === 'denied' && typeof api.openSetting === 'function';
     setState(previewing ? 'preview' : 'authorizing', '正在获取好友榜授权…');
     return new Promise(function (resolve) {
@@ -104,7 +102,7 @@ function createFriendLeaderboard(platform, config, options) {
         if (ok) resolve(show(token));
         else { authorized = false; post('close'); resolve(setState('denied', message || '尚未允许好友互动\n点击授权按钮可前往设置开启')); }
       }
-      // System authorization may remain open while the player reads it.
+      // Native consent has no timeout.
       cancelAuthorization = function () { done = true; cancelAuthorization = null; resolve(getState()); };
       try {
         if (useSettings) api.openSetting({
@@ -121,8 +119,19 @@ function createFriendLeaderboard(platform, config, options) {
     if (visible && authorized && state.status === 'ready') return post('refresh');
     return post('retry');
   }
-  // Apply a read-only settings check after returning from the background.
-  // An authorization dialog already in progress must settle on its own.
+  // Restore uploads silently without opening the list or reading friend records.
+  function restore(settings) {
+    if (context || visible || pendingShow !== null || cancelAuthorization) return revalidate(settings);
+    if (!settings || settings[FRIEND_SCOPE] !== true || !api) return false;
+    try {
+      if (canSync() !== true || typeof api.getOpenDataContext !== 'function') return false;
+      context = context || api.getOpenDataContext();
+      if (!context || !context.canvas || typeof context.postMessage !== 'function') return false;
+      authorized = true;
+      return post('validated');
+    } catch (_) { return false; }
+  }
+  // Restore checked permissions without interrupting an authorization dialog.
   function revalidate(settings) {
     if (settings && cancelAuthorization) return false;
     if (!settings || settings[FRIEND_SCOPE] !== true) {
@@ -157,7 +166,7 @@ function createFriendLeaderboard(platform, config, options) {
     return post('tap', { x, y });
   }
   function preview(next) {
-    if (!context || !authorized || !canPreview() || state.status === 'denied') return false;
+    if (!context || !authorized || !canPreview() || !['ready', 'preview'].includes(state.status)) return false;
     visible = true; resize(next);
     return post('preview', dimensions) && (setState('preview', '正在更新好友成绩'), true);
   }
@@ -175,8 +184,7 @@ function createFriendLeaderboard(platform, config, options) {
       if (x < 0 || y < 0 || x > dimensions.width || y > dimensions.height) return false;
       cancelPointer();
     } else if (!activePointer && phase !== 'cancel') return false;
-    // Release coordinates can be outside the shared canvas: the child owns the
-    // entire gesture once an in-bounds start is accepted, including tap detection.
+    // The child owns the gesture after an in-bounds start, even if release is outside.
     activePointer = phase === 'end' || phase === 'cancel' ? null : { x, y, time };
     const sent = post('pointer', { phase, x, y, time });
     if (!sent) activePointer = null;
@@ -194,7 +202,7 @@ function createFriendLeaderboard(platform, config, options) {
   }
   function suspend() {
     cancelPointer();
-    return visible && authorized ? post('suspend') : false;
+    return authorized ? post('suspend') : false;
   }
   function close() { cancelPointer(); visible = false; revision++; pendingShow = null; if (cancelAuthorization) cancelAuthorization(); post('hide'); }
   function draw(ctx, x, y, width, height) {
@@ -202,8 +210,7 @@ function createFriendLeaderboard(platform, config, options) {
     try { ctx.drawImage(context.canvas, x, y, width, height); return true; }
     catch (_) { setState('error', '好友榜画面暂时不可用，请重试'); return false; }
   }
-  // Deliver to the child, whose canvas reports actual synchronization status.
-  // The child first reads hosted history so an older device cannot downgrade it.
+  // The child merges hosted history and reports the actual upload status.
   function flush() {
     if (!desired || !syncAllowed() || !context) return false;
     if (desired === dispatched) return true;
@@ -225,7 +232,7 @@ function createFriendLeaderboard(platform, config, options) {
     if (desired !== dispatched) { syncStatus = 'pending'; syncMessage = '完成授权后同步好友成绩'; }
     return Promise.resolve(flush());
   }
-  return { open, preview, resize, refresh, retry, revalidate, page, tap, pointer, wheel, scroll, suspend, close, submit, getState, draw };
+  return { open, preview, resize, refresh, retry, restore, revalidate, page, tap, pointer, wheel, scroll, suspend, close, submit, getState, draw };
 }
 
 module.exports = { createFriendLeaderboard, FRIEND_STORAGE_KEY };

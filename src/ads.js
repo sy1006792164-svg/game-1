@@ -1,7 +1,7 @@
 'use strict';
 
 // Rewards are issued only by an explicit, complete WeChat close event.
-// Each attempt owns its listeners so late callbacks cannot reward a later attempt.
+// Each attempt owns its close listener so late callbacks cannot reward a later attempt.
 function createAds(platform, config, onActiveChange) {
   const options = config || {};
   const adUnitId = typeof options.REWARDED_AD_UNIT_ID === 'string' ? options.REWARDED_AD_UNIT_ID.trim() : '';
@@ -11,6 +11,7 @@ function createAds(platform, config, onActiveChange) {
   let destroyed = false;
   let activeAd = null;
   let activeAttempt = null;
+  let errorListener = null;
 
   function setActive(attempt, active) {
     if (active ? activeAttempt === attempt : activeAttempt !== attempt) return;
@@ -23,37 +24,75 @@ function createAds(platform, config, onActiveChange) {
     return !destroyed && Boolean(platform && platform.kind === 'wechat' && configured && api && typeof api.createRewardedVideoAd === 'function');
   }
 
+  function detachErrorListener() {
+    const listener = errorListener;
+    errorListener = null;
+    try { if (listener && activeAd && typeof activeAd.offError === 'function') activeAd.offError(listener); } catch (_) { /* Cleanup only. */ }
+  }
+
+  function initializeAd() {
+    if (!isConfigured()) return 'unsupported';
+    try {
+      // Reuse the SDK singleton for the lifetime of this game instance.
+      if (!activeAd) activeAd = api.createRewardedVideoAd({ adUnitId });
+      if (!activeAd || typeof activeAd.show !== 'function' || typeof activeAd.onClose !== 'function' || typeof activeAd.onError !== 'function') return 'unsupported';
+      if (!errorListener) {
+        const ad = activeAd;
+        const listener = function () {
+          if (destroyed || activeAd !== ad || errorListener !== listener) return;
+          const attempt = pending || activeAttempt;
+          if (attempt && attempt.ad === ad && attempt.error) attempt.error();
+        };
+        // Automatic preloads also emit errors while no user request is pending.
+        // Keep one listener from initialization through destroy; idle errors
+        // must neither display an ad nor consume a future revive attempt.
+        errorListener = listener;
+        try { ad.onError(listener); } catch (error) { detachErrorListener(); throw error; }
+      }
+      return null;
+    } catch (_) { return 'error'; }
+  }
+
+  // Prepare at startup without showing an ad or taking the game's audio lock.
+  // If the SDK is not ready yet, the next user request can retry initialization.
+  initializeAd();
+
   function showRevive() {
     if (destroyed) return Promise.resolve(result('destroyed'));
     if (pending || activeAttempt) return Promise.resolve(result('busy'));
     if (!platform || platform.kind !== 'wechat') return Promise.resolve(result('preview'));
     if (!configured) return Promise.resolve(result('unconfigured'));
     if (!api || typeof api.createRewardedVideoAd !== 'function') return Promise.resolve(result('unsupported'));
+    const initializationError = initializeAd();
+    if (initializationError) return Promise.resolve(result(initializationError));
 
     let resolvePromise;
     const promise = new Promise(function (resolve) { resolvePromise = resolve; });
-    const attempt = { resolve: resolvePromise, settled: false, started: false, timer: null, stage: 'starting', ad: null, close: null, error: null };
+    const attempt = { resolve: resolvePromise, settled: false, started: false, displayEnded: false, timer: null, stage: 'starting', ad: null, close: null, error: null };
     pending = attempt;
 
     function endDisplay() {
+      if (attempt.displayEnded) return;
+      attempt.displayEnded = true;
       const ad = attempt.ad;
       if (ad) {
         try { if (typeof ad.offClose === 'function') ad.offClose(attempt.close); } catch (_) { /* Cleanup only. */ }
-        try { if (typeof ad.offError === 'function') ad.offError(attempt.error); } catch (_) { /* Cleanup only. */ }
       }
       setActive(attempt, false);
     }
     attempt.endDisplay = endDisplay;
 
     function settle(reason) {
+      // Commit the result before native cleanup or audio callbacks can reenter.
+      if (!attempt.settled) {
+        attempt.settled = true;
+        clearTimeout(attempt.timer);
+        if (pending === attempt) pending = null;
+        attempt.resolve(result(reason));
+      }
       // A watchdog cannot close a native video. Keep its audio lock and listeners
       // until the SDK confirms closure/failure, even after denying the reward.
       if (reason !== 'timeout' || !attempt.started) endDisplay();
-      if (attempt.settled) return;
-      attempt.settled = true;
-      clearTimeout(attempt.timer);
-      if (pending === attempt) pending = null;
-      attempt.resolve(result(reason));
     }
     attempt.settle = settle;
 
@@ -66,13 +105,6 @@ function createAds(platform, config, onActiveChange) {
     }
 
     try {
-      // WeChat may return its global singleton. Detach our previous listeners above;
-      // never destroy/recreate a component while it is displaying a video.
-      activeAd = api.createRewardedVideoAd({ adUnitId });
-      if (!activeAd || typeof activeAd.show !== 'function' || typeof activeAd.onClose !== 'function' || typeof activeAd.onError !== 'function') {
-        settle('unsupported');
-        return promise;
-      }
       attempt.ad = activeAd;
       attempt.close = function (event) {
         if (!attempt.started) return;
@@ -91,7 +123,6 @@ function createAds(platform, config, onActiveChange) {
         else settle('show-failed');
       };
       activeAd.onClose(attempt.close);
-      activeAd.onError(attempt.error);
       armTimer(30000, 'timeout');
       function showing() {
         if (attempt.settled) return;
@@ -129,6 +160,7 @@ function createAds(platform, config, onActiveChange) {
     if (destroyed) return;
     destroyed = true;
     if (pending) pending.settle('destroyed');
+    detachErrorListener();
     if (activeAd && typeof activeAd.destroy === 'function') {
       try { activeAd.destroy(); } catch (_) { /* SDK destroy is optional. */ }
     }

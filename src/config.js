@@ -16,6 +16,6 @@ module.exports = Object.freeze({
     'https://mmocgame.qpic.cn/wechatgame/wmgTzBmfDolwqufVlOzHqj6TbBrVSaac2iazw3fib00MCLCibb59XSNdVCsPs0ymUHD/0'
   ]),
   GAME_CIRCLE_OPENLINK: '-SSEykJvFV3pORt5kTNpS2IiFSEzG7QODYe3HMbdeWYsRlY0pSECz65dK0y_42shAZWSJv3qX2Rf8Rm9QnUYGhgrcEx2V-DRWSpYte8xc86nuoqDbjpSGUTGT8ExmFAKrDDqRooQdYxMNs79Wye6iPcgYxvg3hOc082YSfwWmrvb2rt-aSkGWWj2gMuf0SRK9GP53PgPV6QIOyGvSmA5TxZNGWE-igJz1GCgS1Z9f1kgho3jULBAMdqssfR8BKEBldVI7HCnTmIext5x_Ea_3Z4TWJbuTHSYVBOYvVM0EhMc-58JDNDlOtxjoevoXr7ue2g4ktxK6hv_Z_6dmm59Kw',
-  // 微信公众平台 → 流量主 → 广告管理 → 激励式视频。请填写真实广告位 ID。
-  REWARDED_AD_UNIT_ID: ''
+  // 微信公众平台 → 流量主 → 广告管理 → 激励式视频。
+  REWARDED_AD_UNIT_ID: 'adunit-eaca1e8c6595e19f'
 });

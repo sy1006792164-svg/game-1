@@ -170,7 +170,7 @@ test('board edge tolerance is measured in screen pixels and never replaces exact
   }
 });
 
-test('native WeChat touch coordinates keep the small-screen target through capped DPR and pinch cancellation', t => {
+test('native WeChat touch coordinates keep the small-screen target and multi-touch cannot change the camera or tap', t => {
   const h = harness(screens[2]); t.after(() => h.destroy()); h.start(CAMPAIGN[0]);
   const handlers = {}, metrics = screens[2];
   const api = {
@@ -200,6 +200,11 @@ test('native WeChat touch coordinates keep the small-screen target through cappe
   handlers.Move({ touches: [a, { ...b, clientX: b.clientX - 20 }], changedTouches: [b] });
   handlers.End({ touches: [a], changedTouches: [b] });
   handlers.End({ touches: [], changedTouches: [a] });
-  assert.deepEqual(h.game.actions, ['right'], 'the remaining pinch finger cannot emit a tile tap');
-  assert.ok(h.game.camera.zoom > 1);
+  assert.deepEqual(h.game.actions, ['right'], 'the remaining finger cannot emit a tile tap');
+  assert.equal(h.game.camera.zoom, 1);
+  assert.equal(h.game.camera.panX, 0);
+  assert.equal(h.game.camera.panY, 0);
+  handlers.Start({ touches: [a], changedTouches: [a] });
+  handlers.End({ touches: [], changedTouches: [a] });
+  assert.deepEqual(h.game.actions, ['right', 'right'], 'single-finger play resumes after all fingers lift');
 });

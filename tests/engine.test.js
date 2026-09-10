@@ -2,11 +2,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ACTIONS, createState, step, replay, revive, stars, STAR_TWO_MARGIN } = require('../src/engine');
+const { ACTIONS, createState, step, replay, normalizeReviveHistory, revive, stars, STAR_TWO_MARGIN } = require('../src/engine');
 const { CAMPAIGN, chapterNames, CONTENT_VERSION, PER_CHAPTER, reserveFor, undoFor } = require('../src/levels');
 const { solve } = require('../tools/solve');
 const { tier, bridgesRequired, HAND_MADE } = require('../tools/generate');
 const { playHint } = require('../src/play-guide');
+const { isReviveRouteBlocked } = require('../src/revive-policy');
 
 // The independent solver is slow on the big late boards, so it checks the hand-made routes plus every sixtieth generated route.
 const independentlySolved = level => level.id <= HAND_MADE || (level.id - 1 - HAND_MADE) % 60 === 0;
@@ -303,7 +304,7 @@ test('win wins over energy failure; merely reaching exit does not finish an inco
   assert.equal(step(unsealed, createState(unsealed), 'right').state.status, 'failed');
 });
 
-test('finished states ignore input, revival is one-time and preserves the route', () => {
+test('finished states ignore input and each new failure can be revived without resetting the route', () => {
   const level = board({ budget: 1 });
   const failed = step(level, createState(level), 'right').state;
   const snapshot = JSON.stringify(failed);
@@ -312,16 +313,66 @@ test('finished states ignore input, revival is one-time and preserves the route'
   assert.equal(revived.energy, 8);
   assert.equal(revived.status, 'playing');
   assert.equal(revived.revived, true);
+  assert.equal(failed.reviveCount, 0);
+  assert.equal(revived.reviveCount, 1);
   assert.equal(revived.player, failed.player);
   assert.deepEqual(revived.history, failed.history);
   assert.equal(JSON.stringify(failed), snapshot);
   assert.equal(revive(level, revived), revived);
-  const failedAgain = { ...revived, status: 'failed', energy: 0 };
-  assert.equal(revive(level, failedAgain), failedAgain);
+  let failedAgain = revived;
+  for (let index = 0; index < revived.energy; index++) failedAgain = step(level, failedAgain, 'wait').state;
+  const revivedAgain = revive(level, failedAgain);
+  assert.equal(revivedAgain.status, 'playing');
+  assert.equal(revivedAgain.reviveCount, 2);
+  assert.equal(revivedAgain.energy, revived.energy);
+  assert.equal(revivedAgain.turn, failedAgain.turn);
+  assert.deepEqual(revivedAgain.history, failedAgain.history);
   assert.equal(revive(board({ budget: 30 }), failed).energy, 15);
   assert.equal(revive(level, createState(level)).revived, false);
   const won = { ...failed, status: 'won' };
   assert.equal(revive(level, won), won);
+});
+
+test('revival rejects the real level 21 dead end even after more energy is granted', () => {
+  const level = CAMPAIGN[20];
+  const failed = replay(level, ['left', 'right', ...Array(level.budget - 2).fill('wait')]);
+  const before = JSON.stringify(failed);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.player, level.start);
+  assert.deepEqual(failed.bridges, []);
+  assert.equal(isReviveRouteBlocked(level, failed), true);
+  assert.equal(isReviveRouteBlocked(level, revive(level, failed)), true, 'extra turns cannot repair the broken return route');
+  assert.equal(JSON.stringify(failed), before, 'eligibility checks preserve the saved route');
+});
+
+test('revival does not reject routes with no torn bridge or an intact bridge under the courier', () => {
+  const first = CAMPAIGN[0], bridge = CAMPAIGN[20];
+  assert.equal(isReviveRouteBlocked(first, replay(first, Array(first.budget).fill('wait'))), false);
+  assert.equal(isReviveRouteBlocked(bridge, createState(bridge)), false);
+  const standing = replay(bridge, ['left']);
+  assert.ok(standing.bridges.includes(standing.player));
+  assert.equal(isReviveRouteBlocked(bridge, standing), false);
+});
+
+test('the useful side of the same torn bridge remains eligible for extra turns', () => {
+  const level = CAMPAIGN[20];
+  const failed = replay(level, ['left', 'left', ...Array(level.budget - 2).fill('wait')]);
+  assert.equal(failed.status, 'failed');
+  assert.deepEqual(failed.bridges, []);
+  assert.equal(isReviveRouteBlocked(level, failed), false);
+});
+
+test('a real pending echo beyond torn bridges does not suppress revival', () => {
+  const level = CAMPAIGN[100], actions = level.solution.slice(0, 30);
+  let state = replay(level, actions);
+  assert.deepEqual(state.bridges, []);
+  assert.ok(state.seals.includes(45));
+  assert.equal(state.history[state.turn - 2], 45, 'the oldest pending echo lands on the next action');
+  assert.equal(isReviveRouteBlocked(level, state), false, 'the echo can collect the unreachable stamp');
+  state = step(level, state, level.solution[30]).state;
+  assert.equal(state.seals.includes(45), false);
+  for (const action of level.solution.slice(31)) state = step(level, state, action).state;
+  assert.equal(state.status, 'won', 'the unchanged real route can still finish');
 });
 
 test('steps leave their inputs unchanged and serializable for local saves', () => {
@@ -346,6 +397,11 @@ test('three-star targets and revival cap apply at their exact boundaries', () =>
   assert.equal(stars(board({ par: 40 }), { turn: 43, revived: false }), 1);
   assert.equal(stars(level, { turn: 10, revived: true }), 2);
   assert.equal(stars(level, { turn: 15, revived: true }), 1);
+  for (const reviveCount of [1, 2, 10]) {
+    assert.equal(stars(level, { turn: 10, revived: true, reviveCount, energy: 999 }), 2);
+    assert.equal(stars(level, { turn: 12, revived: true, reviveCount, energy: 1 }), 2);
+    assert.equal(stars(level, { turn: 13, revived: true, reviveCount, energy: 999 }), 1);
+  }
 });
 
 test('paper bridges tear once the courier leaves them and never block the echo', () => {
@@ -416,8 +472,46 @@ test('replay rebuilds any state from its action history and rejects impossible h
   assert.throws(() => replay(level, ['right', 'wait'], 1), /invalid revive/);
   const revived = replay(level, ['right', 'wait', 'wait', 'right'], 3);
   assert.equal(revived.revived, true);
+  assert.equal(revived.reviveCount, 1);
   assert.equal(revived.turn, 4);
   assert.deepEqual(revived.history, [0, 1, 1, 1, 2]);
+});
+
+test('ordered revival histories replay every completed reward and keep legacy single-revival saves', () => {
+  const level = board({ letters: [1], budget: 3 });
+  const actions = ['right', 'wait', 'wait', ...Array(8).fill('wait'), 'right'];
+  const history = Object.freeze([3, 11]);
+  const state = replay(level, actions, history);
+  assert.equal(state.status, 'playing');
+  assert.equal(state.reviveCount, 2);
+  assert.equal(state.revived, true);
+  assert.equal(state.turn, actions.length);
+  assert.equal(state.energy, 7);
+  assert.deepEqual(state.letters, []);
+  assert.equal(replay(level, actions.slice(0, 11), history).reviveCount, 2, 'the final saved index can be a just-earned revival');
+  assert.deepEqual(replay(level, actions.slice(0, 4), 3), replay(level, actions.slice(0, 4), [3]));
+  assert.deepEqual(replay(level, [], null), replay(level, [], []));
+  assert.throws(() => replay(level, actions, [3, 10]), /invalid revive/, 'each reward must occur at an actual failure');
+  assert.throws(() => replay(level, actions, [3]), /invalid action/, 'missing later rewards cannot bypass failure');
+});
+
+test('revival history normalization rejects malformed, repeated, unordered and sparse indexes', () => {
+  assert.deepEqual(normalizeReviveHistory(undefined, 0), []);
+  assert.deepEqual(normalizeReviveHistory(null, 0), []);
+  assert.deepEqual(normalizeReviveHistory(0, 0), [0]);
+  const valid = [0, 3, 11], copied = normalizeReviveHistory(valid, 11);
+  assert.deepEqual(copied, valid);
+  assert.notEqual(copied, valid);
+  const sparse = [3, 11]; delete sparse[0];
+  for (const value of [-1, 12, 1.5, NaN, '3', {}, true, [3, 3], [11, 3], [-1], [12], [1.5], [null], sparse]) {
+    assert.throws(() => normalizeReviveHistory(value, 11), /invalid revive/);
+  }
+  let getters = 0;
+  const accessor = [];
+  Object.defineProperty(accessor, '0', { enumerable: true, get() { getters++; return 3; } });
+  assert.throws(() => normalizeReviveHistory(accessor, 11), /invalid revive/);
+  assert.equal(getters, 0);
+  assert.throws(() => normalizeReviveHistory([], -1), /invalid revive/);
 });
 
 test('bridge routes tear their bridges on the witness and cannot be crossed twice', () => {

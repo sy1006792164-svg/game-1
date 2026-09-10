@@ -1,5 +1,7 @@
 'use strict';
 
+const { normalizeReviveHistory } = require('./engine');
+
 const PROFILE_KEY = 'minigame.local.profile.v1';
 const RUN_KEY = 'minigame.local.run.v1';
 const DEV_PROFILE_KEY = 'minigame.development.profile.v1';
@@ -43,6 +45,10 @@ function score(value) {
   return { stars: value.stars, bestTurns: value.bestTurns };
 }
 
+function bestScore(before, stars, turns) {
+  return { stars: Math.max(before ? before.stars : 0, stars), bestTurns: Math.min(before ? before.bestTurns : Infinity, turns) };
+}
+
 function profileFrom(value) {
   const next = defaults();
   if (!plain(value) || value.version !== 1) return next;
@@ -81,6 +87,11 @@ function cleanJson(value) {
     const out = Array.isArray(item) ? [] : {};
     const keys = Object.keys(item);
     if (keys.length > 5000) throw new Error('Save data is too large.');
+    // Sparse arrays would silently lose trailing turns when copied or become
+    // null entries after JSON serialization. Accept only real JSON sequences.
+    if (Array.isArray(item) && (keys.length !== item.length || keys.some((key, index) => key !== String(index)))) {
+      throw new Error('Invalid save array.');
+    }
     keys.forEach(function (key) {
       if (BAD_KEYS.indexOf(key) !== -1) return;
       const descriptor = Object.getOwnPropertyDescriptor(item, key);
@@ -100,9 +111,14 @@ function runFrom(value) {
     const run = cleanJson(value);
     if (!plain(run) || typeof run.mode !== 'string' || !safeId(run.mode) ||
         !(safeId(run.levelId) || (Number.isInteger(run.levelId) && run.levelId >= 0 && run.levelId <= 100000))) return null;
+    const hasRevivalHistory = own(run, 'reviveHistory');
+    if (hasRevivalHistory && !Array.isArray(run.reviveHistory)) return null;
+    if (!hasRevivalHistory && run.reviveAt != null && !Number.isInteger(run.reviveAt)) return null;
     const hasHistory = Array.isArray(run.actions) && run.actions.length <= 4096 &&
-      run.actions.every(function (action) { return ['up', 'down', 'left', 'right', 'wait'].indexOf(action) !== -1; }) &&
-      (run.reviveAt == null || (Number.isInteger(run.reviveAt) && run.reviveAt >= 0 && run.reviveAt <= run.actions.length));
+      run.actions.every(function (action) { return ['up', 'down', 'left', 'right', 'wait'].indexOf(action) !== -1; });
+    if (hasHistory) normalizeReviveHistory(hasRevivalHistory ? run.reviveHistory : run.reviveAt, run.actions.length);
+    // A legacy state snapshot must not bypass validation of a supplied route.
+    if ((own(run, 'actions') || hasRevivalHistory || run.reviveAt != null) && !hasHistory) return null;
     if (run.undosUsed != null && !(Number.isInteger(run.undosUsed) && run.undosUsed >= 0 && run.undosUsed <= 99)) return null;
     if (!plain(run.state) && !hasHistory) return null;
     if (run.mode !== 'campaign') return null;
@@ -118,9 +134,41 @@ function createStore(adapter, options = {}) {
   // Bumped on in-memory changes so callers can cache snapshots between frames.
   let revision = 0;
   const dirty = new Set();
+  const unread = new Set();
+  let guideDismissedChanged = false, runChanged = false, runRejected = false;
   function failure(message) { status = { persisted: false, message }; }
+  function readFailed(key, error) {
+    if (error instanceof SyntaxError) { save(key); return; }
+    // A failed read does not prove the stored value is missing or corrupt.
+    unread.add(key); dirty.add(key);
+    failure('本地进度暂时无法读取，已保留原存档；当前进度暂存于内存。');
+  }
+  function recoverRead(key) {
+    if (!unread.has(key)) return;
+    let stored;
+    try { stored = adapter.get(key); }
+    catch (error) { if (!(error instanceof SyntaxError)) throw error; }
+    if (key === profileKey) {
+      let clean;
+      try { clean = cleanJson(stored); } catch (_) { clean = null; }
+      const recovered = profileFrom(clean);
+      // Apply real play since the failed read without erasing older records.
+      ['completed', 'daily'].forEach(name => Object.keys(profile[name]).forEach(id => {
+        const record = profile[name][id];
+        recovered[name][id] = bestScore(own(recovered[name], id) ? recovered[name][id] : null, record.stars, record.bestTurns);
+      }));
+      if (profile.mechanicGuides) recovered.mechanicGuides = { ...recovered.mechanicGuides, ...profile.mechanicGuides };
+      if (guideDismissedChanged) {
+        if (profile.guideDismissed) recovered.guideDismissed = true;
+        else delete recovered.guideDismissed;
+      }
+      profile = profileFrom(recovered);
+    } else if (!runChanged) run = runFrom(stored);
+    unread.delete(key); revision += 1;
+  }
   function writePending(key) {
     try {
+      recoverRead(key);
       // Read current memory on every attempt; never replay an older queued save.
       const value = key === profileKey ? profile : run;
       if (key === runKey && value === null) {
@@ -128,7 +176,7 @@ function createStore(adapter, options = {}) {
         catch (_) { adapter.set(key, null); }
       } else adapter.set(key, cleanJson(value));
       dirty.delete(key);
-      if (!dirty.size) status = { persisted: true, message: '' };
+      if (!dirty.size && !runRejected) status = { persisted: true, message: '' };
       return true;
     } catch (_) {
       failure('本地存储不可用，当前进度暂存于内存，关闭后可能丢失。');
@@ -138,7 +186,7 @@ function createStore(adapter, options = {}) {
   function flush() {
     // Each pending key gets one attempt, even if storage is still unavailable.
     Array.from(dirty).forEach(writePending);
-    return !dirty.size;
+    return !dirty.size && !runRejected;
   }
   function save(key) {
     revision += 1;
@@ -155,20 +203,14 @@ function createStore(adapter, options = {}) {
       profile = profileFrom(clean);
       if (JSON.stringify(profile) !== JSON.stringify(clean)) save(profileKey);
     }
-  } catch (_) {
-    // JSON decode errors and denied storage both arrive here. A successful
-    // replacement repairs corrupt bytes; a rejected write keeps memory usable.
-    save(profileKey);
-  }
+  } catch (error) { readFailed(profileKey, error); }
   try {
     const stored = adapter.get(runKey);
     if (stored != null && stored !== '') {
       run = runFrom(stored);
       if (!run) save(runKey);
     }
-  } catch (_) {
-    save(runKey);
-  }
+  } catch (error) { readFailed(runKey, error); }
   function snapshot() { return cleanJson(profile); }
   return {
     getProfile: snapshot,
@@ -177,6 +219,7 @@ function createStore(adapter, options = {}) {
     flush,
     setGuideDismissed: function (dismissed) {
       if (typeof dismissed !== 'boolean') return false;
+      guideDismissedChanged = true;
       if (dismissed) profile.guideDismissed = true;
       else delete profile.guideDismissed;
       return save(profileKey);
@@ -194,27 +237,29 @@ function createStore(adapter, options = {}) {
       const map = profile.completed;
       const before = own(map, id) ? map[id] : null;
       if (!before && Object.keys(map).length >= 1000) return snapshot();
-      map[id] = {
-        stars: Math.max(before ? before.stars : 0, stars),
-        bestTurns: Math.min(before ? before.bestTurns : Infinity, turns),
-      };
+      map[id] = bestScore(before, stars, turns);
       if (!before) profile.totalWins += 1;
       save(profileKey);
       return snapshot();
     },
     saveRun: function (value) {
       const next = runFrom(value);
-      if (!next) return false;
-      run = next;
+      if (!next) {
+        runRejected = true;
+        failure('当前路线无法保存，原存档已保留；本次进度仅在运行期间保留。');
+        return false;
+      }
+      run = next; runChanged = true; runRejected = false;
       return save(runKey);
     },
     loadRun: function () { return run ? cleanJson(run) : null; },
-    clearRun: function () { run = null; return save(runKey); },
+    clearRun: function () { run = null; runRejected = false; unread.delete(runKey); return save(runKey); },
     reset: function () {
       profile = defaults(); run = null;
-      const removed = save(runKey);
-      const saved = save(profileKey);
-      return removed && saved;
+      unread.clear(); guideDismissedChanged = false; runChanged = false; runRejected = false;
+      save(runKey);
+      save(profileKey);
+      return !dirty.size;
     },
   };
 }

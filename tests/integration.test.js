@@ -110,6 +110,7 @@ function harness(options = {}) {
     act(action) { now += 200; game.act(action); },
     start(level = CAMPAIGN[0], mode = 'campaign') { game.start(level, mode); },
     closeAd(ended) { Array.from(closeListeners).forEach(handler => handler({ isEnded: ended })); },
+    failAd(error) { Array.from(errorListeners).forEach(handler => handler(error)); },
     destroy() { game.ads.destroy(); game.sound.release(); }
   };
 }
@@ -143,63 +144,129 @@ test('new mechanics use two actual board taps on small phones without spending a
   }
 });
 
-test('new mechanic stages restore, retry and skip independently of first-route preferences', t => {
+test('new mechanic appearances persist across relaunch, retry and skip independently of first-route preferences', t => {
   const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
   h.game.store.setGuideDismissed(true); h.start(CAMPAIGN[19]);
   assert.deepEqual(h.game.mechanicGuide.ids, ['wind', 'bridge', 'light']);
+  assert.deepEqual(h.game.profile().mechanicGuides, { wind: true }, 'record the first displayed type before confirmation');
   h.game.advanceMechanicGuide();
   const resumed = harness({ mechanics: true, development: true, data: h.data }); t.after(() => resumed.destroy());
   assert.equal(resumed.game.restore(), true);
-  assert.equal(resumed.game.guideStep().step, 2);
-  assert.equal(resumed.game.guideStep().mechanic, 'wind');
+  assert.equal(resumed.game.guideStep().step, 1);
+  assert.equal(resumed.game.guideStep().mechanic, 'bridge', 'relaunch skips the already displayed wind and introduces the next unseen type');
+  assert.deepEqual(resumed.game.profile().mechanicGuides, { wind: true, bridge: true });
   resumed.game.start(resumed.game.level);
-  assert.equal(resumed.game.guideStep().step, 1, 'retry restarts an uncompleted inspection');
+  assert.equal(resumed.game.guideStep().mechanic, 'light', 'retry skips the displayed bridge and introduces the next unseen type');
+  assert.deepEqual(resumed.game.profile().mechanicGuides, { wind: true, bridge: true, light: true });
   resumed.game.dismissGuide();
-  assert.equal(resumed.game.guideStep().mechanic, 'bridge', 'skip marks only the displayed mechanic');
-  assert.deepEqual(resumed.game.profile().mechanicGuides, { wind: true });
-  resumed.game.advanceMechanicGuide(); resumed.game.advanceMechanicGuide();
-  assert.equal(resumed.game.guideStep().mechanic, 'light');
-  resumed.game.advanceMechanicGuide(); resumed.game.advanceMechanicGuide();
   assert.equal(resumed.game.guideStep(), null);
   resumed.game.start(resumed.game.level);
   assert.equal(resumed.game.guideStep(), null, 'confirmed mechanics do not reopen on retry');
   assert.equal(resumed.game.profile().guideDismissed, true, 'first-route preference is independent');
 });
 
-test('manual mechanic review survives relaunch at its current item and preserves an existing route through undo', t => {
+test('pausing a first paper bridge explanation preserves its type, phase and remaining new mechanics', t => {
+  for (const level of [CAMPAIGN[15], CAMPAIGN[19]]) {
+    const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
+    h.game.store.markMechanicSeen('wind'); h.start(level);
+    const route = clone(h.game.state);
+    for (let phase = 0; phase < 2; phase++) {
+      const lesson = clone(h.game.mechanicGuide);
+      assert.equal(h.game.guideStep().mechanic, 'bridge');
+      assert.equal(h.game.guideStep().step, phase + 1);
+      h.game.pause();
+      assert.equal(h.game.modal.buttons.some(button => /道具引导|回看/.test(button.text)), false);
+      h.game.modal.buttons.find(button => button.text === '玩法说明').action();
+      assert.equal(h.game.modal.kind, 'help');
+      assert.deepEqual(h.game.mechanicGuide, lesson, 'reading static rules preserves the active introduction');
+      h.game.modal.buttons.find(button => button.text === '明白了').action();
+      assert.equal(h.game.modal.kind, 'pause');
+      h.game.modal.buttons.find(button => button.text === '继续投递').action();
+      assert.equal(h.game.modal, null);
+      assert.deepEqual(h.game.mechanicGuide, lesson, 'pause must not rebuild the queue from wind or reset its phase');
+      assert.deepEqual(h.game.state, route);
+      assert.equal(h.game.actions.length, 0);
+      assert.deepEqual(h.game.store.loadRun().mechanicGuide, { id: 'bridge', phase });
+      h.game.advanceMechanicGuide();
+    }
+    assert.equal(h.game.guideStep()?.mechanic || null, level.id === 20 ? 'light' : null);
+  }
+});
+
+test('known mechanics are read through current-map help without replay entries or route changes', t => {
+  for (const [id, names] of [[13, ['风口']], [16, ['风口', '纸桥']], [19, ['风口', '风灯']], [20, ['风口', '纸桥', '风灯']]]) {
+    const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
+    ['wind', 'bridge', 'light'].forEach(item => h.game.store.markMechanicSeen(item));
+    h.start(CAMPAIGN[id - 1]); h.act(h.game.level.solution[0]);
+    const route = clone(h.game.state), run = h.game.store.loadRun();
+    assert.equal(h.game.canShowGuide(), false);
+    h.game.pause();
+    assert.deepEqual(h.game.modal.buttons.map(button => button.text), ['继续投递', '重新开始', '玩法说明', '返回邮局']);
+    h.game.showGuide();
+    assert.equal(h.game.modal.kind, 'pause', 'the old guide entry cannot start a manual mechanic replay');
+    h.game.modal.buttons.find(button => button.text === '玩法说明').action();
+    assert.equal(h.game.modal.kind, 'help');
+    const rules = h.game.modal.sections.find(section => section.title === '本关机关').text;
+    for (const name of ['风口', '纸桥', '风灯']) assert.equal(rules.includes(name + '：'), names.includes(name), 'level ' + id + ' rules for ' + name);
+    assert.equal(h.game.guideStep(), null);
+    assert.deepEqual(h.game.state, route);
+    h.game.modal.buttons.find(button => button.text === '明白了').action();
+    assert.equal(h.game.modal.kind, 'pause');
+    h.game.modal.buttons.find(button => button.text === '继续投递').action();
+    assert.equal(h.game.modal, null);
+    assert.equal(h.game.guideStep(), null);
+    assert.deepEqual(h.game.state, route);
+    assert.deepEqual(h.game.store.loadRun(), run);
+  }
+});
+
+test('a retired paper bridge replay save resumes its real route without an introduction or extra undo cost', t => {
   const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
   ['wind', 'bridge', 'light'].forEach(id => h.game.store.markMechanicSeen(id));
   h.start(CAMPAIGN[19]); h.act(h.game.level.solution[0]);
   const route = clone(h.game.state);
-  h.game.pause(); h.game.modal.buttons.find(button => button.text === '操作引导').action();
-  h.game.advanceMechanicGuide(); h.game.advanceMechanicGuide(); h.game.advanceMechanicGuide();
-  assert.equal(h.game.guideStep().mechanic, 'bridge'); assert.equal(h.game.guideStep().step, 2);
+  h.data.set(DEV_RUN_KEY, { ...h.game.store.loadRun(), mechanicGuide: { id: 'bridge', phase: 1, repeat: true } });
   const resumed = harness({ mechanics: true, development: true, data: h.data }); t.after(() => resumed.destroy());
   assert.equal(resumed.game.restore(), true);
-  assert.equal(resumed.game.guideStep().mechanic, 'bridge'); assert.equal(resumed.game.guideStep().step, 2);
+  assert.equal(resumed.game.guideStep(), null, 'removed replay state cannot start wind, bridge or lamp explanations');
+  assert.equal(resumed.game.store.loadRun().mechanicGuide, undefined, 'retired replay metadata is removed immediately');
   assert.deepEqual(resumed.game.state, route);
-  resumed.game.advanceMechanicGuide(); resumed.game.dismissGuide();
-  assert.equal(resumed.game.guideStep(), null);
+  assert.equal(resumed.game.undosUsed, 0);
   resumed.game.undo();
   assert.equal(resumed.game.state.turn, 0);
   assert.equal(resumed.game.guideStep(), null, 'undo preserves acquired knowledge without consuming extra undo credit');
   assert.equal(resumed.game.undosUsed, 1);
 });
 
-test('mechanic inspection on a legacy mid-route save uses the replayed state and survives background pause', t => {
+test('a map without mechanics offers no mechanic review entry', t => {
+  const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
+  h.start(CAMPAIGN[1]);
+  const state = clone(h.game.state);
+  h.game.pause();
+  assert.equal(h.game.modal.buttons.some(button => /道具/.test(button.text)), false);
+  h.game.showGuide();
+  assert.equal(h.game.modal.kind, 'pause');
+  assert.equal(h.game.guideStep(), null);
+  assert.deepEqual(h.game.state, state);
+});
+
+test('mechanic help on a legacy mid-route save preserves its route through background pause', t => {
   const level = CAMPAIGN[18], data = new Map([[DEV_RUN_KEY, { mode: 'campaign', levelId: level.id,
     revision: level.revision || '1', actions: level.solution.slice(0, 3), reviveAt: null, undosUsed: 0 }]]);
   const h = harness({ mechanics: true, development: true, data }); t.after(() => h.destroy());
   assert.equal(h.game.restore(), true);
   const state = clone(h.game.state);
-  h.game.dismissGuide();
-  assert.equal(h.game.guideStep().mechanic, 'light');
-  assert.ok(state.lights.includes(h.game.guideStep().visual.tapCell), 'prefer a lamp that has not already been used');
-  h.game.advanceMechanicGuide(); h.callbacks.hide();
-  assert.equal(h.game.advanceMechanicGuide(), false, 'hidden or paused inspection cannot acknowledge a rule');
+  assert.equal(h.game.guideStep(), null, 'continuing a real legacy route must not introduce its existing props again');
+  h.game.pause(); h.game.modal.buttons.find(button => button.text === '玩法说明').action();
+  const rules = h.game.modal.sections.find(section => section.title === '本关机关').text;
+  assert.match(rules, /风灯：/);
+  assert.doesNotMatch(rules, /纸桥：/);
+  h.game.modal.buttons.find(button => button.text === '明白了').action();
+  h.game.modal.buttons.find(button => button.text === '继续投递').action();
+  h.callbacks.hide();
+  assert.equal(h.game.advanceMechanicGuide(), false);
   h.callbacks.show(); h.game.modal.buttons.find(button => button.text === '继续投递').action();
-  assert.equal(h.game.guideStep().step, 2);
-  h.game.advanceMechanicGuide();
+  assert.equal(h.game.guideStep(), null);
   assert.deepEqual(h.game.state, state);
   assert.equal(h.game.store.loadRun().mechanicGuide, undefined);
 });
@@ -658,6 +725,34 @@ test('ad completion restores music immediately and cancelled or failed ads allow
   }
 });
 
+test('SDK errors during close cleanup or after a completed close cannot change the earned revive', async () => {
+  for (const timing of ['cleanup', 'after-close']) {
+    const h = harness({ withAudio: true }); h.start();
+    while (h.game.state.status === 'playing') h.act('wait');
+    const before = clone(h.game.state);
+    const offClose = h.ad.offClose;
+    h.ad.offClose = handler => {
+      offClose(handler);
+      if (timing === 'cleanup') h.failAd({ errCode: 1003, errMsg: 'SDK error during close cleanup' });
+    };
+    const pending = h.game.requestRevive(); await Promise.resolve();
+    h.closeAd(true);
+    if (timing === 'after-close') h.failAd({ errCode: 1004, errMsg: 'no ad for next preload' });
+    await pending;
+    assert.deepEqual(h.game.state, { ...before, energy: 8, status: 'playing', revived: true, reviveCount: 1 });
+    assert.deepEqual(h.game.store.loadRun().reviveHistory, [before.turn]);
+    assert.equal(h.game.busy, false);
+    assert.equal(h.game.ads.isActive(), false);
+    assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1);
+    while (h.game.state.status === 'playing') h.act('wait');
+    const secondFailure = clone(h.game.state);
+    const retry = h.game.requestRevive(); await Promise.resolve(); h.closeAd(false); await retry;
+    assert.deepEqual(h.game.state, secondFailure, 'a later cancelled ad cannot add another revive');
+    assert.equal(h.showCount, 2, 'the next user request can still display an ad');
+    h.destroy();
+  }
+});
+
 test('an ad timeout cannot unmute a video that has not closed or award a late revive', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const h = harness({ withAudio: true }); h.start();
@@ -925,11 +1020,13 @@ test('closing and relaunching reconstructs the exact active puzzle from saved ac
   h.destroy(); reloaded.destroy();
 });
 
-test('cancelled ads cannot revive, completed ads revive once, and relaunch preserves that spent chance', async () => {
+test('cancelled ads do not revive and the same route can relight repeatedly across relaunches', async () => {
   const h = harness(); h.start();
   for (let index = 0; index < CAMPAIGN[0].budget; index++) h.act('wait');
   assert.equal(h.game.state.status, 'failed');
   const failed = clone(h.game.state);
+  assert.match(h.game.modal.buttons[0].text, /看广告续灯 \+8 拍/);
+  assert.ok(h.game.modal.lines.some(line => line.includes('不限次数')));
   let pending = h.game.requestRevive();
   await Promise.resolve();
   assert.equal(h.game.busy, true);
@@ -945,17 +1042,46 @@ test('cancelled ads cannot revive, completed ads revive once, and relaunch prese
   h.closeAd(true); await pending;
   assert.equal(h.game.state.status, 'playing');
   assert.equal(h.game.state.revived, true);
+  assert.equal(h.game.state.energy, 8);
+  assert.match(h.game.toastText, /已增加 8 拍/);
   assert.equal(h.game.reviveAt, failed.turn);
-  assert.deepEqual(h.game.state.history, failed.history);
+  assert.deepEqual(h.game.state, { ...failed, energy: 8, status: 'playing', revived: true, reviveCount: 1 });
   const reloaded = harness({ data: h.data });
   assert.equal(reloaded.game.restore(), true);
   assert.deepEqual(reloaded.game.state, h.game.state);
-  for (let index = 0; index < h.game.state.energy; index++) reloaded.act('wait');
-  assert.equal(reloaded.game.state.status, 'failed');
-  assert.equal(reloaded.game.modal.buttons.some(button => button.text.includes('看视频')), false);
-  await reloaded.game.requestRevive();
-  assert.equal(reloaded.showCount, 0);
-  h.destroy(); reloaded.destroy();
+  for (let count = 2; count <= 3; count++) {
+    while (reloaded.game.state.status === 'playing') reloaded.act('wait');
+    assert.equal(reloaded.game.modal.buttons.some(button => button.text.includes('看广告')), true);
+    const before = clone(reloaded.game.state);
+    pending = reloaded.game.requestRevive(); await Promise.resolve();
+    reloaded.closeAd(true); await pending;
+    assert.deepEqual(reloaded.game.state, { ...before, energy: 8, status: 'playing', reviveCount: count });
+    assert.equal(reloaded.game.reviveHistory.length, count);
+    assert.deepEqual(reloaded.game.store.loadRun().reviveHistory, reloaded.game.reviveHistory);
+  }
+  assert.equal(reloaded.showCount, 2);
+  const resumed = harness({ data: reloaded.data });
+  assert.equal(resumed.game.restore(), true);
+  assert.deepEqual(resumed.game.state, reloaded.game.state);
+  assert.deepEqual(resumed.game.reviveHistory, reloaded.game.reviveHistory);
+  resumed.game.help();
+  assert.ok(resumed.game.modal.sections.some(section => /已续灯 3 次/.test(section.text)));
+  resumed.game.modal.buttons[0].action();
+  const boundary = resumed.game.state.turn;
+  resumed.act('right'); resumed.game.undo();
+  assert.equal(resumed.game.state.turn, boundary);
+  assert.equal(resumed.game.state.reviveCount, 3);
+  assert.equal(resumed.game.canUndo(), false, 'undo stops at the most recent relight');
+  CAMPAIGN[0].solution.forEach(action => resumed.act(action));
+  assert.equal(resumed.game.state.status, 'won');
+  assert.equal(resumed.game.modal.stars, 1);
+  assert.ok(resumed.game.modal.lines.some(line => /续灯 3 次/.test(line)));
+  assert.ok(resumed.game.modal.lines.some(line => /总拍数超过.*本次获一星/.test(line)));
+  assert.equal(resumed.game.profile().completed['1'].bestTurns, boundary + CAMPAIGN[0].par);
+  assert.equal(resumed.game.profile().totalWins, 1);
+  assert.equal(resumed.game.unlocked(1), true);
+  assert.equal(resumed.game.store.loadRun(), null);
+  h.destroy(); reloaded.destroy(); resumed.destroy();
 });
 
 test('an unconfigured real-WeChat ad never grants a preview reward', async () => {
@@ -966,6 +1092,101 @@ test('an unconfigured real-WeChat ad never grants a preview reward', async () =>
   assert.equal(h.game.state.revived, false);
   assert.equal(h.showCount, 0);
   assert.match(h.game.toastText, /尚未配置/);
+  h.destroy();
+});
+
+test('an irrecoverable bridge route never offers or starts an ad and can restart for free', async () => {
+  const h = harness({ development: true }), level = CAMPAIGN[20];
+  h.start(level); h.act('left'); h.act('right');
+  while (h.game.state.status === 'playing') h.act('wait');
+  const failed = clone(h.game.state);
+  assert.equal(failed.status, 'failed');
+  assert.ok(h.game.modal.lines.some(line => /补拍也无法送达/.test(line)));
+  assert.equal(h.game.modal.buttons.some(button => /看广告/.test(button.text)), false);
+  await h.game.requestRevive();
+  assert.equal(h.showCount, 0);
+  assert.deepEqual(h.game.state, failed);
+  const retry = h.game.modal.buttons.find(button => /免费再试/.test(button.text));
+  assert.equal(retry.primary, true);
+  retry.action();
+  assert.equal(h.game.state.status, 'playing');
+  assert.deepEqual(h.game.state.bridges, level.bridges);
+  assert.equal(h.game.state.revived, false);
+  h.destroy();
+});
+
+test('a completed ad belongs to its original failed session and cannot reward a restored route', async () => {
+  const h = harness(); h.start();
+  while (h.game.state.status === 'playing') h.act('wait');
+  const session = h.game.session;
+  const pending = h.game.requestRevive(); await Promise.resolve();
+  await h.game.requestRevive();
+  assert.equal(h.showCount, 1, 'repeated requests cannot display a second video');
+  assert.equal(h.game.restore(), true);
+  assert.notEqual(h.game.session, session);
+  const restored = clone(h.game.state);
+  h.closeAd(true); await pending;
+  assert.deepEqual(h.game.state, restored);
+  assert.equal(h.game.state.revived, false);
+  assert.deepEqual(h.game.store.loadRun().reviveHistory, []);
+  assert.equal(h.game.busy, false);
+  h.destroy();
+});
+
+test('a legacy single-relight save upgrades to multiple relights without losing the route', async () => {
+  const level = CAMPAIGN[0], first = level.budget;
+  const h = harness({ data: new Map([[RUN_KEY, { mode: 'campaign', levelId: level.id,
+    revision: level.revision, actions: Array(first + 8).fill('wait'), reviveAt: first, undosUsed: 0 }]]) });
+  assert.equal(h.game.restore(), true);
+  assert.equal(h.game.state.status, 'failed');
+  assert.equal(h.game.state.reviveCount, 1);
+  assert.deepEqual(h.game.reviveHistory, [first]);
+  const pending = h.game.requestRevive(); await Promise.resolve(); h.closeAd(true); await pending;
+  assert.equal(h.game.state.reviveCount, 2);
+  assert.deepEqual(h.game.store.loadRun().reviveHistory, [first, first + 8]);
+  assert.equal(Object.hasOwn(h.game.store.loadRun(), 'reviveAt'), false);
+  h.destroy();
+});
+
+test('relit results use total turns and repeated low-star wins preserve personal bests and rewards', async () => {
+  const h = harness();
+  finishCampaign(h, 1);
+  const before = clone(h.game.profile()), stamps = h.game.album().stamps.filter(stamp => stamp.owned).map(stamp => stamp.id);
+  const { campaignScore } = require('../src/friend-score');
+  const score = campaignScore(before);
+  h.start();
+  for (let count = 0; count < 2; count++) {
+    while (h.game.state.status === 'playing') h.act('wait');
+    const pending = h.game.requestRevive(); await Promise.resolve(); h.closeAd(true); await pending;
+  }
+  const turn = h.game.state.turn;
+  CAMPAIGN[0].solution.forEach(action => h.act(action));
+  assert.equal(h.game.state.turn, turn + CAMPAIGN[0].par);
+  assert.equal(h.game.modal.stars, 1);
+  assert.deepEqual(h.game.profile(), before);
+  assert.deepEqual(campaignScore(h.game.profile()), score);
+  assert.deepEqual(h.game.album().stamps.filter(stamp => stamp.owned).map(stamp => stamp.id), stamps);
+  assert.equal(h.game.modal.lines.some(line => /新邮票/.test(line)), false);
+  h.game.victory();
+  assert.deepEqual(h.game.profile(), before, 'repeated settlement never adds wins or stars');
+  h.destroy();
+});
+
+test('a real route finishing within the two-star limit still earns two stars after relighting', async () => {
+  const h = harness({ development: true }), level = CAMPAIGN[18];
+  h.start(level); h.act('wait'); h.act('wait');
+  let action = 0;
+  while (h.game.state.status === 'playing') h.act(level.solution[action++]);
+  assert.equal(h.game.state.status, 'failed');
+  assert.ok(action < level.solution.length);
+  const pending = h.game.requestRevive(); await Promise.resolve(); h.closeAd(true); await pending;
+  assert.equal(h.game.state.reviveCount, 1);
+  level.solution.slice(action).forEach(move => h.act(move));
+  assert.equal(h.game.state.status, 'won');
+  assert.equal(h.game.state.turn, level.par + 2);
+  assert.equal(h.game.modal.stars, 2);
+  assert.ok(h.game.modal.lines.some(line => /本次获二星/.test(line)));
+  assert.equal(h.game.profile().completed[level.id].stars, 2);
   h.destroy();
 });
 
@@ -1324,7 +1545,7 @@ test('a failed route can be reviewed without spending turns and free retry prese
   for (let index = 0; index < CAMPAIGN[0].budget; index++) h.act('wait');
   const failed = clone(h.game.state), saved = clone(h.game.store.loadRun());
   assert.equal(h.game.modal.buttons[0].primary, true);
-  assert.match(h.game.modal.buttons[0].text, /看视频续灯/, 'with a configured ad the relight leads the failure dialog');
+  assert.match(h.game.modal.buttons[0].text, /看广告续灯/, 'with a configured ad the relight leads the failure dialog');
   assert.ok(h.game.modal.lines.some(line => /最高二星/.test(line)), 'the score limit is disclosed before choosing an ad');
   const retry = h.game.modal.buttons.find(button => /免费再试/.test(button.text));
   assert.ok(retry, 'the free retry always remains available');
@@ -1812,7 +2033,7 @@ test('choosing each introductory route starts it directly without a launch or tu
   h.destroy();
 });
 
-test('a real wind lamp grants three energy and one board effect without a duplicate toast', () => {
+test('a real wind lamp grants three energy and acknowledges its HUD delivery without a duplicate toast', () => {
   const h = harness(); h.start(CAMPAIGN[18]);
   let collected = false;
   for (const action of h.game.level.solution) {
@@ -1826,10 +2047,23 @@ test('a real wind lamp grants three energy and one board effect without a duplic
     assert.equal(h.game.state.lights.includes(light.cell), false);
     assert.equal(h.game.toastUntil, 0);
     h.draw();
-    assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '+3 拍'));
+    assert.equal(h.calls.some(call => call.method === 'fillText' && call.args[0] === '+3 拍'), false,
+      'the gain is printed after the collection flight lands');
+    h.draw(600);
+    const gain = h.calls.find(call => call.method === 'fillText' && call.args[0] === '+3 拍');
+    assert.ok(gain);
+    assert.ok(gain.args[2] < h.game.renderer.boardRect.y, 'the gain belongs to the HUD, outside the board');
+    assert.ok(gain.args[2] + 7 < 143, 'the gain and its text height fit inside the paper card');
+    assert.ok(gain.args[1] > 24 && gain.args[1] < 66, 'the gain sits under its icon, clear of the number and progress ticks');
+    assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '剩余拍数'), 'the counter caption remains stable');
     break;
   }
   assert.equal(collected, true, 'the recorded route must actually collect a wind lamp');
+  h.start(); h.act('wait'); h.draw();
+  const spent = h.calls.find(call => call.method === 'fillText' && call.args[0] === '−1 拍');
+  assert.ok(spent);
+  assert.ok(spent.args[2] + 7 < 143, 'the waiting cost also stays inside the paper card');
+  assert.ok(spent.args[1] > 24 && spent.args[1] < 66, 'the waiting cost uses the same icon column');
   h.destroy();
 });
 

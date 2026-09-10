@@ -25,7 +25,9 @@ function createProjection(level, rect, view) {
   const { minCol, maxCol, minRow, maxRow } = bounds;
   const span = maxCol - minCol + 1 + maxRow - minRow + 1;
   const centerCol = (minCol + maxCol + 1) / 2, centerRow = (minRow + maxRow + 1) / 2;
-  const halfW = Math.min((rect.w - 22) / span, (rect.h - 104) / (span * TILT));
+  // Fill the viewport width, keeping only the camera's impact margin at each edge.
+  const edgePadding = rect.w * .012;
+  const halfW = Math.min((rect.w - edgePadding * 2) / span, (rect.h - 104) / (span * TILT));
   const halfH = halfW * TILT;
   const centerX = rect.x + rect.w / 2, centerY = rect.y + rect.h / 2 + 4;
   const floor = (dx, dy) => [dx, dy];

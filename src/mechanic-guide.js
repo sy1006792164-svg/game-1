@@ -1,6 +1,7 @@
 'use strict';
 
 const { neighbor } = require('./engine');
+const { CAMPAIGN } = require('./levels');
 
 const MECHANICS = ['wind', 'bridge', 'light'];
 const NAMES = { wind: '风口', bridge: '纸桥', light: '风灯' };
@@ -15,14 +16,20 @@ function availableMechanics(level, mode = 'campaign') {
   return mode === 'campaign' ? MECHANICS.filter(id => mechanicCells(level, id).length) : [];
 }
 
-function createMechanicGuide(profile, level, mode, saved, repeat = false) {
-  const available = availableMechanics(level, mode), seen = profile.mechanicGuides || {};
-  let ids = available.filter(id => repeat || !seen[id]);
-  if (repeat && saved && ids.includes(saved.id)) ids = ids.slice(ids.indexOf(saved.id));
+function createMechanicGuide(profile, level, mode) {
+  const available = availableMechanics(level, mode), seen = new Set();
+  MECHANICS.forEach(id => { if (profile.mechanicGuides && profile.mechanicGuides[id] === true) seen.add(id); });
+  // Derive old encounters from actual completed maps, never the highest level number.
+  CAMPAIGN.forEach(map => {
+    const record = profile.completed && profile.completed[map.id];
+    if (record && Number.isInteger(record.stars) && record.stars >= 1 && record.stars <= 3 &&
+        Number.isInteger(record.bestTurns) && record.bestTurns >= 0 && record.bestTurns <= 100000)
+      availableMechanics(map, mode).forEach(id => seen.add(id));
+  });
+  const ids = available.filter(id => !seen.has(id));
   if (!ids.length) return null;
   // The stage is UI state only; never store a synthetic player or route.
-  const phase = saved && saved.id === ids[0] && saved.phase === 1 ? 1 : 0;
-  return { ids, phase, repeat };
+  return { ids, phase: 0 };
 }
 
 function mechanicStep(game) {

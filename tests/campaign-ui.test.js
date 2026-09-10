@@ -223,7 +223,8 @@ test('album touch drags coast without clicking, clipped cards cannot steal heade
   assert.equal(h.game.toastUntil, beforeToast, 'a card clipped behind the section heading is not clickable');
   h.game.collectionScroll.offset = 0; h.draw();
   h.pointer(77, 322, 'start'); h.advance(70); h.pointer(77, 322, 'end');
-  assert.match(h.game.toastText, /第一缕风/);
+  assert.equal(h.game.modal.kind, 'stamp-detail');
+  assert.equal(h.game.modal.stampId, h.game.album().stamps[0].id);
   assert.equal(h.game.collectionScroll.tapped.index, 0);
   h.game.home(); h.advance(100);
   assert.equal(h.game.collectionScroll.touching, false);

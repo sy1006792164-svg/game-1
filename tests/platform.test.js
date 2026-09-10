@@ -14,16 +14,19 @@ function eventTarget(extra) {
   };
 }
 
-function browser() {
+function browser(reducedMotion = false) {
   const saved = new Map();
   const rect = { left: 20, top: 10, width: 390, height: 800 };
   const canvas = eventTarget({ getBoundingClientRect: () => rect, setPointerCapture() {} });
   const doc = eventTarget({ hidden: false, getElementById: id => id === 'game' ? canvas : null });
-  const win = eventTarget({ devicePixelRatio: 4, localStorage: {
+  const motion = { matches: reducedMotion };
+  const win = eventTarget({ devicePixelRatio: 4, matchMedia: query => {
+    assert.equal(query, '(prefers-reduced-motion: reduce)'); return motion;
+  }, localStorage: {
     getItem: key => saved.has(key) ? saved.get(key) : null,
     setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key),
   } });
-  return { canvas, doc, win, saved, rect, platform: createPlatform({ window: win, document: doc }) };
+  return { canvas, doc, win, saved, rect, motion, platform: createPlatform({ window: win, document: doc }) };
 }
 
 test('wheel events route to collection scrolling before board zoom and preserve line/page units', () => {
@@ -73,6 +76,40 @@ test('platform exposes native channel or browser origin development detection', 
   win.location = { protocol: 'https:', hostname: 'game.example.com', search: '?dev=1' };
   assert.equal(createPlatform({ window: win, document: doc }).isDevelopment, false);
   assert.ok(browserCanvas);
+});
+
+test('browser motion preference stays live and memory pressure lowers native effect quality', () => {
+  const reduced = browser(true);
+  assert.equal(reduced.platform.reducedMotion, true);
+  assert.equal(reduced.platform.effectsQuality, 'high');
+  reduced.motion.matches = false;
+  assert.equal(reduced.platform.reducedMotion, false);
+
+  const platform = createPlatform({ wx: { createCanvas: () => ({}) } });
+  assert.equal(platform.reducedMotion, false);
+  assert.equal(platform.effectsQuality, 'high');
+  platform.reduceMemory();
+  assert.equal(platform.effectsQuality, 'low');
+});
+
+test('browser multi-touch neither zooms nor releases a tap and the next single-finger tap works', () => {
+  const { platform, canvas } = browser(); platform.resize();
+  const points = [], zoomed = [];
+  platform.onPointer((...args) => points.push(args), (...args) => zoomed.push(args));
+  const first = { pointerType: 'touch', pointerId: 1, clientX: 120, clientY: 210, button: 0, preventDefault() {} };
+  const second = { ...first, pointerId: 2, clientX: 220 };
+  canvas.emit('pointerdown', first);
+  canvas.emit('pointerdown', second);
+  canvas.emit('pointermove', { ...second, clientX: 320 });
+  canvas.emit('pointermove', { ...second, clientX: 150 });
+  canvas.emit('pointerup', second);
+  canvas.emit('pointermove', { ...first, clientX: 130 });
+  canvas.emit('pointerup', first);
+  assert.deepEqual(zoomed, []);
+  assert.deepEqual(points, [[100, 200, 'start'], [100, 200, 'cancel']]);
+  canvas.emit('pointerdown', first);
+  canvas.emit('pointerup', first);
+  assert.deepEqual(points.slice(2), [[100, 200, 'start'], [100, 200, 'end']]);
 });
 
 test('browser storage roundtrips objects and surfaces corrupt/quota errors to the store', () => {
@@ -125,7 +162,11 @@ test('WeChat reserves capsule/safe area, uses native local storage and single-to
   callbacks.End({ changedTouches: [{ identifier: 7, clientX: 90, clientY: 90 }] });
   callbacks.Move({ changedTouches: [{ identifier: 4, clientX: 20, clientY: 60 }] });
   callbacks.Cancel({ changedTouches: [] });
-  assert.deepEqual(points, [[12, 45, 'start'], [20, 60, 'move'], [20, 60, 'cancel']]);
+  assert.deepEqual(points, [[12, 45, 'start'], [12, 45, 'cancel']]);
+  callbacks.Start({ changedTouches: [{ identifier: 4, clientX: 12, clientY: 45 }] });
+  callbacks.Move({ changedTouches: [{ identifier: 4, clientX: 20, clientY: 60 }] });
+  callbacks.End({ changedTouches: [{ identifier: 4, clientX: 20, clientY: 60 }] });
+  assert.deepEqual(points.slice(2), [[12, 45, 'start'], [20, 60, 'move'], [20, 60, 'end']]);
   off(); assert.deepEqual(callbacks, {});
   platform.storage.set('a', { valid: true });
   assert.equal(data.get('a'), '{"valid":true}', 'native bridge receives a JSON string');

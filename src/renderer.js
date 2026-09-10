@@ -6,17 +6,42 @@ const { drawUiIcon, UI_ICON } = require('./ui-icons');
 const { drawHome } = require('./home-view');
 const { drawStartup, drawPublication } = require('./startup-view');
 const { drawGame } = require('./game-view');
-const { drawLevels } = require('./level-view');
+const { drawLevels, levelChapterAtOffset } = require('./level-view');
 const { drawCollection } = require('./collection-view');
+const { drawStampDetail } = require('./stamp-detail-view');
 const { drawLeaderboard } = require('./leaderboard-view');
 const { drawModal } = require('./modal-view');
 const { RESULT_DELAY_MS } = require('./result-effects');
 const { drawDeveloperPicker } = require('./developer-view');
 const { drawBackdrop } = require('./scene');
+const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
+const { chapterNames } = require('./levels');
+const { chapterMood } = require('./chapter-atmosphere');
 const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑': 'arrow-up', '↓': 'arrow-down', '↗': 'arrow-ne', '↘': 'arrow-se', '↙': 'arrow-sw', '↖': 'arrow-nw', '✓': 'check' });
 const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2, ne: -Math.PI / 4, se: Math.PI / 4, sw: Math.PI * .75, nw: -Math.PI * .75 });
+
+function atmosphereChapter(game, height) {
+  if (game.page === 'game' && game.level) return game.level.chapter || 0;
+  if (game.page === 'levels' && game.levelScroll) return levelChapterAtOffset(game.levelScroll.offset, height);
+  if (['home', 'collection'].includes(game.page) && typeof game.nextLevel === 'function') {
+    const next = game.nextLevel();
+    if (next) return next.chapter || 0;
+  }
+  return 0;
+}
+
+function ambientRect(page, viewport) {
+  const quietTop = { publication: 92, levels: 148, collection: 251, leaderboard: 120 }[page];
+  if (quietTop == null) return viewport;
+  const bottom = viewport.y + viewport.h, y = Math.max(viewport.y, quietTop);
+  return { x: viewport.x, y, w: viewport.w, h: Math.max(0, bottom - y) };
+}
+
 class Renderer {
-  constructor(canvas) { this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.hits = []; this.scale = 1; this.ox = 0; this.oy = 0; this.H = 844; this.safeBottom = 0; }
+  constructor(canvas) {
+    this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.hits = []; this.scale = 1;
+    this.ox = 0; this.oy = 0; this.H = 844; this.safeBottom = 0; this.ambientFreezeAt = null;
+  }
   clearCaches() {
     if (this.wrapCache) this.wrapCache.clear();
     this.boardGeometry = null; this.motionEffects = null;
@@ -31,8 +56,7 @@ class Renderer {
   text(text, x, y, size, color, align, weight) {
     const c = this.ctx, value = String(text);
     this.font(size, weight); c.fillStyle = color || C.ink; c.textAlign = align || 'left'; c.textBaseline = 'middle';
-    // iOS renders several Unicode arrows as colored emoji, even in Canvas.
-    // Draw those symbols as paths while keeping mixed labels aligned as one run.
+    // Vector arrows avoid iOS emoji rendering while retaining text alignment.
     if (!/[→←↑↓↗↘↙↖✓]/.test(value)) { c.fillText(value, x, y); return; }
     const parts = value.split(/([→←↑↓↗↘↙↖✓])/).filter(Boolean);
     const widths = parts.map(part => SYMBOLS[part] ? size : c.measureText(part).width);
@@ -84,7 +108,7 @@ class Renderer {
     return lines.length;
   }
   wrapLines(text, width, size, weight) {
-    // Callers rely on the font being set afterwards; keep that even on a cache hit.
+    // Set the font even on cache hits.
     this.font(size, weight);
     const key = this.ctx.font + '|' + width + '|' + text;
     const cache = this.wrapCache || (this.wrapCache = new Map());
@@ -176,26 +200,47 @@ class Renderer {
     const available = metrics.height - safeTop - safeBottom;
     this.scale = Math.min(metrics.width / 390, available / 700);
     this.H = available / this.scale; this.ox = (metrics.width - 390 * this.scale) / 2; this.oy = safeTop;
-    // Content keeps its safe-area origin; scenery and scrims share the full canvas bounds.
+    // Content respects safe areas; scenery spans the canvas.
     this.viewport = { x: -this.ox / this.scale, y: -safeTop / this.scale,
       w: metrics.width / this.scale, h: metrics.height / this.scale };
     c.setTransform(ratio, 0, 0, ratio, 0, 0);
     c.translate(this.ox, this.oy); c.scale(this.scale, this.scale);
     this.hits = []; this.boardRect = null; this.boardProjection = null; this.collectionRect = null; this.levelRect = null; this.pointer = game.modal ? null : game.pointer;
     this.now = now;
-    this.reducedMotion = false;
+    this.reducedMotion = !!(game.platform && game.platform.reducedMotion);
+    this.effectsQuality = game.platform && game.platform.effectsQuality === 'low' ? 'low' : 'high';
+    this.ambientImpulse = 0;
+    if (!game.modal) this.ambientFreezeAt = null;
+    else if (!Number.isFinite(this.ambientFreezeAt)) this.ambientFreezeAt = now;
+    const backgroundNow = game.modal ? this.ambientFreezeAt : now;
+    this.ambientNow = backgroundNow;
     c.save();
-    drawBackdrop(this, now, game.page === 'game' && game.level ? game.level.chapter || 0 : 0, { reducedMotion: this.reducedMotion });
-    c.globalAlpha = game.page === 'game' ? .08 : game.page === 'home' ? .02 : .87;
+    const treatment = atmosphereTreatment(game.page);
+    const chapter = atmosphereChapter(game, this.H), mood = chapterMood(chapter, chapterNames.length);
+    this.atmosphereMood = mood;
+    drawBackdrop(this, backgroundNow, chapter, { page: game.page,
+      reducedMotion: this.reducedMotion || this.effectsQuality === 'low',
+      quality: this.effectsQuality, strength: treatment.depth, treatment, mood, totalChapters: chapterNames.length });
+    c.globalAlpha = treatment.wash;
     this.scrim(C.paper);
     c.restore();
-    if (game.page === 'startup') drawStartup(this, game, now);
+    if (game.page !== 'startup' && game.page !== 'home' && game.page !== 'game') {
+      drawAmbientOverlay(this, backgroundNow, game.page, ambientRect(game.page, this.viewport), {
+        reducedMotion: this.reducedMotion, quality: this.effectsQuality, treatment, mood,
+        scrollOffset: game.page === 'levels' && game.levelScroll ? game.levelScroll.offset : 0
+      });
+    }
+    // Gameplay keeps real time for short-lived movement and camera feedback;
+    // its decorative layers read ambientNow and remain frozen behind a modal.
+    const pageNow = game.modal && game.page !== 'game' ? backgroundNow : now;
+    this.pageNow = pageNow;
+    if (game.page === 'startup') drawStartup(this, game, pageNow);
     else if (game.page === 'publication') drawPublication(this, game);
-    else if (game.page === 'game') this.game(game, now);
+    else if (game.page === 'game') this.game(game, pageNow);
     else if (game.page === 'levels') this.levels(game);
     else if (game.page === 'collection') this.collection(game);
     else if (game.page === 'leaderboard') drawLeaderboard(this, game);
-    else this.home(game, now);
+    else this.home(game, pageNow);
     if (game.modal !== this.currentModal) { this.currentModal = game.modal; this.modalAt = now; }
     let modalBounds = null;
     if (game.modal) {
@@ -205,21 +250,22 @@ class Renderer {
       const result = game.page === 'game' && game.state &&
         ((kind === 'win' && game.state.status === 'won') || (kind === 'fail' && game.state.status === 'failed')) &&
         Number.isFinite(game.transitionAt) && (game.moveEvents || []).some(event => event && event.type === kind);
-      // Outcome effects belong to the real turn, so reviewing a result cannot restart them.
+      // Reviewing a result must not restart its effects.
       const resultAge = result && !this.reducedMotion ? now - game.transitionAt - RESULT_DELAY_MS : null;
       if (game.modal.kind === 'developer-level') {
         if (game.development) modalBounds = drawDeveloperPicker(this, game);
       }
+      else if (game.modal.kind === 'stamp-detail') modalBounds = drawStampDetail(this, game, now);
       else if (resultAge === null || resultAge >= 0) modalBounds = this.modal(game.modal, now, resultAge);
       else this.modalAt = now;
     }
     if (game.toastUntil > now) {
-      const lines = this.wrapLines(game.toastText, 326, 12);
+      const lines = this.wrapLines(game.toastText, 326, 13);
       const w = Math.min(358, Math.max(...lines.map(line => c.measureText(line).width), 0) + 32), h = 20 + Math.max(1, lines.length) * 18;
-      const preferred = game.page === 'game' ? 231 - h : this.H - 12 - h;
+      const preferred = game.page === 'game' ? Math.max(151, 231 - h) : this.H - 12 - h;
       const y = modalBounds ? Math.max(8, modalBounds.y - h - 12) : preferred;
-      this.round((390 - w) / 2, y, w, h, 12, '#16363bf2', '#7b9280');
-      lines.forEach((line, i) => this.text(line, 195, y + 19 + i * 18, 12, C.white, 'center'));
+      this.panel((390 - w) / 2, y, w, h, { radius: 12, fill: C.panel, stroke: C.line, accent: C.green });
+      lines.forEach((line, i) => this.text(line, 195, y + 19 + i * 18, 13, C.ink, 'center'));
     }
     const status = game.store.getStatus();
     const footerToast = game.toastUntil > now && game.page !== 'game' && !game.modal;

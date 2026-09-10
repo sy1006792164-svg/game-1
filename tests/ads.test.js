@@ -5,7 +5,7 @@ const { createAds } = require('../src/ads');
 
 const config = { REWARDED_AD_UNIT_ID: 'adunit-0123abcd' };
 const flush = async () => { for (let i = 0; i < 12; i += 1) await Promise.resolve(); };
-function setup(overrides) {
+function setup(overrides, onActiveChange) {
   const close = new Set(), error = new Set();
   const calls = { show: 0, load: 0, destroy: 0, created: [] };
   const video = {
@@ -17,7 +17,7 @@ function setup(overrides) {
     ...overrides,
   };
   const platform = { kind: 'wechat', wx: { createRewardedVideoAd: options => { calls.created.push(options); return video; } } };
-  return { platform, video, close, error, calls, ads: createAds(platform, config) };
+  return { platform, video, close, error, calls, ads: createAds(platform, config, onActiveChange) };
 }
 
 test('browser preview and missing ad configuration can never grant a real reward', async () => {
@@ -28,7 +28,89 @@ test('browser preview and missing ad configuration can never grant a real reward
   assert.equal((await createAds({ kind: 'wechat', wx: {} }, config).showRevive()).reason, 'unsupported');
 });
 
-test('only strict isEnded true rewards; listeners detach after each attempt', async () => {
+test('the ad initializes before user input without displaying or muting and is reused', async () => {
+  const active = [];
+  const fixture = setup({}, value => active.push(value));
+  assert.deepEqual(fixture.calls.created, [{ adUnitId: config.REWARDED_AD_UNIT_ID }]);
+  assert.equal(fixture.calls.show, 0);
+  assert.equal(fixture.error.size, 1, 'automatic preloading has an error listener immediately');
+  assert.equal(fixture.ads.isActive(), false);
+  assert.deepEqual(active, []);
+  for (const isEnded of [false, true]) {
+    const pending = fixture.ads.showRevive();
+    await flush();
+    assert.equal(fixture.ads.isActive(), true);
+    Array.from(fixture.close)[0]({ isEnded });
+    assert.equal((await pending).rewarded, isEnded);
+    assert.equal(fixture.ads.isActive(), false);
+  }
+  assert.equal(fixture.calls.created.length, 1);
+  assert.equal(fixture.calls.show, 2);
+  assert.deepEqual(active, [true, false, true, false]);
+  fixture.ads.destroy();
+  assert.equal(fixture.calls.destroy, 1);
+  assert.equal(fixture.error.size, 0);
+});
+
+test('idle and post-close preload errors stay handled without showing ads or spending rewards', async () => {
+  const active = [];
+  const fixture = setup({}, value => active.push(value));
+  const listener = Array.from(fixture.error)[0];
+  listener({ errCode: 1004 });
+  await flush();
+  assert.equal(fixture.calls.show, 0);
+  assert.equal(fixture.calls.load, 0);
+  assert.deepEqual(active, []);
+  for (const isEnded of [false, true]) {
+    const pending = fixture.ads.showRevive();
+    await flush();
+    Array.from(fixture.close)[0]({ isEnded });
+    assert.equal((await pending).rewarded, isEnded);
+    assert.deepEqual(Array.from(fixture.error), [listener], 'one listener survives each close');
+    listener({ errCode: 1004 });
+    await flush();
+    assert.equal(fixture.ads.isActive(), false);
+  }
+  assert.equal(fixture.calls.show, 2);
+  assert.equal(fixture.calls.load, 0);
+  fixture.ads.destroy();
+  assert.equal(fixture.error.size, 0);
+  listener({ errCode: 1004 });
+  assert.equal(fixture.calls.show, 2);
+});
+
+test('an error emitted while the startup listener is registering never starts an ad', async () => {
+  let listener;
+  const fixture = setup({ onError(fn) { listener = fn; fn({ errCode: 1004 }); } });
+  await flush();
+  assert.equal(fixture.calls.show, 0);
+  assert.equal(fixture.calls.load, 0);
+  assert.equal(fixture.ads.isActive(), false);
+  const pending = fixture.ads.showRevive();
+  await flush();
+  listener({ errCode: 1003 });
+  assert.deepEqual(await pending, { rewarded: false, reason: 'error' });
+  fixture.ads.destroy();
+});
+
+test('startup initialization failure can recover on the next user request', async () => {
+  let attempts = 0, close;
+  const video = { show: () => Promise.resolve(), onClose: fn => { close = fn; }, offClose() {}, onError() {}, offError() {} };
+  const ads = createAds({ kind: 'wechat', wx: { createRewardedVideoAd() {
+    attempts += 1;
+    if (attempts === 1) throw new Error('SDK not ready');
+    return video;
+  } } }, config);
+  assert.equal(attempts, 1);
+  const pending = ads.showRevive();
+  await flush();
+  assert.equal(attempts, 2);
+  close({ isEnded: true });
+  assert.equal((await pending).rewarded, true);
+  ads.destroy();
+});
+
+test('only strict isEnded true rewards; close listeners detach and the error listener persists', async () => {
   for (const value of [undefined, {}, { isEnded: false }, { isEnded: 1 }, { isEnded: true }]) {
     const { ads, close, error, calls } = setup();
     assert.equal(ads.isConfigured(), true);
@@ -39,9 +121,10 @@ test('only strict isEnded true rewards; listeners detach after each attempt', as
     handler({ isEnded: true });
     assert.deepEqual(await pending, { rewarded: value && value.isEnded === true || false, reason: value && value.isEnded === true ? 'completed' : 'cancelled' });
     assert.equal(close.size, 0);
-    assert.equal(error.size, 0);
+    assert.equal(error.size, 1);
     assert.deepEqual(calls.created, [config && { adUnitId: config.REWARDED_AD_UNIT_ID }]);
     ads.destroy();
+    assert.equal(error.size, 0);
   }
 });
 
@@ -123,17 +206,54 @@ test('destroy settles pending requests and suppresses late completion', async ()
   assert.deepEqual(await ads.showRevive(), { rewarded: false, reason: 'destroyed' });
 });
 
-test('loading watchdog unlocks a hung SDK and late events cannot issue rewards', async t => {
+test('loading watchdog denies rewards but retains the audio lock until a late close', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const { ads, close } = setup({ show: () => new Promise(() => {}) });
+  const { ads, close, video } = setup({ show: () => new Promise(() => {}) });
+  let cleanupCalls = 0;
+  video.offClose = fn => { cleanupCalls++; close.delete(fn); };
   const pending = ads.showRevive();
   const handler = Array.from(close)[0];
   await flush();
   t.mock.timers.tick(30001);
   assert.deepEqual(await pending, { rewarded: false, reason: 'timeout' });
+  assert.equal(ads.isActive(), true);
+  assert.equal(cleanupCalls, 0);
   handler({ isEnded: true });
+  handler({ isEnded: true });
+  assert.equal(ads.isActive(), false);
+  assert.equal(cleanupCalls, 1);
   ads.destroy();
 });
+
+for (const trigger of ['offClose', 'onActiveChange']) {
+  test('closing keeps its result when ' + trigger + ' synchronously emits another ad error', async () => {
+    for (const isEnded of [true, false]) {
+      const active = [];
+      const fixture = setup({}, value => {
+        active.push(value);
+        if (!value && trigger === 'onActiveChange') Array.from(fixture.error)[0]({ errCode: -1 });
+      });
+      let cleanupCalls = 0;
+      fixture.video.offClose = fn => {
+        cleanupCalls++;
+        fixture.close.delete(fn);
+        if (trigger === 'offClose') Array.from(fixture.error)[0]({ errCode: -1 });
+      };
+      const pending = fixture.ads.showRevive();
+      const close = Array.from(fixture.close)[0];
+      await flush();
+      close({ isEnded });
+      close({ isEnded: true });
+      Array.from(fixture.error)[0]({ errCode: -1 });
+      assert.deepEqual(await pending, { rewarded: isEnded, reason: isEnded ? 'completed' : 'cancelled' });
+      assert.equal(cleanupCalls, 1, 'native cleanup never reenters or repeats for stale callbacks');
+      assert.deepEqual(active, [true, false]);
+      assert.equal(fixture.ads.isActive(), false);
+      fixture.ads.destroy();
+      assert.equal(cleanupCalls, 1);
+    }
+  });
+}
 
 test('a normally playing video is not cancelled by the short loading timeout', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -169,9 +289,9 @@ test('synchronous show/load failures do not escape as unhandled rejections', asy
   showing.ads.destroy();
 });
 
-test('an immediate SDK error during listener registration starts one load and one show', async () => {
+test('an SDK error while a user attempt registers its close listener starts one retry', async () => {
   const fixture = setup();
-  fixture.video.onError = fn => { fixture.error.add(fn); fn({ errCode: 1004 }); };
+  fixture.video.onClose = fn => { fixture.close.add(fn); Array.from(fixture.error)[0]({ errCode: 1004 }); };
   const pending = fixture.ads.showRevive();
   await flush();
   assert.equal(fixture.calls.load, 1);
@@ -200,5 +320,67 @@ test('listener registration failures clean up any already-registered callbacks',
   assert.deepEqual(await fixture.ads.showRevive(), { rewarded: false, reason: 'error' });
   assert.equal(fixture.close.size, 0);
   assert.equal(fixture.calls.show, 0);
+  fixture.ads.destroy();
+});
+
+test('a failed close-listener registration preserves the idle error listener and allows retry', async () => {
+  const fixture = setup();
+  const onClose = fixture.video.onClose;
+  fixture.video.onClose = fn => { onClose(fn); throw new Error('close listener failure'); };
+  assert.deepEqual(await fixture.ads.showRevive(), { rewarded: false, reason: 'error' });
+  assert.equal(fixture.close.size, 0);
+  assert.equal(fixture.error.size, 1);
+  assert.equal(fixture.calls.show, 0);
+  fixture.video.onClose = onClose;
+  const pending = fixture.ads.showRevive();
+  await flush();
+  Array.from(fixture.close)[0]({ isEnded: true });
+  assert.equal((await pending).rewarded, true);
+  fixture.ads.destroy();
+});
+
+test('a failed error-listener registration cleans up and retries without reviving stale handlers', async () => {
+  const registered = new Set();
+  let fails = true, stale;
+  const fixture = setup({
+    onError(fn) { registered.add(fn); if (fails) { stale = fn; throw new Error('registration failed'); } },
+    offError(fn) { registered.delete(fn); }
+  });
+  assert.equal(registered.size, 0);
+  assert.equal(fixture.calls.show, 0);
+  fails = false;
+  const pending = fixture.ads.showRevive();
+  let settled = false; pending.then(() => { settled = true; });
+  await flush();
+  assert.equal(registered.size, 1);
+  stale({ errCode: 1003 });
+  await flush();
+  assert.equal(settled, false);
+  assert.equal(fixture.ads.isActive(), true);
+  Array.from(fixture.close)[0]({ isEnded: true });
+  assert.equal((await pending).rewarded, true);
+  fixture.ads.destroy();
+  assert.equal(registered.size, 0);
+});
+
+test('the persistent error listener releases a timed-out native video without granting a late reward', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fixture = setup();
+  const pending = fixture.ads.showRevive();
+  const close = Array.from(fixture.close)[0];
+  await flush();
+  t.mock.timers.tick(15 * 60 * 1000 + 1);
+  assert.deepEqual(await pending, { rewarded: false, reason: 'timeout' });
+  assert.equal(fixture.ads.isActive(), true);
+  Array.from(fixture.error)[0]({ errCode: 1003 });
+  assert.equal(fixture.ads.isActive(), false);
+  assert.equal(fixture.close.size, 0);
+  assert.equal(fixture.error.size, 1);
+  const next = fixture.ads.showRevive();
+  await flush();
+  close({ isEnded: true });
+  assert.equal(fixture.ads.isActive(), true);
+  Array.from(fixture.close)[0]({ isEnded: false });
+  assert.deepEqual(await next, { rewarded: false, reason: 'cancelled' });
   fixture.ads.destroy();
 });

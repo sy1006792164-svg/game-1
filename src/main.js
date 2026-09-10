@@ -7,9 +7,11 @@ const { createFriendLeaderboard } = require('./friend-leaderboard');
 const { createRankingAuthorization } = require('./ranking-authorization');
 const { campaignScore } = require('./friend-score');
 const { enableSharing } = require('./sharing');
-const { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, createState, step, replay, revive, stars } = require('./engine');
+const { ACTIONS, STAR_TWO_MARGIN, createState, step, replay, normalizeReviveHistory, stars } = require('./engine');
+const reviveFlow = require('./revive-flow');
 const { CAMPAIGN } = require('./levels');
 const { getAlbum } = require('./stamp-album');
+const { handleGameKey } = require('./keyboard-input');
 const { ListScroll } = require('./list-scroll');
 const { levelListLayout, levelProgressOffset } = require('./level-view');
 const { leaderboardRect } = require('./leaderboard-view');
@@ -25,8 +27,9 @@ const { createSound } = require('./sound');
 const { turnFeedback } = require('./feedback');
 const config = require('./config');
 const { publicationLines, StartupLoader } = require('./startup');
+const { helpContent } = require('./help-view');
 
-// Undos per run come from the route itself (levels.undoFor): three on the first chapter, one from route 19 on.
+// Each route supplies its undo allowance through levels.undoFor.
 const DEFAULT_UNDO = 3;
 
 class Game {
@@ -69,41 +72,19 @@ class Game {
     this.page = 'startup'; this.collectionScroll = new ListScroll(); this.levelScroll = new ListScroll(); this.modal = null; this.reviewing = false;
     this.guideEnabled = false;
     this.mechanicGuide = null;
-    this.level = null; this.state = null; this.actions = []; this.reviveAt = null; this.undosUsed = 0;
+    this.level = null; this.state = null; this.actions = []; this.reviveHistory = []; this.undosUsed = 0;
     this.mode = 'campaign'; this.session = 0;
     this.toastText = ''; this.toastUntil = 0; this.transitionAt = 0; this.motionPath = null;
     this.busy = false; this.hidden = false; this.lastFrame = -Infinity; this.pointer = null; this.pendingAction = null; this.blockedAt = null;
     this.metrics = { ...platform.resize() };
     platform.onResize(() => { this.cancelRankingPointer(); this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.setMetrics(platform.resize()); this.lastFrame = -Infinity; });
-    platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor, pan) => this.zoomScene(x, y, factor, pan), (x, y, delta) => this.scrollList(x, y, delta));
+    platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor) => this.zoomScene(x, y, factor), (x, y, delta) => this.scrollList(x, y, delta));
     platform.onKey(key => {
-      if (this.startupActive()) return;
-      this.unlockAudio();
-      if (this.development && this.modal && this.modal.kind === 'developer-level') { this.developmentKey(key); return; }
-      if (this.rankingInteractive()) {
-        const delta = { ArrowUp: -100, ArrowDown: 100, PageUp: -340, PageDown: 340, ' ': 340 }[key];
-        if (key === 'Home' || key === 'End') {
-          if (this.pointer && this.pointer.ranking) this.cancelRankingPointer();
-          this.friendLeaderboard.scroll(key === 'Home' ? 'start' : 'end', this.platform.now()); return;
-        }
-        if (delta) {
-          if (this.pointer && this.pointer.ranking) this.cancelRankingPointer();
-          this.friendLeaderboard.wheel(delta, this.platform.now()); return;
-        }
+      const page = this.page, modal = this.modal, session = this.session;
+      handleGameKey(this, key);
+      if (page !== this.page || modal !== this.modal || session !== this.session) {
+        this.pointer = null; this.renderer.hits = []; this.lastFrame = -Infinity;
       }
-      const scroll = this.listScroll();
-      if (scroll && !this.modal && !this.busy) {
-        const delta = { ArrowUp: -100, ArrowDown: 100, PageUp: -340, PageDown: 340, ' ': 340 }[key];
-        if (key === 'Home' || key === 'End') { this.pointer = null; scroll.stop(); scroll.offset = key === 'Home' ? 0 : scroll.max; return; }
-        if (delta) { this.pointer = null; scroll.wheel(delta, this.platform.now()); return; }
-      }
-      if (key === 'Escape') { if (!this.busy && this.page === 'game') this.pause(); return; }
-      let action = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right', ' ': 'wait', Space: 'wait' }[key];
-      if (action && action !== 'wait' && this.page === 'game' && this.renderer.boardProjection) {
-        action = this.renderer.boardProjection.direction(...DIRECTIONS[action]);
-      }
-      if (action) this.act(action);
-      else if (key === 'z' || key === 'Backspace') this.undo();
     });
     platform.onHide(() => {
       this.startupLastAt = null;
@@ -121,21 +102,8 @@ class Game {
     platform.onShow(() => {
       this.startupLastAt = null;
       this.hidden = false;
-      if (this.page === 'leaderboard') this.rankingAuthorization.show();
-      const token = ++this.friendResumeRevision;
-      const checking = this.rankingAuthorization.revalidate();
-      if (this.page === 'leaderboard') this.previewRanking();
-      checking.then(settings => {
-        if (token !== this.friendResumeRevision || this.hidden) return;
-        if (!settings) {
-          if (!this.rankingAuthorization.getState().canDisplay) this.friendLeaderboard.revalidate(null);
-          return;
-        }
-        if (!this.rankingAuthorization.getState().enabled) { this.friendLeaderboard.revalidate(null); return; }
-        if (!this.friendLeaderboard.revalidate(settings)) return;
-        this.syncFriendScore();
-        if (this.page === 'leaderboard') this.friendLeaderboard.refresh(); else this.friendLeaderboard.retry();
-      });
+      this.rankingAuthorization.show();
+      this.refreshFriendSession();
       this.pointer = null; this.setMetrics(platform.resize()); this.lastFrame = -Infinity;
       this.syncMusic(); this.sound.resume('hidden');
       if (this.frameId == null) this.loop();
@@ -151,11 +119,12 @@ class Game {
     });
     enableSharing(platform, config);
     this.loop();
+    this.refreshFriendSession();
   }
   startupActive() { return this.page === 'startup' || this.page === 'publication'; }
   setMetrics(metrics) {
     if (this.page === 'publication' && ['width', 'height', 'safeTop', 'safeBottom'].some(key => metrics[key] !== this.metrics[key])) {
-      // A new line wrap can redistribute text across pages; show all of it again.
+      // Reflow restarts publication pages so no text is skipped.
       this.startupPublicationPage = 0; this.startupPublicationPages = 0;
       this.startupPublicationMs = 0; this.startupLastAt = null;
     }
@@ -165,13 +134,13 @@ class Game {
     if (!this.startupActive()) return;
     // Never count time in the background or skip the initial 0% paint.
     if (this.startupLastAt === null) { this.startupLastAt = now; return; }
-    const dt = Math.max(0, Math.min(100, now - this.startupLastAt));
+    const dt = Math.max(0, now - this.startupLastAt);
     this.startupLastAt = now;
     if (this.page === 'startup') {
       this.startup.update(dt);
       if (this.startup.ready) this.finishStartup();
     } else if (this.startupPublicationPages > 0) {
-      this.startupPublicationMs += dt;
+      this.startupPublicationMs += Math.min(100, dt);
       if (this.startupPublicationMs >= 2500) {
         if (this.startupPublicationPage + 1 < this.startupPublicationPages) {
           this.startupPublicationPage++; this.startupPublicationMs = 0;
@@ -189,13 +158,13 @@ class Game {
     if (!this.startupActive() || this.hidden || this.busy || !this.startup.ready) return false;
     if (this.page === 'publication' && (this.startupPublicationMs < 2500 || this.startupPublicationPage + 1 < this.startupPublicationPages)) return false;
     this.page = this.page === 'startup' && this.startupPublication.length ? 'publication' : 'home';
-    // The same pointer release must never activate a button on the next page.
+    // Discard touches crossing the page transition.
     this.pointer = null; this.pendingAction = null; this.renderer.hits = [];
     this.lastFrame = -Infinity;
     if (!this.startupActive()) this.syncMusic();
     return true;
   }
-  /** Snapshots are cloned by the store; reuse one per store revision so a frame never clones the save hundreds of times. */
+  // Reuse cloned snapshots until the store revision changes.
   profile() {
     const revision = this.store.revision();
     if (!this.profileCache || this.profileCache.revision !== revision) this.profileCache = { revision, value: this.store.getProfile() };
@@ -213,17 +182,25 @@ class Game {
   }
   playHint() { return playHint(this, this.platform.now()); }
   guideStep() { return mechanicStep(this) || guideStep(this, this.platform.now()); }
-  canShowGuide() { return canGuide(this.level, this.mode) || availableMechanics(this.level, this.mode).length > 0; }
+  canShowGuide() { return canGuide(this.level, this.mode); }
+  rememberMechanicGuide() {
+    const id = this.mechanicGuide && this.mechanicGuide.ids[0];
+    if (id && !(this.profile().mechanicGuides || {})[id]) this.store.markMechanicSeen(id);
+  }
+  beginMechanicGuide() {
+    this.mechanicGuide = createMechanicGuide(this.profile(), this.level, this.mode);
+    this.rememberMechanicGuide();
+  }
   advanceMechanicGuide(skip = false) {
     if (this.page !== 'game' || this.modal || this.busy || this.hidden || !mechanicStep(this)) return false;
     const lesson = this.mechanicGuide, id = lesson.ids[0];
     this.pendingAction = null; this.pointer = null; this.blockedAt = null; this.toastUntil = 0;
     if (lesson.phase === 0 && !skip) lesson.phase = 1;
     else {
-      this.store.markMechanicSeen(id);
       lesson.ids.shift(); lesson.phase = 0;
       if (!lesson.ids.length) this.mechanicGuide = null;
-      if (skip) this.toast('已跳过' + NAMES[id] + '讲解，可从“操作引导”重看');
+      this.rememberMechanicGuide();
+      if (skip) this.toast('已跳过' + NAMES[id] + '讲解，规则可查“玩法说明”');
     }
     this.renderer.hits = []; this.persist(); this.lastFrame = -Infinity;
     return true;
@@ -243,14 +220,11 @@ class Game {
     this.toast('已跳过引导，点上方“操作引导”可重新开启');
   }
   showGuide() {
-    if (!this.canShowGuide() || this.page !== 'game' || this.busy || !this.state || this.state.status !== 'playing') return;
+    if (!this.canShowGuide() || this.page !== 'game' || this.busy || this.hidden || !this.state || this.state.status !== 'playing') return;
     this.pendingAction = null; this.pointer = null; this.blockedAt = null; this.toastUntil = 0;
-    if (!canGuide(this.level, this.mode)) {
-      this.mechanicGuide = createMechanicGuide(this.profile(), this.level, this.mode, null, true);
-      this.modal = null; this.reviewing = false; this.persist(); this.syncMusic(); return;
-    }
-    this.store.setGuideDismissed(false);
-    this.guideEnabled = true; this.modal = null; this.reviewing = false; this.persist(); this.syncMusic();
+    this.store.setGuideDismissed(false); this.guideEnabled = true;
+    this.modal = null; this.reviewing = false; this.renderer.hits = []; this.lastFrame = -Infinity;
+    this.persist(); this.syncMusic();
   }
   restartGuide() {
     if (!canGuide(this.level, this.mode) || this.page !== 'game' || this.busy || this.hidden) return;
@@ -325,8 +299,8 @@ class Game {
     if (force || enabled !== this.musicActive) { this.musicActive = enabled; this.sound.ambience(enabled); }
   }
   persist() {
-    if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', actions: this.actions.slice(), reviveAt: this.reviveAt, undosUsed: this.undosUsed,
-      ...(this.mechanicGuide ? { mechanicGuide: { id: this.mechanicGuide.ids[0], phase: this.mechanicGuide.phase, repeat: this.mechanicGuide.repeat } } : {}),
+    if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', actions: this.actions.slice(), reviveHistory: this.reviveHistory.slice(), undosUsed: this.undosUsed,
+      ...(this.mechanicGuide ? { mechanicGuide: { id: this.mechanicGuide.ids[0], phase: this.mechanicGuide.phase } } : {}),
       ...(this.guideEnabled ? { guide: true } : {}) });
     else this.store.flush();
   }
@@ -347,18 +321,23 @@ class Game {
         this.toast('路线已升级，已重新出发；通关成绩保留');
         return true;
       }
-      const state = replay(level, run.actions, run.reviveAt);
+      const reviveHistory = normalizeReviveHistory(run.reviveHistory === undefined ? run.reviveAt : run.reviveHistory, run.actions.length);
+      const state = replay(level, run.actions, reviveHistory);
       if (state.status === 'won') throw new Error('already done');
       const undosUsed = run.undosUsed == null ? 0 : run.undosUsed;
       if (!Number.isInteger(undosUsed) || undosUsed < 0 || undosUsed > this.undoLimit(level)) throw new Error('invalid undo count');
       this.level = level; this.state = state; this.previousState = null; this.moveEvents = []; this.motionPath = null;
       this.transitionAt = this.platform.now() - MOVE_MS;
-      this.actions = run.actions.slice(); this.reviveAt = run.reviveAt; this.undosUsed = undosUsed;
+      this.actions = run.actions.slice(); this.reviveHistory = reviveHistory; this.undosUsed = undosUsed;
       this.mode = run.mode; this.page = 'game'; this.session++;
       this.guideEnabled = autoGuide(this.profile(), level, this.mode) ||
         (canGuide(level, this.mode) && run.guide === true && !this.profile().guideDismissed);
-      this.mechanicGuide = createMechanicGuide(this.profile(), level, this.mode, run.mechanicGuide,
-        !!run.mechanicGuide && run.mechanicGuide.repeat === true);
+      if (run.mechanicGuide) this.store.markMechanicSeen(run.mechanicGuide.id);
+      else if (!run.mechanicGuide && run.actions.length)
+        availableMechanics(level, this.mode).forEach(id => this.store.markMechanicSeen(id));
+      // Retired manual reviews restore the real route without reopening a lesson.
+      if (run.mechanicGuide && run.mechanicGuide.repeat === true) { this.mechanicGuide = null; this.persist(); }
+      else this.beginMechanicGuide();
       this.pointer = null; this.camera.enter(this.platform.now());
       this.modal = null; this.reviewing = false;
       if (state.status === 'failed') this.failure();
@@ -374,8 +353,8 @@ class Game {
     this.pendingAction = null; this.blockedAt = null;
     this.level = level; this.mode = mode || 'campaign';
     this.guideEnabled = canGuide(level, this.mode) && (keepGuide || autoGuide(this.profile(), level, this.mode));
-    this.mechanicGuide = createMechanicGuide(this.profile(), level, this.mode);
-    this.state = createState(level); this.previousState = null; this.moveEvents = []; this.motionPath = null; this.actions = []; this.reviveAt = null; this.undosUsed = 0;
+    this.beginMechanicGuide();
+    this.state = createState(level); this.previousState = null; this.moveEvents = []; this.motionPath = null; this.actions = []; this.reviveHistory = []; this.undosUsed = 0;
     this.page = 'game'; this.modal = null; this.reviewing = false; this.session++; this.transitionAt = this.platform.now() - MOVE_MS; this.toastUntil = 0;
     this.pointer = null; this.camera.enter(this.platform.now());
     this.persist(); this.cue('start');
@@ -413,23 +392,24 @@ class Game {
     else if (this.state.status === 'failed') this.failure();
     else if (this.state.player === this.level.exit && (this.state.letters.length || this.state.seals.length)) this.toast(this.playHint());
   }
+  get reviveAt() { return this.reviveHistory.length ? this.reviveHistory[this.reviveHistory.length - 1] : null; }
   undoLeft() { return Math.max(0, this.undoLimit() - this.undosUsed); }
   undoLimit(level = this.level) { return level && Number.isInteger(level.undo) ? level.undo : DEFAULT_UNDO; }
   canUndo() {
-    return this.page === 'game' && !this.modal && !this.busy && !this.reviewing && !!this.state && this.state.status === 'playing' &&
+    return this.page === 'game' && !this.hidden && !this.modal && !this.busy && !this.reviewing && !!this.state && this.state.status === 'playing' &&
       this.undoLeft() > 0 && this.actions.length > (this.reviveAt == null ? 0 : this.reviveAt);
   }
   /** Take back the last turn. The route is rebuilt from history, so undo never invents a state the rules did not produce. */
   undo() {
     this.pendingAction = null; this.blockedAt = null;
     if (mechanicStep(this)) { this.guideMisstep(); return; }
-    if (this.page !== 'game' || this.modal || this.busy || this.reviewing || !this.state || this.state.status !== 'playing') return;
+    if (this.page !== 'game' || this.hidden || this.modal || this.busy || this.reviewing || !this.state || this.state.status !== 'playing') return;
     if (this.undoLeft() <= 0) { this.toast('本程的 ' + this.undoLimit() + ' 次回溯已用完'); return; }
     if (!this.actions.length) { this.toast('已经在起点了'); return; }
     if (this.reviveAt != null && this.actions.length <= this.reviveAt) { this.toast('续灯之前的路，回不去了'); return; }
     const actions = this.actions.slice(0, -1);
     let state;
-    try { state = replay(this.level, actions, this.reviveAt); } catch (_) { return; }
+    try { state = replay(this.level, actions, this.reviveHistory); } catch (_) { return; }
     const undone = step(this.level, state, this.actions[this.actions.length - 1]);
     this.motionPath = [state.player, ...undone.events.filter(event => event.type === 'move' || event.type === 'wind').map(event => event.cell)].reverse();
     this.camera.stopShake();
@@ -449,7 +429,12 @@ class Game {
     const saved = this.store.getStatus().persisted;
     const saveLine = saved ? '本次纪录已保存。' : '本次纪录仅在本次运行保留。';
     const bestLine = !before ? saveLine : this.state.turn < before.bestTurns ? '刷新纪录，比上次少走 ' + (before.bestTurns - this.state.turn) + ' 拍。' : this.state.turn === before.bestTurns ? '追平个人最佳 · ' + before.bestTurns + ' 拍' : '个人最佳 ' + before.bestTurns + ' 拍 · 本次多走 ' + (this.state.turn - before.bestTurns) + ' 拍';
-    const lines = [this.state.turn + ' 拍完成' + (this.state.revived ? ' · 续灯最高二星' : ''), bestLine];
+    const lines = [this.state.turn + ' 拍完成' + (this.state.revived ? ' · 续灯 ' + this.state.reviveCount + ' 次' : ''), bestLine];
+    if (this.state.revived) {
+      const two = this.level.par + STAR_TWO_MARGIN;
+      lines.push(rating === 2 ? '总拍数在 ' + two + ' 拍内，续灯后本次获二星。'
+        : '总拍数超过 ' + two + ' 拍，本次获一星。');
+    }
     if (this.guideEnabled && canGuide(this.level, this.mode)) {
       lines.push('你收信；回声晚 3 次行动，替你收蓝票。', '收齐信和票，再走进邮局就能过关。');
     }
@@ -466,63 +451,10 @@ class Game {
       ]
     };
   }
-  failureHint() {
-    const s = this.state, l = this.level;
-    if (!s.letters.length && !s.seals.length) return '下次为回到邮局留出更多拍数。';
-    if ((l.bridges || []).length && !s.bridges.length) return '纸桥都碎了。先想清楚哪一段只走一次，再踏上去。';
-    if (!s.letters.length) return '先踩过蓝色邮票，再给回声留出三拍。';
-    if (s.lights.length) return '试着把剩余风灯串进路线，每盏补充三拍。';
-    return '先安排远端目标，再把回邮局的路留到最后。';
-  }
-  failure() {
-    this.pendingAction = null; this.toastUntil = 0; this.reviewing = false;
-    const canRevive = this.platform.kind === 'wechat' && this.ads.isConfigured() && !this.state.revived;
-    const remaining = [];
-    if (this.state.letters.length) remaining.push(this.state.letters.length + ' 封信');
-    if (this.state.seals.length) remaining.push(this.state.seals.length + ' 枚邮票');
-    // The one-time relight leads when it is available: the route, collected
-    // letters and stamps all survive, so it is the natural way to finish.
-    this.modal = {
-      kind: 'fail', title: canRevive ? '灯灭了，路线还在' : '换条路线，再寄一次',
-      lines: [remaining.length ? '还差 ' + remaining.join(' / ') : '信笺和邮票已收齐', this.failureHint(),
-        ...(canRevive ? ['续灯保留路线与收集，本次最高二星。'] : [])],
-      buttons: [
-        ...(canRevive ? [{ text: '看视频续灯 +' + Math.max(8, Math.ceil(this.level.budget * .5)) + ' 拍 · 接着送', primary: true, icon: 'lamp', action: () => this.requestRevive() }] : []),
-        { text: '重新规划 · 免费再试', primary: !canRevive, icon: 'restart', action: () => this.start(this.level, this.mode) },
-        { text: '看看刚才的路线', icon: 'route', action: () => { this.modal = null; this.reviewing = true; } },
-        { text: '返回邮局', textOnly: true, action: () => this.home() }
-      ]
-    };
-  }
-  async requestRevive() {
-    if (this.hidden || this.busy || this.ads.isActive() || !this.state || this.state.status !== 'failed' || this.state.revived) return;
-    if (this.platform.kind !== 'wechat') return;
-    if (!this.ads.isConfigured()) {
-      this.toast(config.REWARDED_AD_UNIT_ID ? '当前环境暂不支持激励视频，可直接重新出发' : '激励视频尚未配置，可直接重新出发'); return;
-    }
-    this.busy = true; const session = this.session;
-    this.modal = { title: '正在连接广告', kicker: 'RELIGHT YOUR LANTERN', lines: ['请稍候，完成视频后将回到这条路线。'], buttons: [] };
-    this.sound.suspend('ad'); this.syncMusic();
-    let result;
-    try { result = await this.ads.showRevive(); } catch (_) { result = { rewarded: false, reason: 'error' }; }
-    this.busy = false;
-    if (session === this.session) {
-      if (result.rewarded) this.applyRevive();
-      else {
-        this.failure();
-        this.toast(result.reason === 'cancelled' ? '视频未看完，可重试或重新出发' : '广告暂时不可用，请稍后再试或重新出发');
-      }
-    }
-    this.syncMusic();
-    if (!this.ads.isActive()) this.sound.resume('ad');
-  }
-  applyRevive() {
-    const next = revive(this.level, this.state);
-    if (next === this.state || next.status !== 'playing') return;
-    this.state = next; this.previousState = null; this.reviveAt = this.actions.length;
-    this.moveEvents = []; this.motionPath = null; this.transitionAt = this.platform.now() - MOVE_MS;
-    this.modal = null; this.reviewing = false; this.persist(); this.cue('light'); this.toast('风灯重新亮起，沿途收集已保留');
-  }
+  failureHint() { return reviveFlow.failureHint(this); }
+  failure() { reviveFlow.showFailure(this); }
+  requestRevive() { return reviveFlow.requestRevive(this); }
+  applyRevive() { reviveFlow.applyRevive(this); }
   pause() {
     this.pendingAction = null;
     this.camera.stopShake();
@@ -544,16 +476,8 @@ class Game {
     this.cancelRankingPointer();
     this.pendingAction = null;
     const old = this.modal, l = this.page === 'game' ? this.level : null;
-    const lines = ['点相邻亮格移动，点脚下格或“等一拍”等待。', '你收橙色信笺，晚三拍的回声收蓝色邮票。', '全部收齐后，走到邮局即可过关。'];
-    if (l) {
-      lines.push(this.state.revived ? '本次已续灯，最高二星；' + (l.par + STAR_TWO_MARGIN) + ' 拍内得二星。'
-        : '评分：' + l.par + ' 拍内三星，' + (l.par + STAR_TWO_MARGIN) + ' 拍内二星。');
-      lines.push('双指捏合缩放，放大后拖动；电脑用滚轮。');
-    }
-    if (l && Object.keys(l.winds).length) lines.push('箭头会再推一格，等待不会触发风。');
-    if (l && l.lights.length) lines.push('每盏风灯只补一次，共 3 拍。');
-    if (l && (l.bridges || []).length) lines.push('纸桥离开后就碎，回声可以通过。');
-    this.modal = { kind: 'help', title: '和回声一起送信', lines,
+    this.modal = { kind: 'help', title: '和回声一起送信',
+      ...helpContent(l, this.state ? this.state.reviveCount : 0, this.platform.kind),
       buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
   }
   home() { if (this.busy || this.startupActive()) return; this.cancelRankingPointer(); this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
@@ -571,6 +495,7 @@ class Game {
     if (page === 'levels') this.scrollToProgress();
     if (page === 'collection') this.collectionScroll.reset(this.platform.now());
     if (page === 'leaderboard') {
+      this.friendLeaderboard.suspend();
       this.rankingAuthorization.open().then(() => {
         const state = this.rankingAuthorization.getState();
         if (this.page === 'leaderboard' && !this.hidden && !state.enabled && !state.canDisplay) this.friendLeaderboard.revalidate(null);
@@ -582,6 +507,25 @@ class Game {
   syncFriendScore() {
     if (this.hidden || !this.rankingAuthorization.getState().enabled) return;
     return this.friendLeaderboard.submit(campaignScore(this.profile(), this.rankingProfile));
+  }
+  refreshFriendSession() {
+    const token = ++this.friendResumeRevision;
+    const restoring = !this.rankingAuthorization.getState().profile;
+    this.friendLeaderboard.suspend();
+    const checking = this.rankingAuthorization.revalidate();
+    if (this.page === 'leaderboard') this.previewRanking();
+    return checking.then(settings => {
+      if (token !== this.friendResumeRevision || this.hidden) return;
+      const state = this.rankingAuthorization.getState();
+      if (!settings) {
+        if (!state.canDisplay) this.friendLeaderboard.revalidate(null);
+        return;
+      }
+      if (!state.enabled) { this.friendLeaderboard.revalidate(null); return; }
+      if (!(restoring ? this.friendLeaderboard.restore(settings) : this.friendLeaderboard.revalidate(settings))) return;
+      this.syncFriendScore();
+      if (this.page === 'leaderboard') this.friendLeaderboard.refresh(); else this.friendLeaderboard.retry();
+    });
   }
   previewRanking() {
     if (!this.rankingAuthorization.getState().canDisplay) return false;
@@ -609,8 +553,7 @@ class Game {
   cancelRankingPointer() {
     const pointer = this.pointer;
     if (pointer && pointer.ranking) this.pointer = null;
-    // A cancellation also stops the child's inertia/landing when a modal,
-    // pinch, resize or lifecycle event takes over without an active finger.
+    // Cancellation also stops the child's inertia and rank animation.
     if (this.page === 'leaderboard' || pointer && pointer.ranking) {
       const rect = pointer && pointer.ranking || leaderboardRect(this.renderer.H);
       this.friendLeaderboard.pointer('cancel', pointer && pointer.ranking ? pointer.lastX - rect.x : 0,
@@ -640,20 +583,23 @@ class Game {
     this.pointer = null; scroll.wheel(delta / this.renderer.scale, this.platform.now());
     return true;
   }
-  zoomScene(x, y, factor, pan = { dx: 0, dy: 0 }) {
+  zoomScene(x, y, factor) {
     this.cancelRankingPointer();
     if (this.page !== 'game' || this.modal || this.busy || this.hidden) return;
     const p = this.renderer.toLogical(x, y), b = this.renderer.boardRect;
     if (!b || !insideRect(b, p.x, p.y)) return;
     this.pointer = null; this.pendingAction = null;
-    const dx = pan.dx / this.renderer.scale / b.w, dy = pan.dy / this.renderer.scale / b.h;
-    this.camera.zoomAt(factor, (p.x - b.x - b.w / 2) / b.w - dx, (p.y - b.y - b.h / 2 - 4) / b.h - dy, dx, dy);
+    this.camera.zoomAt(factor, (p.x - b.x - b.w / 2) / b.w, (p.y - b.y - b.h / 2 - 4) / b.h);
     this.cameraMovedAt = this.platform.now();
   }
   pointerEvent(x, y, type) {
     if (this.hidden) { this.cancelRankingPointer(); return; }
     const p = this.renderer.toLogical(x, y);
     if (type === 'cancel') { this.cancelRankingPointer(); this.pointer = null; this.pendingAction = null; this.stopListScrolling(); return; }
+    if (type !== 'start' && this.pointer && !this.pointer.ranking &&
+        (this.pointer.page !== this.page || this.pointer.modal !== this.modal || this.pointer.session !== this.session)) {
+      this.pointer = null; this.stopListScrolling(); return;
+    }
     if (type !== 'start' && this.pointer && this.pointer.ranking) {
       if (!this.rankingInteractive()) { this.cancelRankingPointer(); return; }
       const origin = this.pointer, rect = origin.ranking;
@@ -677,6 +623,7 @@ class Game {
       const list = scroll && !this.modal && !this.busy && rect && insideRect(rect, p.x, p.y) ? this.page : null;
       if (list) scroll.begin(p.y, this.platform.now());
       this.pointer = { ...p, deviceX: x, deviceY: y, list, lastX: p.x, lastY: p.y, time: this.platform.now(), dragging: false,
+        page: this.page, modal: this.modal, session: this.session,
         scene: this.page === 'game' && !this.modal && !this.busy && !this.hidden && b && insideRect(b, p.x, p.y) };
       if (this.pointer.scene) {
         this.pointer.boardTap = captureBoardTap(this.renderer, p);
@@ -704,18 +651,23 @@ class Game {
         return;
       }
     }
+    if (this.pointer && !this.pointer.scene && !this.pointer.list &&
+        Math.hypot(x - this.pointer.deviceX, y - this.pointer.deviceY) > BOARD_DRAG_SLOP) this.pointer.dragging = true;
     if (type !== 'end' || !this.pointer) return;
     const origin = this.pointer; this.pointer = null;
+    if (origin.dragging) return;
     const dx = p.x - origin.x, dy = p.y - origin.y;
     if (!origin.scene && Math.max(Math.abs(dx), Math.abs(dy)) > 25) return;
-    // A short finger release retains its pressed cell even if the floor or prop
-    // moved during a draw. A queued turn changing the board cancels stale presses.
+    // Keep the pressed cell through visual motion; board changes cancel stale taps.
     if (origin.scene && origin.boardState !== this.state) return;
     const pressed = origin.scene && origin.boardTap && insideRect(this.renderer.boardRect, p.x, p.y) ? origin.boardTap : null;
     const hit = pressed || this.renderer.hits.slice().reverse().find(h => containsHit(h, p) && containsHit(h, origin));
     if (hit) {
       const cues = this.cueCount;
       hit.action(p, origin);
+      if (origin.page !== this.page || origin.modal !== this.modal || origin.session !== this.session) {
+        this.renderer.hits = []; this.lastFrame = -Infinity;
+      }
       if (!origin.scene && cues === this.cueCount) this.cue('tap');
       this.syncMusic();
     } else if (origin.scene) this.guideMisstep();
@@ -733,13 +685,16 @@ class Game {
       const pending = this.pendingAction; this.pendingAction = null;
       if (now - pending.at <= 500) this.act(pending.action);
     }
-    const smoothList = !!this.listScroll() && !this.modal;
+    const list = this.listScroll();
+    const activeList = !!list && (list.touching || Math.abs(list.velocity) > 4 || list.wheelTarget !== null ||
+      list.offset < 0 || list.offset > list.max);
+    const smoothList = !!list && !this.modal && (this.platform.effectsQuality !== 'low' || activeList);
     const smoothScene = this.page === 'game' && !this.modal && (
       now - this.transitionAt < MOVE_MS || now - this.camera.enteredAt < INTRO_MS ||
       now - this.camera.shakeAt < SHAKE_MS || now - this.cameraMovedAt < 250 || !!this.pointer);
     const smooth = smoothList || smoothScene || this.rankingInteractive();
     if (this.platform.setFrameRate) this.platform.setFrameRate(smooth ? 60 : 30);
-    // Use every native RAF during a gesture or movement; quiet scenes return to 30 FPS.
+    // Idle scenes use 30 FPS; input and movement use every RAF.
     const frameInterval = this.platform.kind === 'wechat' ? smooth ? 0 : 1000 / 30 : 16;
     if (now - this.lastFrame >= frameInterval - .5) { this.renderer.draw(this, now, this.metrics); this.lastFrame = now; }
     this.frameId = this.platform.raf(() => this.loop());

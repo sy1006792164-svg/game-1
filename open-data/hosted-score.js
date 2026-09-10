@@ -1,29 +1,36 @@
 'use strict';
 
-const { cleanScore, parseScore, mergeScores, serializeScore, DEFAULT_KEY } = require('./leaderboard-data');
+const { isKVDataList, cleanScore, parseScore, mergeScores, serializeScore, DEFAULT_KEY } = require('./leaderboard-data');
 
-// The read and write APIs run together in the open data domain. Keeping the
-// better complete aggregate protects hosted history from an older local save;
-// without a per-level database it cannot combine independent device progress.
+// Keep the better hosted aggregate; this cannot merge per-level device saves.
 function createHostedScoreSync(api, options) {
   const settings = options || {};
   const getKey = typeof settings.key === 'function' ? settings.key : () => DEFAULT_KEY;
+  const canSync = typeof settings.canSync === 'function' ? settings.canSync : () => true;
   const changed = typeof settings.onChange === 'function' ? settings.onChange : () => {};
   const stores = new Map();
   function current() {
     const key = getKey();
-    if (!stores.has(key)) stores.set(key, createStorageKeySync(api, key, state => {
+    if (!stores.has(key)) stores.set(key, createStorageKeySync(api, key, canSync, state => {
       if (getKey() === key) changed(state);
     }));
     return stores.get(key);
   }
-  return { submit: value => current().submit(value), retry: () => current().retry(), getState: () => current().getState() };
+  return { submit: value => current().submit(value), retry: () => current().retry(),
+    pause: () => stores.forEach(store => store.pause()), getState: () => current().getState() };
 }
 
-// Pending work, cached history and late-write repair all belong to the key
-// where they started. Switching environments must never migrate an aggregate.
-function createStorageKeySync(api, key, changed) {
+// Pending writes and late repairs belong to their original storage key.
+function createStorageKeySync(api, key, allowed, changed) {
   let desired = null, generation = 0, flight = null, status = 'idle', message = '', hosted = null;
+  let retryTimer = null, retryAttempt = 0;
+  const retryDelays = [2000, 5000, 15000];
+  function pause() { if (retryTimer) clearTimeout(retryTimer); retryTimer = null; }
+  function retryLater() {
+    if (!allowed() || retryTimer || retryAttempt >= retryDelays.length) return;
+    retryTimer = setTimeout(() => { retryTimer = null; retry(true); }, retryDelays[retryAttempt++]);
+    if (retryTimer && typeof retryTimer.unref === 'function') retryTimer.unref();
+  }
   function createOwnerToken() {
     let suffix = '';
     for (let i = 0; i < 5; i++) suffix += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0');
@@ -42,42 +49,47 @@ function createStorageKeySync(api, key, changed) {
       catch (error) { finish(error || new Error('UNAVAILABLE')); }
     });
   }
-  function retry() {
+  function retry(automatic) {
     if (flight) return flight;
-    if (!desired) return Promise.resolve(false);
+    if (!desired || !allowed()) return Promise.resolve(false);
+    pause(); if (automatic !== true) retryAttempt = 0;
     const startedGeneration = generation;
     status = 'pending'; message = '正在保存微信好友成绩…'; notify();
     flight = (async () => {
-      let readSucceeded = false;
+      let readSucceeded = false, retryable = false;
       try {
         const response = await call('getUserCloudStorage', { keyList: [key] });
-        const list = response && response.KVDataList || [];
-        const existing = Array.isArray(list) && list.find(item => item && item.key === key);
+        // A malformed success is not proof of an empty account history.
+        if (!response || !isKVDataList(response.KVDataList)) throw new Error('INVALID_HISTORY_RESPONSE');
+        const list = response.KVDataList;
+        const existing = list.find(item => item.key === key);
         const oldScore = parseScore(list, key);
         if (existing && !oldScore) throw new Error('UNRECOGNIZED_HISTORY');
         readSucceeded = true;
+        // A late read must not write during suspension or permission checks.
+        if (!allowed()) { message = '等待恢复微信成绩同步'; return false; }
         const best = mergeScores(oldScore, desired);
-        // Prefer the marker read from this WeChat account's own hosted record.
-        // Generate only if absent; a submitted device value may never choose it.
+        // Only this account's hosted record may choose the owner marker.
         best.ownerToken = oldScore && oldScore.ownerToken || createOwnerToken();
         const value = serializeScore(best, key);
         if (!value) throw new Error('INVALID_SCORE');
         if (!existing || existing.value !== value) {
           await call('setUserCloudStorage', { KVDataList: [{ key, value }] }, () => {
-            // A timed-out write may finish after a newer one. Read and merge
-            // again instead of allowing its older value to remain last.
+            // Repair an old write that completed after a newer one.
             generation++; retry();
           });
         }
         hosted = best; desired = mergeScores(best, desired);
-        status = 'saved'; message = '已保存微信托管最佳成绩';
+        status = 'saved'; message = '已保存微信托管最佳成绩'; retryAttempt = 0;
         return true;
-      } catch (_) {
+      } catch (error) {
+        retryable = !/UNRECOGNIZED_HISTORY|INVALID_SCORE|auth|deny|denied|permission/i.test(error && (error.errMsg || error.message) || '');
         status = 'error'; message = readSucceeded ? '成绩暂未保存，可点击重试' : '历史成绩读取失败，未覆盖旧成绩；可重试';
         return false;
       } finally {
         flight = null; notify();
         if (generation !== startedGeneration) retry();
+        else if (retryable) retryLater();
       }
     })();
     return flight;
@@ -89,7 +101,7 @@ function createStorageKeySync(api, key, changed) {
     if (JSON.stringify(merged) !== JSON.stringify(desired)) { desired = merged; generation++; }
     return retry();
   }
-  return { submit, retry, getState: () => ({ status, message, hosted }) };
+  return { submit, retry, pause, getState: () => ({ status, message, hosted }) };
 }
 
 module.exports = { createHostedScoreSync };

@@ -1,6 +1,6 @@
 'use strict';
 
-const { createPinchGesture } = require('./pointer-zoom');
+const { createMultiTouchGuard } = require('./multi-touch');
 const { isDevelopmentEnvironment } = require('./runtime-environment');
 
 // A small platform boundary; game rules never depend on wx or the DOM.
@@ -29,6 +29,10 @@ function createPlatform(environment) {
   if (!canvas) throw new Error('Game canvas is unavailable.');
   let dimensions = { width: 390, height: 844, pixelRatio: 1, safeTop: 0, safeBottom: 0 };
   let lowMemory = false;
+  let reducedMotionQuery = null;
+  if (!api && win && typeof win.matchMedia === 'function') {
+    try { reducedMotionQuery = win.matchMedia('(prefers-reduced-motion: reduce)'); } catch (_) { /* Optional browser preference. */ }
+  }
   let preferredFrameRate = null;
   function setFrameRate(fps) {
     if (!api) return;
@@ -96,15 +100,15 @@ function createPlatform(environment) {
     return Object.assign({}, dimensions);
   }
 
-  // Zoom receives canvas coordinates, a relative scale, and optional center motion.
-  function onPointer(listener, onZoom, onScroll) {
+  // Wheel zoom receives canvas coordinates and a relative scale; touch is single-finger only.
+  function onPointer(listener, onWheelZoom, onScroll) {
     if (typeof listener !== 'function') return function () {};
     let activeId = null;
     let last = null;
     let source = null;
     let lastNativeTouchAt = -Infinity;
     const removeListeners = [];
-    const pinch = typeof onZoom === 'function' ? createPinchGesture(cancelPointer, onZoom) : null;
+    const multiTouch = createMultiTouchGuard(cancelPointer);
 
     function cancelPointer() {
       const point = last;
@@ -113,7 +117,7 @@ function createPlatform(environment) {
       if (wasActive) listener(point ? point.x : 0, point ? point.y : 0, 'cancel');
     }
     function cancel() {
-      if (pinch) pinch.reset();
+      multiTouch.reset();
       cancelPointer();
     }
     function listen(target, name, handler) {
@@ -134,9 +138,9 @@ function createPlatform(environment) {
     }
     function finitePoint(point) { return point && Number.isFinite(point.x) && Number.isFinite(point.y); }
     function listenWheel() {
-      if (!pinch && typeof onScroll !== 'function') return;
+      if (typeof onWheelZoom !== 'function' && typeof onScroll !== 'function') return;
       listen(canvas, 'wheel', function (event) {
-        if ((pinch && pinch.isActive()) || !Number.isFinite(event.deltaY) || event.deltaY === 0) return;
+        if (multiTouch.isActive() || !Number.isFinite(event.deltaY) || event.deltaY === 0) return;
         const point = canvasPoint(event);
         if (!finitePoint(point)) return;
         if (event.preventDefault) event.preventDefault();
@@ -144,7 +148,7 @@ function createPlatform(environment) {
         const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? dimensions.height : 1;
         if (typeof onScroll === 'function' && onScroll(point.x, point.y, event.deltaY * unit)) return;
         const exponent = Math.max(-0.35, Math.min(0.35, -event.deltaY * unit * 0.002));
-        if (typeof onZoom === 'function') onZoom(point.x, point.y, Math.exp(exponent));
+        if (typeof onWheelZoom === 'function') onWheelZoom(point.x, point.y, Math.exp(exponent));
       });
     }
 
@@ -156,7 +160,7 @@ function createPlatform(environment) {
           // In the desktop simulator, a canvas mouse event may subsequently be
           // translated to wx touch at the document. Its existing owner wins.
           if (source === 'mouse') return;
-          if (pinch && pinch.touch(type, event)) { lastNativeTouchAt = now(); return; }
+          if (multiTouch.touch(type, event)) { lastNativeTouchAt = now(); return; }
           const changed = Array.from((event && event.changedTouches) || []);
           const touches = Array.from((event && event.touches) || []);
           const points = changed.length ? changed : touches;
@@ -221,7 +225,7 @@ function createPlatform(environment) {
             // A new left-button down is also a recovery point if an overlay
             // swallowed the previous release. It cannot be a second finger.
             if (source === 'mouse') cancel();
-            if (source !== null || (pinch && pinch.isActive()) || now() - lastNativeTouchAt < 700) return;
+            if (source !== null || multiTouch.isActive() || now() - lastNativeTouchAt < 700) return;
             const point = canvasPoint(event);
             if (!finitePoint(point)) return;
             source = 'mouse'; activeId = 'mouse'; last = point;
@@ -252,12 +256,12 @@ function createPlatform(environment) {
       listen(canvas, name, function (event) {
         if (type === 'start' && event.button != null && event.button !== 0) return;
         const point = canvasPoint(event);
-        if (pinch && (event.pointerType === 'touch' || pinch.isActive())) {
+        if (event.pointerType === 'touch' || multiTouch.isActive()) {
           if (event.preventDefault) event.preventDefault();
           if (type === 'start' && canvas.setPointerCapture) {
             try { canvas.setPointerCapture(event.pointerId); } catch (_) { /* Synthetic pointer. */ }
           }
-          if (pinch.pointer(type, event, point)) return;
+          if (multiTouch.pointer(type, event)) return;
         }
         if (type === 'start') {
           if (activeId !== null || (event.button != null && event.button !== 0)) return;
@@ -349,6 +353,8 @@ function createPlatform(environment) {
   const cancelFrame = env.cancelAnimationFrame || (win && win.cancelAnimationFrame) || canvas.cancelAnimationFrame;
   return {
     kind: api ? 'wechat' : 'browser', wx: api, canvas, resize, onPointer, onKey, onResize, storage, setFrameRate,
+    get reducedMotion() { return !!(reducedMotionQuery && reducedMotionQuery.matches); },
+    get effectsQuality() { return lowMemory ? 'low' : 'high'; },
     isDevelopment: isDevelopmentEnvironment(api, win && win.location),
     onMemoryWarning: function (listener) {
       if (!api || typeof api.onMemoryWarning !== 'function') return function () {};

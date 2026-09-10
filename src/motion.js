@@ -94,7 +94,7 @@ function burst(renderer, x, y, unit, progress, color, seed, paper) {
   }
 }
 
-function drawEffectBatch(renderer, batch, now, point, scale, showLabels) {
+function drawEffectBatch(renderer, batch, now, point, scale) {
   const c = renderer.ctx, age = now - batch.at, events = batch.events;
   events.forEach((event, index) => {
     if (!event || !validCell(event.cell)) return;
@@ -116,7 +116,6 @@ function drawEffectBatch(renderer, batch, now, point, scale, showLabels) {
         c.globalAlpha *= 1 - progress;
         renderer.circle(x, y - scale * .08, scale * (.15 + progress * .48), null, color);
         burst(renderer, x, y - scale * .18, scale, progress, color, seed, paper);
-        if (showLabels) renderer.text(event.type === 'light' ? '+3 拍' : paper ? '纸桥碎了' : '+1', x, y - scale * .52 - progress * 20, paper ? 10 : 14, color, 'center', '600');
       }
     } else if (event.type === 'wind' && age < 600) {
       const progress = age / 600;
@@ -133,7 +132,6 @@ function drawEffectBatch(renderer, batch, now, point, scale, showLabels) {
       c.globalAlpha *= (1 - progress) * .75;
       renderer.circle(x, y, scale * (.13 + progress * .42), null, COLORS.cyan);
       renderer.circle(x, y, scale * (.07 + progress * .29), null, COLORS.gold);
-      if (showLabels) renderer.text('等一拍', x, y - scale * .6 - progress * 12, 10, COLORS.cyan, 'center');
     } else if (event.type === 'echo-born' && age < 780) {
       const progress = age / 780;
       c.globalAlpha *= 1 - progress;
@@ -155,22 +153,8 @@ function drawEffectBatch(renderer, batch, now, point, scale, showLabels) {
       c.beginPath(); c.ellipse(x, y, scale * (.25 + progress * .75), scale * (.1 + progress * .34), 0, 0, TAU);
       c.strokeStyle = color; c.lineWidth = won ? 2 : 1.3; c.stroke();
       if (!failed) burst(renderer, x, y - scale * .5, scale * (won ? 1.5 : .85), progress, color, seed, true);
-      // The destination badge owns the ready/delivered label; these effects stay visual.
-      if (showLabels && failed) renderer.text('灯火熄灭', x, y - scale * .9 - progress * 12, 11, color, 'center', '600');
     }
     c.restore();
-  });
-}
-
-function drawStaticFeedback(renderer, events, age, point, scale) {
-  if (age < 0 || age > 700) return;
-  const labels = { letter: '信笺 +1', seal: '印记 +1', light: '+3 拍', bridge: '纸桥已碎', wait: '等一拍', undo: '已撤回', fail: '灯火熄灭' };
-  const displayed = new Set();
-  events.slice().reverse().forEach(event => {
-    if (!event || !labels[event.type] || !validCell(event.cell) || displayed.has(event.cell)) return;
-    displayed.add(event.cell);
-    const [x, y] = position(point, event.cell);
-    renderer.text(labels[event.type], x, y - scale * .85, 11, event.type === 'undo' || event.type === 'seal' ? COLORS.cyan : COLORS.gold, 'center', '600');
   });
 }
 
@@ -183,7 +167,6 @@ function drawBlocked(renderer, game, now, point, scale, reduced) {
   c.save(); c.globalAlpha *= reduced ? .85 : 1 - progress;
   c.beginPath(); c.ellipse(x, y + 1, scale * (.3 + progress * .09), scale * (.12 + progress * .04), 0, 0, TAU);
   c.strokeStyle = '#f1b189'; c.lineWidth = 1.8; c.stroke();
-  renderer.text('这边不通', x, y - scale * .8, 10, '#f5c099', 'center', '600');
   c.restore();
 }
 
@@ -213,14 +196,10 @@ function drawEffects(renderer, game, now, point, unit, options = {}) {
   buffer.batches = buffer.batches.filter(batch => now >= batch.at && now - batch.at <= 950).slice(-8);
   if (game.reviewing) return;
   const scale = finite(unit) && unit > 0 ? unit : 40;
-  // On delivery, even older collection/wait batches must not write over the result badge.
-  const showLabels = game.state && game.state.status !== 'won';
-  if (showLabels) drawBlocked(renderer, game, now, point, scale, reduced);
-  if (reduced) {
-    if (showLabels) drawStaticFeedback(renderer, game.moveEvents || [], now - game.transitionAt, point, scale);
-    return;
-  }
-  buffer.batches.forEach(batch => drawEffectBatch(renderer, batch, now, point, scale, showLabels));
+  // Text belongs to the fixed feedback row; the board only carries visual effects.
+  if (game.state && game.state.status === 'playing') drawBlocked(renderer, game, now, point, scale, reduced);
+  if (reduced) return;
+  buffer.batches.forEach(batch => drawEffectBatch(renderer, batch, now, point, scale));
 }
 
 module.exports = { MOVE_MS, actorFrame, drawEffects, drawBurst: burst };

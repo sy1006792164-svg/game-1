@@ -2,30 +2,8 @@
 
 const { C } = require('./theme');
 const { insideRect } = require('./board-projection');
-
-const INKS = ['#376f5d', '#a87440', '#3b7b88', '#65754a'];
-
-// The notches are part of the paper silhouette, so no painted holes cover the artwork.
-function stampOutline(c, x, y, w, h) {
-  const notch = 1.65, inset = 10, spacing = 11;
-  c.beginPath(); c.moveTo(x + 3, y);
-  for (let px = x + inset; px < x + w - inset; px += spacing) {
-    c.lineTo(px - notch, y); c.quadraticCurveTo(px, y + notch * 2, px + notch, y);
-  }
-  c.lineTo(x + w - 3, y); c.quadraticCurveTo(x + w, y, x + w, y + 3);
-  for (let py = y + inset; py < y + h - inset; py += spacing) {
-    c.lineTo(x + w, py - notch); c.quadraticCurveTo(x + w - notch * 2, py, x + w, py + notch);
-  }
-  c.lineTo(x + w, y + h - 3); c.quadraticCurveTo(x + w, y + h, x + w - 3, y + h);
-  for (let px = x + w - inset; px > x + inset; px -= spacing) {
-    c.lineTo(px + notch, y + h); c.quadraticCurveTo(px, y + h - notch * 2, px - notch, y + h);
-  }
-  c.lineTo(x + 3, y + h); c.quadraticCurveTo(x, y + h, x, y + h - 3);
-  for (let py = y + h - inset; py > y + inset; py -= spacing) {
-    c.lineTo(x, py + notch); c.quadraticCurveTo(x + notch * 2, py, x, py - notch);
-  }
-  c.lineTo(x, y + 3); c.quadraticCurveTo(x, y, x + 3, y); c.closePath();
-}
+const { drawStampArt } = require('./stamp-art');
+const { openStampDetail } = require('./stamp-detail-view');
 
 function drawSummary(r, game, album) {
   const next = album.next, contentX = 151, contentWidth = 195, contentRight = contentX + contentWidth;
@@ -36,7 +14,7 @@ function drawSummary(r, game, album) {
   r.text(album.stars + ' 星的旅程', 42, 187, 9, C.muted);
   r.line([[130, 112], [130, 188]], '#cbd6c4', 1, [2, 4]);
   if (next) {
-    const held = game.pointer && insideRect({ x: 139, y: 100, w: 220, h: 101 }, game.pointer.x, game.pointer.y);
+    const held = !game.modal && game.pointer && insideRect({ x: 139, y: 100, w: 220, h: 101 }, game.pointer.x, game.pointer.y);
     r.round(139, 101, 219, 99, 12, held ? '#efe0bd' : '#f5ecd7', held ? '#c59c65' : '#dfcba8');
   }
   r.text(next ? '下一枚收藏 · 去送信' : '全套珍藏已集齐', contentX, 114, 10, next ? C.gold : C.green);
@@ -63,42 +41,21 @@ function drawStamp(r, game, stamp, rect, viewport, now) {
     scroll.revealed.set(stamp.index, entering ? now + delay : now - 360);
   }
   if (scroll.touching || scroll.dragged || scroll.wheelTarget !== null) scroll.revealed.set(stamp.index, Math.min(scroll.revealed.get(stamp.index), now - 360));
-  const progress = clamp((now - scroll.revealed.get(stamp.index)) / 360), ease = 1 - Math.pow(1 - progress, 3);
+  const progress = clamp((now - scroll.revealed.get(stamp.index)) / 360);
+  const ease = r.reducedMotion || r.effectsQuality === 'low' ? 1 : 1 - Math.pow(1 - progress, 3);
   const { x, w, h } = rect, y = rect.y + (1 - ease) * 14, c = r.ctx, middle = x + w / 2;
-  const held = game.pointer && !game.pointer.dragging && insideRect(viewport, game.pointer.x, game.pointer.y) && insideRect(rect, game.pointer.x, game.pointer.y);
+  const held = !game.modal && game.pointer && !game.pointer.dragging && insideRect(viewport, game.pointer.x, game.pointer.y) && insideRect(rect, game.pointer.x, game.pointer.y);
   const age = scroll.tapped && scroll.tapped.index === stamp.index ? (now - scroll.tapped.at) / 330 : 2;
-  const bounce = age >= 0 && age < 1 ? Math.sin(age * Math.PI) * .04 : 0;
+  const bounce = !r.reducedMotion && age >= 0 && age < 1 ? Math.sin(age * Math.PI) * .04 : 0;
   const scale = (.97 + ease * .03) * (held ? .97 : 1 + bounce);
-  const owned = stamp.owned, ink = owned ? INKS[stamp.index % INKS.length] : next ? C.gold : '#7e9681';
-  const paper = owned ? '#fffbed' : next ? '#fff0d5' : '#e2eade';
-  const border = held ? owned ? '#86a489' : C.gold : owned ? '#b9c7a9' : next ? '#cba477' : '#b5c9b6';
   c.save();
   c.globalAlpha *= ease * Math.min(clamp((y + h - viewport.y) / 22), clamp((viewport.y + viewport.h - y) / 22));
   c.translate(middle, y + h / 2); c.scale(scale, scale); c.translate(-middle, -y - h / 2);
-  stampOutline(c, x, y + 4, w, h); c.fillStyle = '#496c5120'; c.fill();
-  stampOutline(c, x, y, w, h); c.fillStyle = paper; c.fill(); c.strokeStyle = border; c.lineWidth = held ? 1.8 : next ? 1.3 : .8; c.stroke();
-  r.round(x + 6, y + 6, w - 12, h - 12, 2, null, owned ? '#d9dfc6' : next ? '#e2c796' : '#c9d7c6');
-  r.text(String(stamp.index + 1).padStart(2, '0'), x + 13, y + 17, 9, C.muted);
-  if (next) r.round(x + w - 56, y + 9, 45, 17, 5, '#edd1a1');
-  r.text(owned ? '已收藏' : next ? '下一枚' : '待收藏', x + w - 14, y + 17, 9, next ? '#926c39' : C.muted, 'right');
-  r.circle(middle, y + 65, 28, owned ? '#7f967521' : next ? '#b8874220' : '#8da18d15');
-  r.circle(middle, y + 62, 28, owned ? '#eff1df' : next ? '#f9e6bd' : '#d9e5d5', owned ? '#c3d0b1' : next ? '#d7b777' : '#b6cbb6');
-  r.circle(middle, y + 62, 23, null, owned ? '#fffdf4' : next ? '#fff2d8' : '#ecf1e7');
-  r.icon(stamp.icon, middle, y + 63, 39, ink);
-  if (next) {
-    const pulse = .45 + Math.sin(now / 850) * .2, angle = now / 2300;
-    c.save(); c.globalAlpha *= pulse;
-    r.circle(middle + Math.cos(angle) * 28, y + 63 + Math.sin(angle) * 28, 2, C.gold);
-    r.circle(middle - Math.cos(angle) * 28, y + 63 - Math.sin(angle) * 28, 1.2, '#c79c53');
-    c.restore();
-  }
-  r.line([[x + 18, y + 94], [x + w - 18, y + 94]], owned ? '#c9d2b6' : next ? '#d5b98b' : '#bbceb9', .8);
-  r.label(stamp.name, middle, y + 110, w - 18, 12, owned ? C.ink : next ? '#92643c' : '#637d68', 'center', '600');
-  r.label(owned ? '累计 ' + stamp.target + ' 星' : '还差 ' + (stamp.goal - stamp.current) + ' 星', middle, y + 130, w - 18, 9.5, next ? '#98703e' : C.muted, 'center');
+  drawStampArt(r, stamp, { x, y, w, h }, { next, held });
   c.restore();
   r.hit(x, y, w, h, () => {
     scroll.tapped = { index: stamp.index, at: game.platform.now() };
-    game.toast(owned ? '「' + stamp.name + '」已经收入你的邮票册' : stamp.condition + '，即可收藏「' + stamp.name + '」');
+    openStampDetail(game, stamp.id);
   }, (px, py) => insideRect(viewport, px, py));
 }
 
@@ -109,14 +66,20 @@ function collectionLayout(height, count) {
 }
 
 function drawCollection(r, game) {
-  const album = game.album(), scroll = game.collectionScroll, now = r.now;
+  const album = game.album(), scroll = game.collectionScroll;
+  const now = Number.isFinite(r.pageNow) ? r.pageNow : r.now;
   const { viewport, contentHeight, maxScroll } = collectionLayout(r.H, album.stamps.length);
   r.collectionRect = viewport;
-  scroll.setBounds(maxScroll); scroll.update(now);
+  scroll.setBounds(maxScroll);
+  if (r.reducedMotion && !scroll.touching) {
+    if (scroll.wheelTarget !== null) scroll.offset = scroll.wheelTarget;
+    scroll.stop();
+  }
+  scroll.update(now);
   r.header('沿途邮票册', '把每一次抵达，慢慢收集起来', () => game.home());
   drawSummary(r, game, album);
   r.text('旅程纪念', 24, 232, 14, C.ink, 'left', '600');
-  r.text('轻触邮票查看', 365, 232, 10, C.muted, 'right');
+  r.text('轻触邮票 · 查看详情', 365, 232, 10, C.muted, 'right');
   const c = r.ctx;
   c.save(); c.beginPath(); c.rect(viewport.x, viewport.y, viewport.w, viewport.h); c.clip();
   album.stamps.forEach((stamp, index) => {

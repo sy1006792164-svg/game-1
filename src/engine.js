@@ -34,7 +34,8 @@ function createState(level) {
     lights: (level.lights || []).filter(cell => cell !== level.start),
     bridges: (level.bridges || []).slice(),
     status: 'playing',
-    revived: false
+    revived: false,
+    reviveCount: 0
   };
   if (state.player === level.exit && !state.letters.length && !state.seals.length) state.status = 'won';
   else if (state.energy <= 0) state.status = 'failed';
@@ -104,13 +105,35 @@ function step(level, state, action) {
   return { state: next, moved: true, events };
 }
 
-/** Rebuild a state from its action history; an optional revival index replays the one-time relight. */
-function replay(level, actions, reviveAt) {
+/** Normalize legacy single-relight saves and ordered relight histories without trusting a saved count. */
+function normalizeReviveHistory(value, actionCount) {
+  if (!Number.isSafeInteger(actionCount) || actionCount < 0) throw new Error('invalid revive');
+  if (value == null) return [];
+  const history = Array.isArray(value) ? value : [value];
+  if (history.length > actionCount + 1 || Object.keys(history).length !== history.length) throw new Error('invalid revive');
+  const result = [];
+  let previous = -1;
+  for (let index = 0; index < history.length; index++) {
+    const item = Object.getOwnPropertyDescriptor(history, String(index));
+    if (!item || !Object.prototype.hasOwnProperty.call(item, 'value') || !Number.isInteger(item.value) ||
+        item.value <= previous || item.value > actionCount) throw new Error('invalid revive');
+    previous = item.value;
+    result.push(item.value);
+  }
+  return result;
+}
+
+/** Rebuild every relight at its recorded failed turn; accumulated turns still determine the score. */
+function replay(level, actions, revivalHistory) {
+  if (!Array.isArray(actions)) throw new Error('invalid history');
+  const history = normalizeReviveHistory(revivalHistory, actions.length);
+  let revivalIndex = 0;
   let state = createState(level);
   for (let index = 0; index <= actions.length; index++) {
-    if (reviveAt === index) {
+    if (history[revivalIndex] === index) {
       if (state.status !== 'failed') throw new Error('invalid revive');
       state = revive(level, state);
+      revivalIndex++;
     }
     if (index === actions.length) break;
     const result = step(level, state, actions[index]);
@@ -120,9 +143,11 @@ function replay(level, actions, reviveAt) {
   return state;
 }
 
+function reviveEnergy(level) { return Math.max(8, Math.ceil(level.budget * 0.5)); }
+
 function revive(level, state) {
-  if (!state || state.status !== 'failed' || state.revived) return state;
-  return { ...state, energy: Math.max(8, Math.ceil(level.budget * 0.5)), status: 'playing', revived: true };
+  if (!state || state.status !== 'failed') return state;
+  return { ...state, energy: reviveEnergy(level), status: 'playing', revived: true, reviveCount: state.reviveCount + 1 };
 }
 
 /** Three stars at the verified minimum, two within a short margin, one for any other delivery. */
@@ -132,4 +157,4 @@ function stars(level, state) {
   return state.revived ? Math.min(2, earned) : earned;
 }
 
-module.exports = { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, createState, step, replay, revive, stars, neighbor };
+module.exports = { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, createState, step, replay, normalizeReviveHistory, reviveEnergy, revive, stars, neighbor };

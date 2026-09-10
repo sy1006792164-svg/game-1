@@ -54,8 +54,9 @@ check(['release', 'trial', undefined].every(envVersion => !isDevelopmentEnvironm
 }, loopback)) && !isDevelopmentEnvironment({}, loopback) &&
   !isDevelopmentEnvironment(null, { protocol: 'https:', hostname: 'game.example.com', search: '?dev=1' }),
 'Developer selection stays disabled for release, trial, unknown SDKs and public web origins.');
-// The expanded offline campaign has a 2 MiB project budget, including audio.
-check(bytes < 2 * 1024 * 1024, 'Source/assets below project budget of 2 MiB: ' + bytes + ' bytes; final upload size subject to WeChat tools.');
+// This is a self-imposed repository budget, not the WeChat package limit.
+check(bytes < 2 * 1024 * 1024, 'Source/assets below the self-imposed 2 MiB project budget: ' + bytes +
+  ' bytes; this is not the WeChat upload limit, whose packaged size is measured by WeChat DevTools.');
 if (process.argv.includes('--release')) check(/^adunit-[a-zA-Z0-9]+$/.test(config.REWARDED_AD_UNIT_ID), 'Real rewarded-video adUnitId configured.');
 else if (!config.REWARDED_AD_UNIT_ID) console.log('PENDING Real adUnitId; real-ad acceptance remains pending.');
 if (errors) { console.error(errors + ' check(s) failed.'); process.exitCode = 1; }

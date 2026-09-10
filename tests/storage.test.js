@@ -294,6 +294,64 @@ test('controller action-history saves survive reload and reject invalid revive i
   assert.equal(store.saveRun({ ...history, mode: 'daily', dateKey: 'broken' }), false);
 });
 
+test('multiple-revival saves survive relaunch and derive the earned count from the real route', () => {
+  const { CAMPAIGN } = require('../src/levels');
+  const { replay, reviveEnergy } = require('../src/engine');
+  const level = CAMPAIGN[0], adapter = memory(), store = createStore(adapter);
+  const actions = Array(level.budget + reviveEnergy(level)).fill('wait');
+  const progress = { mode: 'campaign', levelId: level.id, revision: level.revision, actions,
+    reviveHistory: [level.budget, actions.length], reviveCount: 99 };
+  assert.equal(store.saveRun(progress), true);
+  progress.reviveHistory.push(actions.length + 1);
+  const saved = createStore(adapter).loadRun();
+  assert.deepEqual(saved.reviveHistory, [level.budget, actions.length]);
+  const restored = replay(level, saved.actions, saved.reviveHistory);
+  assert.equal(restored.reviveCount, 2, 'an arbitrary stored count is never used to rebuild the route');
+  assert.equal(restored.status, 'playing');
+  assert.equal(restored.turn, actions.length);
+  const legacy = { mode: 'campaign', levelId: level.id, actions: actions.slice(0, level.budget), reviveAt: level.budget };
+  assert.equal(store.saveRun(legacy), true);
+  const oldSaved = createStore(adapter).loadRun();
+  assert.equal(replay(level, oldSaved.actions, oldSaved.reviveAt).reviveCount, 1);
+});
+
+test('invalid new revival histories cannot fall back to a legacy index or state snapshot', () => {
+  const adapter = memory(), store = createStore(adapter);
+  const valid = { mode: 'campaign', levelId: 1, actions: ['wait', 'wait', 'wait'], reviveHistory: [] };
+  assert.equal(store.saveRun(valid), true);
+  const sparse = [0, 3]; delete sparse[0];
+  for (const reviveHistory of [undefined, null, 3, '3', {}, true, [3, 3], [2, 1], [-1], [4], [1.5], sparse]) {
+    assert.equal(store.saveRun({ ...valid, reviveHistory, reviveAt: 0, state: {} }), false);
+    assert.deepEqual(store.loadRun(), valid);
+    assert.deepEqual(adapter.get(RUN_KEY), valid);
+  }
+  assert.equal(store.saveRun({ mode: 'campaign', levelId: 1, reviveHistory: [], state: {} }), false);
+  assert.equal(store.saveRun({ ...valid, reviveHistory: [], reviveAt: 99 }), true, 'the explicitly valid new format has priority');
+  const legacyArray = { mode: 'campaign', levelId: 1, actions: ['wait'], reviveAt: [1] };
+  assert.equal(store.saveRun(legacyArray), false, 'the legacy field remains a single index');
+});
+
+test('an oversized route reports unsaved progress and preserves the previous save until recovery', () => {
+  const adapter = memory(), store = createStore(adapter);
+  const saved = { mode: 'campaign', levelId: 1, actions: ['wait'], reviveHistory: [] };
+  assert.equal(store.saveRun(saved), true);
+  assert.equal(store.saveRun({ ...saved, actions: Array(4097).fill('wait') }), false);
+  assert.equal(store.getStatus().persisted, false);
+  assert.match(store.getStatus().message, /当前路线无法保存.*原存档已保留/);
+  assert.deepEqual(store.loadRun(), saved);
+  assert.deepEqual(createStore(adapter).loadRun(), saved);
+  assert.equal(store.flush(), false);
+  store.recordWin(1, 3, 4);
+  assert.equal(store.getStatus().persisted, false, 'a separate successful score write cannot claim the rejected route was saved');
+  assert.equal(store.saveRun({ ...saved, actions: ['wait', 'wait'] }), true);
+  assert.deepEqual(store.getStatus(), { persisted: true, message: '' });
+  assert.deepEqual(createStore(adapter).loadRun().actions, ['wait', 'wait']);
+  assert.equal(store.saveRun({ ...saved, actions: Array(5001).fill('wait') }), false);
+  assert.equal(store.getStatus().persisted, false);
+  assert.equal(store.clearRun(), true);
+  assert.deepEqual(store.getStatus(), { persisted: true, message: '' });
+});
+
 test('WeChat-style cross-realm storage reads preserve saved run and progress', () => {
   const adapter = memory();
   const first = createStore(adapter);

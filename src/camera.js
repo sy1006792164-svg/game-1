@@ -4,7 +4,7 @@ const MIN_ZOOM = .65, MAX_ZOOM = 1.6, INTRO_MS = 850;
 const SHAKE_MS = 260;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-// A fixed isometric view with an entrance, user-controlled zoom/pan and brief impacts.
+// A fixed isometric view with an entrance, desktop zoom/pan and brief impacts.
 class SceneCamera {
   constructor() { this.reset(); }
 
@@ -35,12 +35,12 @@ class SceneCamera {
   limit(zoom = this.zoom) { return Math.max(0, (zoom - 1) / 2); }
 
   // Coordinates are fractions of the viewport, relative to its center.
-  zoomAt(factor, x = 0, y = 0, dx = 0, dy = 0) {
-    if (![factor, x, y, dx, dy].every(Number.isFinite) || factor <= 0) return;
+  zoomAt(factor, x = 0, y = 0) {
+    if (![factor, x, y].every(Number.isFinite) || factor <= 0) return;
     this.stopShake();
     const next = clamp(this.zoom * factor, MIN_ZOOM, MAX_ZOOM), ratio = next / this.zoom, limit = this.limit(next);
-    this.panX = clamp(x + (this.panX - x) * ratio + dx, -limit, limit);
-    this.panY = clamp(y + (this.panY - y) * ratio + dy, -limit, limit);
+    this.panX = clamp(x + (this.panX - x) * ratio, -limit, limit);
+    this.panY = clamp(y + (this.panY - y) * ratio, -limit, limit);
     this.zoom = next;
   }
 

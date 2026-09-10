@@ -1,5 +1,7 @@
 'use strict';
 
+const { windState } = require('./ambient-effects');
+
 // The miniature uses the same two-to-one perspective as the playable courtyard.
 // These buildings are home-screen scenery, never part of a puzzle's hit geometry.
 const PALETTE = {
@@ -61,7 +63,8 @@ function roof(r, u, v, width, length, z, height) {
 }
 
 function gardenTree(r, u, v, size, now, color = '#7ea88a') {
-  const [x, y] = point(u, v), sway = Math.sin(now / 2800 + u) * .55;
+  const wind = windState(now), [x, y] = point(u, v);
+  const sway = Math.sin(now / 2800 + u) * .28 + Math.sin(now / 620 + u * .17) * (.22 + wind.gust * 1.05);
   polygon(r, [[x - 3, y], [x + 3, y - 1], [x + size * .82, y + size * .2], [x + size * .38, y + size * .28]], '#4b746822');
   r.line([[x, y], [x, y - size * .59]], '#887e60', 2.3);
   r.line([[x, y - size * .29], [x - size * .15, y - size * .51]], '#8c8566', 1.2);
@@ -109,7 +112,7 @@ function drawHomeArchitecture(r, now) {
   polygon(r, [point(-55, -15), point(37, -15), point(57, 6), point(-24, 5)], '#60816e24');
   polygon(r, [point(5, -46), point(40, -12), point(68, 21), point(49, 31)], '#5d7e6b28');
   gardenTree(r, -63, -41, 41, now);
-  gardenTree(r, -58, -63, 29, now + 600);
+  gardenTree(r, -58, -63, 29, now);
 
   // Raised gallery with three genuine inset arches and a roof terrace.
   slab(r, -53, -48, 64, 30, 2, 6);
@@ -136,7 +139,7 @@ function drawHomeArchitecture(r, now) {
   roof(r, 5, -49, 36, 36, 100, 17);
   const [flagX, flagY] = point(23, -31, 121);
   r.line([[flagX, flagY + 8], [flagX, flagY - 14]], '#657e6b', 1.1);
-  const flap = Math.sin(now / 850) * 3.2;
+  const wind = windState(now), flap = Math.sin(now / 850) * (1.8 + wind.strength * 3.5);
   polygon(r, [[flagX + .5, flagY - 13], [flagX + 15 + Math.sin(now / 1100), flagY - 10 + flap], [flagX + 12, flagY - 3 + flap * .65], [flagX + .5, flagY - 6]], '#d79177');
   const [signX, signY] = point(23, -16, 45);
   r.circle(signX, signY, 5, '#e1ba83'); r.icon('letter', signX, signY, 6, '#fff9df');
@@ -144,8 +147,8 @@ function drawHomeArchitecture(r, now) {
   // Six individual steps connect the porch to the courtyard.
   for (let i = 5; i >= 0; i--) slab(r, 11, -13 + i * 3, 23, 3.2, 2, 1 + (6 - i) * 1.05, { front: '#e9e4ce', side: '#bfcab0', top: '#fff5df' });
   planter(r, 46, -22, 11, 23);
-  gardenTree(r, 58, -39, 36, now + 350);
-  gardenTree(r, 61, -17, 27, now + 850);
+  gardenTree(r, 58, -39, 36, now);
+  gardenTree(r, 61, -17, 27, now);
 
   // Warm brass lamp and a low bench make the courtyard feel inhabited.
   const [lampX, lampY] = point(48, 23, 3);

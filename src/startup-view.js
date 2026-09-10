@@ -5,6 +5,8 @@ const { CONTROL } = require('./controls');
 const { drawVignette } = require('./scene');
 const { HEALTH_ADVICE_TITLE, HEALTH_ADVICE_LINES } = require('./startup');
 const { drawTitle } = require('./brand-title');
+const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
+const { drawStartupJourney } = require('./startup-journey');
 
 function startupLayout(height) {
   const contentHeight = Math.min(height, 840), top = (height - contentHeight) / 2;
@@ -44,9 +46,14 @@ function drawLoading(r, game, y, now) {
 }
 
 function drawStartup(r, game, now) {
-  const ui = startupLayout(r.H);
+  const ui = startupLayout(r.H), bounds = r.viewport || { x: 0, w: 390 };
+  const mood = r.atmosphereMood, quietMotion = r.reducedMotion || r.effectsQuality === 'low';
   drawBrand(r, ui.top);
-  drawVignette(r, now, { x: 13, y: ui.heroY, w: 364, h: ui.heroH }, { reducedMotion: r.reducedMotion });
+  drawAmbientOverlay(r, now, 'startup', { x: bounds.x, y: ui.heroY, w: bounds.w, h: ui.heroH },
+    { reducedMotion: quietMotion, quality: r.effectsQuality, mood, treatment: atmosphereTreatment('startup') });
+  const hero = { x: 13, y: ui.heroY, w: 364, h: ui.heroH };
+  drawVignette(r, now, hero, { reducedMotion: quietMotion, mood });
+  drawStartupJourney(r, game.startup && game.startup.progress, hero, now, { reducedMotion: quietMotion });
   r.panel(22, ui.adviceY, 346, ui.adviceH, { fill: C.panel, stroke: '#9ab8a5', accent: C.green });
   r.text(HEALTH_ADVICE_TITLE, 195, ui.adviceY + 27, 17, C.ink, 'center', '700');
   HEALTH_ADVICE_LINES.forEach((text, index) => r.text(text, 195, ui.adviceY + 62 + index * 22, 15, C.ink, 'center'));

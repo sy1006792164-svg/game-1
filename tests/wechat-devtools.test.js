@@ -138,14 +138,16 @@ test('empty changedTouches falls back to touches and a lost native release recov
   assert.deepEqual(h.seen, [[10, 20, 'start'], [30, 40, 'move'], [30, 40, 'cancel'], [100, 120, 'start'], [100, 120, 'end']]);
 });
 
-test('a second simultaneous native finger never steals the current gesture', () => {
+test('a second simultaneous native finger cancels the current gesture without a tap', () => {
   const h = harness('ios');
   h.touch('TouchStart');
   const original = { identifier: 1, clientX: 100, clientY: 120 };
   const second = { identifier: 2, clientX: 200, clientY: 240 };
   Array.from(h.callbacks.TouchStart).forEach(fn => fn({ changedTouches: [second], touches: [original, second] }));
   h.touch('TouchEnd', 200, 240, 2); h.touch('TouchEnd');
-  assert.deepEqual(h.seen, [[100, 120, 'start'], [100, 120, 'end']]);
+  assert.deepEqual(h.seen, [[100, 120, 'start'], [100, 120, 'cancel']]);
+  h.touch('TouchStart'); h.touch('TouchEnd');
+  assert.deepEqual(h.seen.slice(2), [[100, 120, 'start'], [100, 120, 'end']]);
 });
 
 test('compatibility mouse with no sourceCapabilities is ignored for the same touch tap', () => {

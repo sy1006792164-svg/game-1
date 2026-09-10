@@ -165,7 +165,7 @@ test('resize, pinch, modal, navigation and hide cancel a ranking gesture before 
     const h = harness(t); await h.enter(); const box = leaderboardRect(h.game.renderer.H);
     h.pointer(box.x + 60, box.y + 230, 'start'); h.messages.length = 0;
     if (interrupt === 'resize') h.callbacks.resize();
-    if (interrupt === 'pinch') h.callbacks.zoom(...h.css(100, 300), 1.2, { dx: 0, dy: 0 });
+    if (interrupt === 'pinch') h.pointer(100, 300, 'cancel');
     if (interrupt === 'modal') h.game.help();
     if (interrupt === 'navigate') h.game.home();
     if (interrupt === 'hide') h.callbacks.hide();

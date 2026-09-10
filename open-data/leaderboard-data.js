@@ -8,6 +8,12 @@ const avatarUrl = value => typeof value === 'string' && value.length <= 1024 && 
 // OpenID, secret, or authentication credential. Main-domain input cannot set it.
 const ownerToken = value => typeof value === 'string' && /^wl1_[a-f0-9]{48}$/.test(value) ? value : '';
 const nativeId = value => typeof value === 'string' && value && value.trim() === value && !['selfopenid', 'self'].includes(value.toLowerCase()) ? value : '';
+const cleanName = value => typeof value === 'string' ? Array.from(value.slice(0, 2048)
+  .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').trim()).slice(0, 24).join('') : '';
+
+function isKVDataList(value) {
+  return Array.isArray(value) && value.every(item => item && typeof item.key === 'string' && typeof item.value === 'string');
+}
 
 function cleanScore(score) {
   if (!score || ![score.stars, score.completed, score.turns].every(Number.isSafeInteger) ||
@@ -15,7 +21,7 @@ function cleanScore(score) {
       score.stars > score.completed * 3 || score.turns < score.completed || score.turns > 99900000) return null;
   return { v: 2, stars: score.stars, completed: score.completed, turns: score.turns,
     avatarUrl: avatarUrl(score.avatarUrl),
-    name: typeof score.name === 'string' ? Array.from(score.name).slice(0, 24).join('') : '送信人',
+    name: cleanName(score.name) || '送信人',
     ...(ownerToken(score.ownerToken) ? { ownerToken: score.ownerToken } : {}) };
 }
 function parseScore(list, key) {
@@ -55,13 +61,13 @@ function buildRows(friends, mine, key, identity) {
     const score = parseScore(friend.KVDataList, key);
     if (!score) return;
     const row = Object.assign(score, { openid: friend.openid, isMe: false,
-      nickname: typeof friend.nickname === 'string' && friend.nickname.trim() ? friend.nickname : score.name,
+      nickname: cleanName(friend.nickname) || score.name,
       avatarUrl: avatarUrl(friend.avatarUrl) || score.avatarUrl });
     const earlier = seen.get(friend.openid);
     if (!earlier || compareScores(row, earlier) < 0) seen.set(friend.openid, row);
   });
   let self = mineScore ? Object.assign({}, mineScore, { rank: null, isMe: true,
-    nickname: identity && identity.nickName || mineScore.name, avatarUrl: avatarUrl(identity && identity.avatarUrl) || mineScore.avatarUrl }) : null;
+    nickname: cleanName(identity && identity.nickName) || mineScore.name, avatarUrl: avatarUrl(identity && identity.avatarUrl) || mineScore.avatarUrl }) : null;
   const marker = mineScore && ownerToken(mineScore.ownerToken);
   const markerMatches = marker ? Array.from(seen.values()).filter(row => row.ownerToken === marker) : [];
   // Only mark a record already returned by WeChat. Some runtimes echo the
@@ -71,7 +77,7 @@ function buildRows(friends, mine, key, identity) {
   if (matched) {
     const latest = mergeScores(matched, mineScore);
     Object.assign(matched, latest, { isMe: true,
-      nickname: identity && identity.nickName || matched.nickname,
+      nickname: cleanName(identity && identity.nickName) || matched.nickname,
       avatarUrl: avatarUrl(identity && identity.avatarUrl) || matched.avatarUrl });
   }
   seen.forEach(function (row) { rows.push(row); });
@@ -82,4 +88,4 @@ function buildRows(friends, mine, key, identity) {
   return { rows, self };
 }
 
-module.exports = { DEFAULT_KEY, cleanScore, parseScore, compareScores, mergeScores, serializeScore, buildRows };
+module.exports = { DEFAULT_KEY, isKVDataList, cleanScore, parseScore, compareScores, mergeScores, serializeScore, buildRows };

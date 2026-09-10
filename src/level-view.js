@@ -21,6 +21,13 @@ function levelProgressOffset(level, height) {
   return Math.min(level.chapter * CHAPTER_HEIGHT, levelListLayout(height).maxScroll);
 }
 
+function levelChapterAtOffset(offset, height, count = CAMPAIGN.length) {
+  const chapters = Math.max(1, Math.ceil(count / PER_CHAPTER));
+  const { viewport } = levelListLayout(height, count);
+  const focus = Math.max(0, Number(offset) || 0) + viewport.h * .3;
+  return Math.min(chapters - 1, Math.max(0, Math.floor(focus / CHAPTER_HEIGHT)));
+}
+
 function drawLetterCard(r, x, y, w, h, unlocked, next, held) {
   r.panel(x, y, w, h, { fill: held && unlocked ? '#e5ecde' : next ? '#fff7e5' : unlocked ? C.panel : '#dce5dc',
     stroke: next ? '#cba477' : C.line, accent: next ? C.gold : unlocked ? C.green : null, radius: 13 });
@@ -32,14 +39,15 @@ function drawLetterCard(r, x, y, w, h, unlocked, next, held) {
 }
 
 function drawLevelCard(r, game, level, record, index, rect, viewport, current, saved) {
-  const scroll = game.levelScroll, now = r.now, c = r.ctx;
+  const scroll = game.levelScroll, now = Number.isFinite(r.pageNow) ? r.pageNow : r.now, c = r.ctx;
   if (!scroll.revealed.has(index)) {
     if (scroll.revealed.size >= 64) scroll.revealed.delete(scroll.revealed.keys().next().value);
     const entering = now - scroll.enteredAt < 200 && !scroll.touching && !scroll.dragged && scroll.wheelTarget === null;
     scroll.revealed.set(index, entering ? now + index % PER_CHAPTER * 26 : now - 320);
   }
   if (scroll.touching || scroll.dragged || scroll.wheelTarget !== null) scroll.revealed.set(index, Math.min(scroll.revealed.get(index), now - 320));
-  const progress = clamp((now - scroll.revealed.get(index)) / 320), ease = 1 - Math.pow(1 - progress, 3);
+  const progress = clamp((now - scroll.revealed.get(index)) / 320);
+  const ease = r.reducedMotion || r.effectsQuality === 'low' ? 1 : 1 - Math.pow(1 - progress, 3);
   const { x, w, h } = rect, y = rect.y + (1 - ease) * 10;
   const unlocked = game.unlocked(index), next = level.id === current.id;
   const inProgress = saved && saved.levelId === level.id;
@@ -64,9 +72,15 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
 
 function drawLevels(r, game) {
   const profile = game.profile(), current = game.nextLevel(), saved = game.savedRun(), scroll = game.levelScroll;
+  const now = Number.isFinite(r.pageNow) ? r.pageNow : r.now;
   const { viewport, contentHeight, maxScroll } = levelListLayout(r.H);
   r.levelRect = viewport;
-  scroll.setBounds(maxScroll); scroll.update(r.now);
+  scroll.setBounds(maxScroll);
+  if (r.reducedMotion && !scroll.touching) {
+    if (scroll.wheelTarget !== null) scroll.offset = scroll.wheelTarget;
+    scroll.stop();
+  }
+  scroll.update(now);
   r.header('选一封来信', game.development ? '开发环境 · 全关卡自由试玩' : '上下滑动，沿着回声继续出发', () => game.home());
   r.text('主线旅程', 25, 106, 14, C.ink, 'left', '600');
   r.text('已送达 ' + game.completion() + ' / ' + CAMPAIGN.length, 25, 128, 10, C.muted);
@@ -94,7 +108,7 @@ function drawLevels(r, game) {
   const endY = viewport.y + contentHeight - 18 - scroll.offset;
   if (endY > viewport.y && endY < viewport.y + viewport.h) r.text('九百九十九封信，寄往远方。', 195, endY, 11, C.muted, 'center');
   c.restore();
-  const alpha = scroll.touching || Math.abs(scroll.velocity) > 4 ? .65 : clamp(1 - (r.now - scroll.activeAt - 600) / 450) * .65;
+  const alpha = scroll.touching || Math.abs(scroll.velocity) > 4 ? .65 : clamp(1 - (now - scroll.activeAt - 600) / 450) * .65;
   if (maxScroll > 0 && alpha > 0) {
     const thumb = Math.max(34, viewport.h * viewport.h / contentHeight);
     c.save(); c.globalAlpha *= alpha;
@@ -103,4 +117,4 @@ function drawLevels(r, game) {
   }
 }
 
-module.exports = { drawLevels, levelListLayout, levelProgressOffset };
+module.exports = { drawLevels, levelListLayout, levelProgressOffset, levelChapterAtOffset };

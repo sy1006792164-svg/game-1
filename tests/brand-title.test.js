@@ -82,7 +82,9 @@ function loadView(filename) {
   const file = path.join(__dirname, '../src', filename), actualRequire = createRequire(file);
   const module = { exports: {} };
   const factory = vm.runInThisContext('(function(require, module, exports) {\n' + fs.readFileSync(file, 'utf8') + '\n})', { filename: file });
-  factory(specifier => specifier === './scene' ? { drawVignette() {} } : actualRequire(specifier), module, module.exports);
+  factory(specifier => specifier === './scene' ? { drawVignette() {} } : specifier === './ambient-effects'
+    ? { atmosphereTreatment: () => ({}), drawAmbientOverlay() {} } : specifier === './startup-journey'
+      ? { drawStartupJourney() {} } : actualRequire(specifier), module, module.exports);
   return module.exports;
 }
 
