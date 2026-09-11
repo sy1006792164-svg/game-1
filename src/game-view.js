@@ -32,8 +32,9 @@ function drawControls(r, game, layout, now, feedback) {
   const warning = game.state.status === 'failed' || game.state.energy <= 3;
   if (guide) drawGuideCard(r, game, guide, hintY);
   else if (!drawContextFeedback(r, feedback, layout, now)) {
-    r.round(24, hintY + 2, 342, hintHeight, 13, '#53715b12');
-    r.round(24, hintY, 342, hintHeight, 13, warning ? '#fbebdf' : ready ? '#e6f0e2' : '#f8faf1', warning ? '#d6af95' : ready ? '#9cbd9c' : C.line);
+    r.panel(24, hintY, 342, hintHeight, { radius: 13,
+      fill: warning ? '#fbebdf' : ready ? '#e6f0e2' : C.panel,
+      stroke: warning ? '#d6af95' : ready ? '#9cbd9c' : C.surfaceEdge });
     if (ready) r.icon('check', 44, hintY + hintHeight / 2, 16, C.green);
     const textY = hintY + hintHeight / 2 - (hintLines.length - 1) * 9;
     hintLines.forEach((line, index) => r.text(line, ready ? 209 : 195, textY + index * 18, 12, warning ? '#955d42' : ready ? '#316c5f' : C.muted, 'center'));

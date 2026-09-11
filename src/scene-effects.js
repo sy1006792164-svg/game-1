@@ -6,15 +6,20 @@ function drawActorTrails(r, game, now, point, unit, options = {}) {
   if (options.reducedMotion || r.effectsQuality === 'low' || game.reviewing || now < game.transitionAt || now - game.transitionAt > MOVE_MS + 90) return;
   const c = r.ctx;
   [false, true].forEach(ghost => {
-    const frame = actorFrame(game, now, point, ghost), fade = Math.max(0, 1 - Math.max(0, now - game.transitionAt - MOVE_MS) / 90);
+    const frame = actorFrame(game, now, point, ghost, options), fade = Math.max(0, 1 - Math.max(0, now - game.transitionAt - MOVE_MS) / 90);
     if (!frame.alpha) return;
+    const trail = [];
     for (let i = 3; i > 0; i--) {
-      const sample = actorFrame(game, Math.max(game.transitionAt, now - i * 28), point, ghost);
+      const sample = actorFrame(game, Math.max(game.transitionAt, now - i * 28), point, ghost, options);
       if (!sample.moving || Math.hypot(frame.x - sample.x, frame.y - sample.y) < 1) continue;
-      c.save(); c.globalAlpha *= sample.alpha * fade * (ghost ? .2 : .11) * (1 - i / 4);
-      c.beginPath(); c.ellipse(sample.x, sample.y - (ghost ? unit * .16 : 0), unit * (ghost ? .17 : .09), unit * .07, 0, 0, Math.PI * 2);
-      c.fillStyle = ghost ? '#94ece7' : '#ffdc8c'; c.fill(); c.restore();
+      trail.push([sample.x, sample.y - (ghost ? sample.lift + unit * .12 : 0)]);
     }
+    if (!trail.length) return;
+    trail.push([frame.x, frame.y - (ghost ? frame.lift + unit * .12 : 0)]);
+    c.save(); c.globalAlpha *= frame.alpha * fade;
+    r.line(trail, ghost ? '#62bdbd38' : '#e9c27b35', ghost ? 6 : 3.5);
+    r.line(trail, ghost ? '#b9f6de8c' : '#fff0be99', ghost ? 1.8 : 1);
+    c.restore();
   });
 }
 

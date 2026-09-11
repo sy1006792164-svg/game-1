@@ -1,7 +1,10 @@
 'use strict';
 
 // Friend identities and all conditional controls remain inside the open-data domain.
-const C = { ink: '#294d49', muted: '#4d6359', green: '#316c5f', gold: '#a36c35', goldText: '#885729', paper: '#fffdf4', line: '#cedbcf' };
+const C = Object.freeze({
+  ink: '#233f3d', muted: '#485e56', green: '#2e655b', gold: '#a36c35', goldText: '#885729',
+  paper: '#fffaf0', line: '#c3bc9e', side: '#c3c3a9', brass: '#c6a66e'
+});
 
 function leaderboardLayout(width, height) {
   const compact = height < 420, heroH = compact ? 96 : 126;
@@ -45,6 +48,14 @@ function paintLeaderboard(ctx, model, avatar) {
     ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
     ctx.lineWidth = width; ctx.strokeStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
   };
+  // The shared canvas owns its painters. Static bevels keep every row inexpensive.
+  const panel = (x, y, width, height, radius, fill = C.paper, stroke = C.line, strokeWidth = 1, dark = false) => {
+    round(x + 1, y + 3, width - 2, height, radius, '#173f3626');
+    round(x, y + 2, width, height, radius, dark ? '#183e36' : C.side);
+    round(x, y, width, height, radius, fill, stroke, strokeWidth);
+    line([[x + radius, y + 1.5], [x + width - radius, y + 1.5]], dark ? '#e6d3a66e' : '#fffef6', 1);
+    line([[x + radius, y + height - 1], [x + width - radius, y + height - 1]], dark ? '#15382b80' : '#a6ad902e', 1);
+  };
   const circle = (x, y, radius, fill) => { ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); };
   const star = (x, y, size, color) => {
     ctx.beginPath(); for (let i = 0; i < 10; i++) {
@@ -54,15 +65,14 @@ function paintLeaderboard(ctx, model, avatar) {
     ctx.closePath(); ctx.fillStyle = color; ctx.fill();
   };
   const button = (label, x, y, width, height, action, disabled = false) => {
-    round(x, y, width, height, 10, disabled ? '#e4ebe2' : C.paper, disabled ? '#d8e2d6' : C.line);
+    panel(x, y, width, height, 10, disabled ? '#e4ebe2' : C.paper, disabled ? '#d8e2d6' : C.line);
     text(label, x + width / 2, y + height / 2, 12, disabled ? '#869b8e' : C.green, 'center', '600');
     if (!disabled) hits.push({ x, y: y - 4, w: width, h: height + 8, action });
   };
 
   // A personal scorecard anchors the page even when only one friend is present.
-  round(1, 3, w - 2, ui.heroH, 19, '#476d5920');
-  round(0, 0, w, ui.heroH, 19, C.green);
-  round(8, 8, w - 16, ui.heroH - 16, 13, null, '#83aa934d');
+  panel(0, 0, w, ui.heroH, 19, '#285a50', '#8d683f', 1, true);
+  round(8, 8, w - 16, ui.heroH - 16, 13, null, '#cfb37b69');
   circle(w - 14, 15, 33, '#ffffff08'); star(w - 23, 19, 15, '#c0d8b222');
   const portrait = ui.compact ? 30 : 38;
   const myIndex = rows.findIndex(row => row.isMe);
@@ -72,7 +82,8 @@ function paintLeaderboard(ctx, model, avatar) {
   text(personal, 17 + portrait + 12, 47, 10, '#e2ecdc');
   if (hasChange) {
     const up = change.direction === 'up', delta = Math.abs(change.toRank - change.fromRank);
-    round(w - 129, 13, 116, 42, 11, up ? '#f7e5af24' : '#e3ece124', up ? '#e1ca8e55' : '#b5cbb555');
+    round(w - 129, 14, 116, 42, 11, '#12372d60');
+    round(w - 129, 13, 116, 42, 11, up ? '#3b6654' : '#345e54', up ? '#c6a66e80' : '#b5cbb555');
     text((up ? '↑ 上升 ' : '↓ 下降 ') + delta + ' 名', w - 71, 26, 12, up ? '#ffe2a6' : '#ecf1e3', 'center', '600');
     // Animate the real destination digit, never an invented intermediate rank.
     if (moving) {
@@ -113,9 +124,8 @@ function paintLeaderboard(ctx, model, avatar) {
         ctx.scale(1 - .016 * landing, 1 - .026 * landing);
         ctx.translate(-listWidth / 2, -y - rh / 2);
       }
-      round(1, y + 2, listWidth - 2, rh, 13, '#5c805714');
-      round(0, y, listWidth, rh, 13, row.isMe ? moving ? '#eaf1d9' : '#f2f4e2' : C.paper,
-        row.isMe ? moving ? '#77965d' : '#9fba9b' : '#d6dfcf', row.isMe && moving ? 2 : 1);
+      panel(0, y, listWidth, rh, 13, row.isMe ? moving ? '#eaf1d9' : '#f2f2df' : C.paper,
+        row.isMe ? moving ? '#77965d' : C.brass : C.line, row.isMe && moving ? 2 : 1);
       if (row.isMe) round(0, y + 13, 3, rh - 26, 1.5, C.green);
       if (row.rank <= 3) {
         const cy = y + rh / 2, colors = [
@@ -127,6 +137,7 @@ function paintLeaderboard(ctx, model, avatar) {
             i ? ctx.lineTo(22 + dx * side, cy + dy) : ctx.moveTo(22 + dx * side, cy + dy));
           ctx.closePath(); ctx.fillStyle = colors[0]; ctx.fill();
         });
+        circle(22, cy - 1.5, 11, '#6e5a3b38');
         circle(22, cy - 3, 11, colors[0]); circle(22, cy - 3, 9, colors[1]);
         ctx.beginPath(); ctx.arc(22, cy - 3, 7.5, 3.6, 5.2); ctx.strokeStyle = C.paper; ctx.lineWidth = 1; ctx.stroke();
         text(row.rank, 22, cy - 2, 11, colors[2], 'center', '600');
@@ -137,7 +148,7 @@ function paintLeaderboard(ctx, model, avatar) {
       text(fitted((row.isMe ? '我 · ' : '') + row.nickname, listWidth - nameX - 79, 13), nameX, y + rh / 2 - 11, 13, C.ink, 'left', '600');
       text(fitted(row.completed + ' 关 · ' + row.turns + ' 步', listWidth - nameX - 15, 10), nameX, y + rh / 2 + 12, 10, C.muted);
       star(listWidth - 17, y + rh / 2 - 10, 6, C.gold);
-      text(row.stars, listWidth - 28, y + rh / 2 - 10, 18, C.gold, 'right', '600');
+      text(row.stars, listWidth - 28, y + rh / 2 - 10, 18, C.goldText, 'right', '600');
       ctx.restore();
     };
     const floatingSelf = moving && myIndex >= 0 && Number.isFinite(motion.rowY);
@@ -153,7 +164,7 @@ function paintLeaderboard(ctx, model, avatar) {
     if (showHint) {
       const contentEnd = Math.max(ui.listTop + contentHeight - scroll,
         floatingSelf ? motion.rowY + ui.rowHeight : -Infinity);
-      round(0, contentEnd + 14, w, 68, 13, '#e0e9dc');
+      panel(0, contentEnd + 14, w, 68, 13, '#e7ecdf', '#b8c4ac');
       star(27, contentEnd + 37, 9, '#8da985');
       text('每一封送达，都让星光更近', 48, contentEnd + 35, 12, C.green, 'left', '600');
       text('同玩好友同步成绩后，也会出现在这里', 48, contentEnd + 56, 10, C.muted);
@@ -161,7 +172,7 @@ function paintLeaderboard(ctx, model, avatar) {
   } else if (status === 'loading') {
     for (let i = 0; i < Math.min(2, ui.capacity); i++) {
       const y = ui.listTop + i * ui.stride;
-      round(0, y, w, ui.rowHeight, 13, '#f8faf0', C.line);
+      panel(0, y, w, ui.rowHeight, 13, C.paper);
       circle(31, y + ui.rowHeight / 2, 15, '#dfe9dc');
       round(60, y + 18, w * .38, 7, 3, '#d9e4d6');
       round(60, y + 33, w * .24, 6, 3, '#e3ebdf');
@@ -169,7 +180,7 @@ function paintLeaderboard(ctx, model, avatar) {
   } else {
     const emptyH = Math.min(167, ui.listHeight);
     const center = ui.listTop + emptyH / 2;
-    round(0, ui.listTop, w, emptyH, 16, '#f7f8ed', C.line);
+    panel(0, ui.listTop, w, emptyH, 16, '#f5f0e4');
     const error = status === 'error', denied = status === 'denied';
     const short = emptyH < 110;
     if (!short) {

@@ -1,5 +1,6 @@
 'use strict';
 const { C } = require('./theme');
+const { drawPanel, drawMeter } = require('./ui-surface');
 const { drawCourier } = require('./courier-art');
 const { CONTROL, drawButton } = require('./controls');
 const { drawUiIcon, UI_ICON } = require('./ui-icons');
@@ -85,11 +86,7 @@ class Renderer {
     this.text(value, x, y, size, color, align, weight);
   }
   panel(x, y, w, h, options) {
-    const style = options || {}, radius = style.radius == null ? 16 : style.radius;
-    this.round(x + 1, y + 5, w - 2, h, radius, '#55745c0a');
-    this.round(x, y + 2, w, h, radius, '#55745c10');
-    this.round(x, y, w, h, radius, style.fill || C.panel, style.stroke || C.line);
-    if (style.accent) this.line([[x + 18, y + 1], [x + Math.min(w - 18, 66), y + 1]], style.accent, 1.5);
+    drawPanel(this, x, y, w, h, options);
   }
   line(points, color, width, dash) {
     const c = this.ctx; c.beginPath(); c.strokeStyle = color || C.line; c.lineWidth = width || 1.4; c.lineCap = 'round'; c.lineJoin = 'round'; c.setLineDash(dash || []);
@@ -102,9 +99,7 @@ class Renderer {
   }
   actionIcon(type, x, y, color) { drawUiIcon(this, type, x, y, color || C.green); }
   meter(x, y, w, value, target, color) {
-    this.round(x, y, w, 5, 2.5, '#d4e1d6');
-    const filled = Math.max(0, Math.min(1, value / Math.max(1, target))) * w;
-    if (filled > 0) this.round(x, y, Math.max(5, filled), 5, 2.5, color || C.green);
+    drawMeter(this, x, y, w, value, target, color);
   }
   wrapped(text, x, y, width, size, color, lineHeight) {
     const lines = this.wrapLines(text, width, size);

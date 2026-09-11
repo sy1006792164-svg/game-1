@@ -84,9 +84,7 @@ function drawModal(r, modal, now, resultAge = null) {
   const accent = modal.kind === 'fail' ? '#a76e55' : C.gold;
   c.save(); c.globalAlpha *= r.reducedMotion ? 1 : Math.min(1, .18 + age / 180);
   r.scrim('#36554979');
-  r.round(ui.x + 3, ui.y + 8, ui.w - 6, ui.h, 23, '#24473526');
-  r.round(ui.x - 2, ui.y + 3, ui.w + 4, ui.h, 23, '#e6e8d7', '#c1cbb6');
-  r.round(ui.x, ui.y, ui.w, ui.h, 23, '#fffdf4', '#c6d0bd');
+  r.panel(ui.x, ui.y, ui.w, ui.h, { radius: 23, fill: C.panel, stroke: C.surfaceEdge, accent });
   r.round(ui.x + 8, ui.y + 8, ui.w - 16, ui.h - 16, 18, null, '#e4e8d9');
   r.line([[ui.x + 42, ui.y + 2], [ui.x + ui.w - 42, ui.y + 2]], accent, 2);
   // Small cancellation marks turn the result into a paper receipt without

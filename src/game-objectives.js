@@ -2,7 +2,6 @@
 
 const { C } = require('./theme');
 const { drawUiIcon } = require('./ui-icons');
-const { drawPaperPlaque } = require('./controls');
 const { objectiveFeedback, drawObjectiveFeedback } = require('./game-feedback');
 const { COLLECTION_IMPACT_MS, OBJECTIVE_PULSE_MS } = require('./feedback-timing');
 
@@ -13,10 +12,7 @@ function drawObjectives(r, game, now, feedback) {
   const l = game.level, s = game.state, previous = game.previousState;
   const low = s.status === 'playing' && s.energy <= 3;
   const { x, y, w, h, column } = OBJECTIVES;
-  // One sheet of paper, with open columns and the same cut corners as the controls.
-  drawPaperPlaque(r, x, y + 2, w, h, 6, false, '#536a5010');
-  drawPaperPlaque(r, x, y, w, h, 6, false, C.panel, '#ccd5c5');
-  r.line([[x + 8, y + 2], [x + w - 8, y + 2]], '#ffffffb0', .8);
+  r.panel(x, y, w, h, { radius: 10, accent: C.gold });
   const objectives = [
     { label: '剩余拍数', icon: 'lamp', value: s.energy, suffix: ' 拍', changed: previous && previous.energy !== s.energy,
       color: low || s.status === 'failed' ? '#ad5845' : '#98683f' },
@@ -39,6 +35,9 @@ function drawObjectives(r, game, now, feedback) {
       r.circle(anchor.x, anchor.y, 13 + pulse * 4, null, objective.color);
       r.ctx.restore();
     }
+    r.circle(anchor.x, anchor.y + 1.5, 15, '#b9bfa2');
+    r.circle(anchor.x, anchor.y, 15, objective.complete ? '#e6edda' : '#f5ead1', '#d4c7a6');
+    r.circle(anchor.x, anchor.y - .6, 12, null, '#fff8e3');
     drawUiIcon(r, objective.complete ? 'check' : objective.icon, anchor.x, anchor.y, objective.color, 21);
     r.label(objective.label, left + 42, 95, 66, 10, C.muted);
     const size = (index ? 23 : 25) + pulse * .8;

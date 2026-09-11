@@ -1,6 +1,7 @@
 'use strict';
 
 const { C } = require('./theme');
+const { materialGradient } = require('./ui-surface');
 
 const INKS = ['#376f5d', '#a87440', '#3b7b88', '#65754a'];
 
@@ -33,15 +34,23 @@ function drawStampArt(r, stamp, rect, { next = false, held = false } = {}) {
   const paper = owned ? '#fffbed' : next ? '#fff0d5' : '#e2eade';
   const border = held ? owned ? '#86a489' : C.gold : owned ? '#b9c7a9' : next ? '#cba477' : '#b5c9b6';
   c.save(); c.translate(rect.x, rect.y); c.scale(rect.w / w, rect.h / h);
-  stampOutline(c, 0, 4, w, h); c.fillStyle = '#496c5120'; c.fill();
+  stampOutline(c, 1, held ? 2 : 4, w - 1, h); c.fillStyle = held ? '#294d4924' : '#294d4933'; c.fill();
+  stampOutline(c, 0, 1.8, w, h); c.fillStyle = owned || next ? '#baa981' : '#9faf9b'; c.fill();
+  if (held && !r.reducedMotion) c.translate(0, 1);
   stampOutline(c, 0, 0, w, h); c.fillStyle = paper; c.fill(); c.strokeStyle = border; c.lineWidth = held ? 1.8 : next ? 1.3 : .8; c.stroke();
+  if (!r.reducedMotion && r.effectsQuality !== 'low') {
+    c.save(); c.clip();
+    c.fillStyle = materialGradient(r, 0, 0, w, h, [[0, '#ffffff70'], [.4, '#ffffff00'], [1, '#88704418']]);
+    c.fillRect(0, 0, w, h); c.restore();
+  }
   r.round(6, 6, w - 12, h - 12, 2, null, owned ? '#d9dfc6' : next ? '#e2c796' : '#c9d7c6');
   r.text(String(stamp.index + 1).padStart(2, '0'), 13, 17, 9, C.muted);
   if (next) r.round(w - 56, 9, 45, 17, 5, '#f5dfb5');
   r.text(owned ? '已收藏' : next ? '下一枚' : '待收藏', w - 14, 17, 9, next ? C.goldText : C.muted, 'right');
-  r.circle(middle, 65, 28, owned ? '#7f967521' : next ? '#b8874220' : '#8da18d15');
+  r.circle(middle, 65, 28, owned ? '#839373' : next ? '#c3a16a' : '#b0bfa8');
   r.circle(middle, 62, 28, owned ? '#eff1df' : next ? '#f9e6bd' : '#d9e5d5', owned ? '#c3d0b1' : next ? '#d7b777' : '#b6cbb6');
   r.circle(middle, 62, 23, null, owned ? '#fffdf4' : next ? '#fff2d8' : '#ecf1e7');
+  if (owned || next) r.icon(stamp.icon, middle + .5, 64.2, 39, owned ? '#a8b68d' : '#cfb174');
   r.icon(stamp.icon, middle, 63, 39, ink);
   if (next && !r.reducedMotion && r.effectsQuality !== 'low') {
     const time = Number.isFinite(r.ambientNow) ? r.ambientNow : r.now;

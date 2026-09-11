@@ -2,12 +2,13 @@
 
 const { C } = require('./theme');
 const { UI_ICON, drawUiIcon } = require('./ui-icons');
+const { materialGradient } = require('./ui-surface');
 
-const CONTROL = Object.freeze({ height: 52, compactHeight: 44, icon: UI_ICON.size, gap: 8, depth: 3, lineHeight: 20 });
+const CONTROL = Object.freeze({ height: 52, compactHeight: 44, icon: UI_ICON.size, gap: 8, depth: 5, lineHeight: 20 });
 const TONES = Object.freeze({
-  primary: { face: '#39796b', held: '#2e655b', edge: '#4c8a77', base: '#285b52', shine: '#a6c9ad88', ink: C.white, icon: '#f3d4a0' },
-  secondary: { face: '#fcfaf0', held: '#e1eadc', edge: '#b7cbbd', base: '#b4c6b8', shine: '#ffffff', ink: C.ink, icon: C.green },
-  quiet: { face: '#edf2e8', held: '#d7e4d6', edge: '#c3d2c4', base: '#c4d2c5', shine: '#ffffff99', ink: C.ink, icon: C.green }
+  primary: { face: '#326d61', lower: '#204d46', held: '#214e46', edge: C.brassDark, base: '#173c35', shine: '#dbdcada6', ink: C.white, icon: '#f1d39b' },
+  secondary: { face: '#fffdf4', lower: '#eae9d8', held: '#e2e6d5', edge: C.surfaceEdge, base: '#afb99f', shine: '#ffffff', ink: C.ink, icon: C.green },
+  quiet: { face: '#f3f3e6', lower: '#e2e8d8', held: '#d4dfcc', edge: '#b9c6ad', base: '#b2bea5', shine: '#ffffffbf', ink: C.ink, icon: C.green }
 });
 
 function optionsFor(style) { return style && typeof style === 'object' ? style : { style }; }
@@ -50,25 +51,34 @@ function drawButton(r, text, x, y, w, h, action, style) {
   const pointer = r.pointer;
   const pressed = !disabled && pointer && !pointer.dragging &&
     pointer.x >= x && pointer.x <= x + w && pointer.y >= y && pointer.y <= y + h;
-  // Color changes priority; geometry, icon size and baseline stay the same.
-  const depth = flat ? 0 : CONTROL.depth, faceH = h - depth;
+  // The face travels inside the original target; low-motion mode keeps color feedback.
+  const depth = flat ? 0 : primary ? CONTROL.depth : 3, faceH = h - depth;
   const top = y + (pressed && !flat && !r.reducedMotion ? depth - 1 : 0);
   const cut = primary ? 12 : 9, notch = primary && w >= 140;
   if (disabled) c.globalAlpha *= .46;
   if (tab) {
     plaque(r, x + 2, y + 4, w - 4, h - 8, 7, false,
-      pressed ? C.soft : options.selected ? C.panel : null, options.selected ? C.line : null);
-    if (options.selected) r.line([[x + w / 2 - 15, y + h - 8], [x + w / 2 + 15, y + h - 8]], C.green, 1.5);
+      pressed ? C.soft : options.selected ? C.panel : null, options.selected ? C.surfaceEdge : null);
+    if (options.selected) {
+      r.line([[x + 12, y + 5], [x + w - 12, y + 5]], C.white, 1);
+      r.line([[x + w / 2 - 15, y + h - 8], [x + w / 2 + 15, y + h - 8]], C.gold, 2);
+    }
   } else if (textOnly) {
     if (pressed) r.round(x + 2, y + 5, w - 4, h - 10, 8, C.soft);
   } else {
-    if (!pressed && !disabled && primary) {
-      r.round(x + 4, y + 7, w - 8, faceH, 14, '#476c5b12');
-      r.round(x + 2, y + 4, w - 4, faceH, 14, '#476c5b12');
-    }
+    if (!pressed && !disabled && r.effectsQuality !== 'low')
+      plaque(r, x + 3, y + depth + 3, w - 6, faceH, cut, false, '#143d341a');
+    plaque(r, x + 1, y + depth + 1, w - 2, faceH, cut, notch, '#143d342e');
     plaque(r, x, y + depth, w, faceH, cut, notch, tone.base);
-    plaque(r, x, top, w, faceH, cut, notch, pressed ? tone.held : tone.face, tone.edge);
-    r.line([[x + cut + 3, top + 2], [x + w - cut - 3, top + 2]], tone.shine, 1);
+    const face = pressed ? tone.held : r.effectsQuality === 'low' ? tone.face :
+      materialGradient(r, x, top, w, faceH, [[0, tone.face], [1, tone.lower]]);
+    plaque(r, x, top, w, faceH, cut, notch, face, tone.edge);
+    if (primary) {
+      plaque(r, x + 2, top + 2, w - 4, faceH - 4, cut - 1, notch, null, '#cfb37b69');
+      r.line([[x + cut, y + h - 1.5], [x + w - cut, y + h - 1.5]], '#4f72604f', 1);
+    }
+    r.line([[x + 2, top + cut], [x + cut, top + 2], [x + w - cut, top + 2]], tone.shine, 1);
+    r.line([[x + cut, top + faceH - 2], [x + w - cut, top + faceH - 2]], primary ? '#102f344f' : '#8d9c7733', 1);
   }
   const middle = top + faceH / 2;
   const feedbackAge = Number.isFinite(options.feedbackAt) ? r.now - options.feedbackAt : -1;
@@ -76,7 +86,7 @@ function drawButton(r, text, x, y, w, h, action, style) {
   const response = feedback ? Math.sin(feedbackAge / 650 * Math.PI) : 0;
   if (response) {
     c.save(); c.globalAlpha *= response * .55;
-    plaque(r, x + 2, top + 2, w - 4, faceH - 4, Math.max(4, cut - 2), false, null, C.green);
+    plaque(r, x + 2, top + 2, w - 4, faceH - 4, Math.max(4, cut - 2), false, null, primary ? C.brassLight : C.green);
     c.restore();
   }
   const groupX = x + ui.inset + (w - ui.inset * 2 - ui.trailing - ui.leading - ui.textSpan) / 2;

@@ -12,6 +12,7 @@ const { drawHomeDelivery } = require('./page-atmosphere');
 const { drawGuideTargets } = require('./guide-view');
 const { drawHomeArchitecture } = require('./world-art');
 const { drawRoutePreview } = require('./route-preview');
+const { drawPaving, drawFloorLighting, drawGroundGlow, drawTileFocus, drawActorShadow } = require('./scene-lighting');
 
 const COLOR = {
   sky: '#e9efe7', forest: '#b8cebf', fog: '#d6e2d7', teal: '#60b4ba',
@@ -75,15 +76,17 @@ function grass(r, x, y, size, now, color, wind = windState(now)) {
 
 function postOffice(r, x, y, size, now, ready) {
   const c = r.ctx; c.save(); c.translate(x, y); c.scale(size / 44, size / 44);
-  polygon(r, [[-18, 0], [20, -9], [42, 1], [9, 13]], '#597c6633');
-  ellipse(r, 2, 2, 23, 7, '#597c6619');
+  polygon(r, [[-18, 0], [20, -9], [44, 3], [10, 15]], '#315b493d');
+  ellipse(r, 2, 2, 23, 7, '#294d4933');
   if (ready) glow(r, 0, -11, 20, COLOR.gold, .065 + Math.sin(now / 550) * .012);
-  polygon(r, OFFICE.front, '#fff5de');
-  polygon(r, OFFICE.side, '#c2cbb2');
-  polygon(r, OFFICE.roof, '#cf8b74');
-  polygon(r, [[-23, -27], [-4, -43], [8, -35], [8, -19]], '#e9a087');
-  polygon(r, OFFICE.frontTrim, '#edb296');
-  polygon(r, OFFICE.sideTrim, '#ad705c');
+  polygon(r, OFFICE.front, '#fff1d5');
+  polygon(r, OFFICE.side, '#91ac95');
+  polygon(r, OFFICE.roof, '#b97559');
+  polygon(r, [[-23, -27], [-4, -43], [8, -35], [8, -19]], '#e8ae7e');
+  polygon(r, OFFICE.frontTrim, '#d99a72');
+  polygon(r, OFFICE.sideTrim, '#805b49');
+  r.line([[-18, -23], [8, -16], [24, -24]], '#536d565e', 2.2);
+  r.line([[8, -15], [8, 1]], '#fff9dfb0', 1.2);
   r.line([[-4, -42], [24, -35]], '#f6c4a5', 1.4);
   [[-11, -37, 1, -21], [-17, -32, -9, -24], [5, -41, 17, -28]].forEach(([ax, ay, bx, by]) => r.line([[ax, ay], [bx, by]], '#f8bea063', .65));
   r.line([[-18, -5], [7, 1]], '#e0d9be', 1.1);
@@ -165,13 +168,17 @@ function floatingMail(r, x, y, size, now, cell, seal, action) {
   glow(r, x, y - 10, size * .52, seal ? COLOR.teal : COLOR.gold, .055);
   c.save(); c.translate(x, floatY); c.rotate(angle);
   if (seal) {
-    r.round(-size * .36, -size * .43, size * .72, size * .86, 2, '#79c6c9', '#d0f0e5');
-    r.round(-size * .23, -size * .29, size * .46, size * .57, 1, '#b3e0d9');
+    r.round(-size * .36, -size * .43 + 1.4, size * .72, size * .86, 2, '#3d8587');
+    r.round(-size * .36, -size * .43, size * .72, size * .86 - 1.4, 2, '#75c1bc', '#d0f0e5');
+    r.round(-size * .23, -size * .29, size * .46, size * .57, 1, '#d0edcf');
     r.icon('star', 0, 0, size * .44, '#39797c');
     [-1, 0, 1].forEach(i => { r.circle(-size * .37, i * size * .24, 1.1, COLOR.stone); r.circle(size * .37, i * size * .24, 1.1, COLOR.stone); });
   } else {
     r.icon('letter', 0, 0, size, COLOR.gold);
-    r.circle(0, 1, size * .095, '#bd7146');
+    r.line([[-size * .29, -size * .24], [size * .29, -size * .24]], '#ffeab7', .8);
+    r.line([[-size * .29, size * .24], [size * .29, size * .24]], '#8b693f', .8);
+    r.circle(0, 1.5, size * .115, '#925333');
+    r.circle(-.3, .8, size * .095, '#d89263');
   }
   c.restore();
   const sparkle = (now / 1800 + cell * .31) % 1;
@@ -186,6 +193,7 @@ function drawBoard(r, game, now, rect, guide) {
   // Performance mode still animates a deliberate move, but idle scenery stays still.
   const quietScenery = options.reducedMotion || r.effectsQuality === 'low';
   const time = quietScenery ? 0 : Number.isFinite(r.ambientNow) ? r.ambientNow : now;
+  options.idleTime = time;
   const wind = windState(time, quietScenery);
   const l = game.level, s = game.state;
   const view = options.reducedMotion
@@ -207,7 +215,9 @@ function drawBoard(r, game, now, rect, guide) {
   c.scale(view.scale, view.scale); c.translate(-p.centerX, -p.centerY);
   glow(r, rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w * .32, '#f9f3d3', .026);
   const shadowBottom = p.toWorld(p.centerX, rect.y + rect.h - 1)[1];
-  drawIslandSurface(r, corners, 26, time, shadowBottom);
+  const front = Math.max(...corners.map(p => p[1]));
+  const depth = Math.min(42, Math.max(26, hw * 1.35), Math.max(20, shadowBottom - front - 10));
+  drawIslandSurface(r, corners, depth, time, shadowBottom);
   const { walls, adjacent, ordered } = geometry;
   const selectCell = cell => {
     if (game.inspectGuideCell(cell)) return;
@@ -225,9 +235,12 @@ function drawBoard(r, game, now, rect, guide) {
   const enterOffice = !game.reviewing && s.status === 'playing' && (adjacent.has(l.exit) || s.player === l.exit)
     ? cellAction(l.exit) : null;
   const actors = [];
+  const pointer = target.pointer;
+  const pressedCell = pointer && !pointer.dragging && !game.modal && !game.busy
+    ? p.cellAt(pointer.x, pointer.y) : null;
   for (const cell of ordered) {
     const [x, y] = point(cell), wall = walls.has(cell);
-    diamond(r, x, y, hw - .8, hh - .7, wall ? (cell % 3 ? '#9db792' : '#acc09a') : cell % 3 ? COLOR.stone : COLOR.stoneLight, wall ? '#c3d1ac' : '#fff9e8', wall ? 4 : 0);
+    drawPaving(r, x, y, hw - .8, hh - .7, wall, cell % 3);
     if (wall) {
       if (cell % 3 === 0) actors.push({ y: y + 2, draw: () => {
         polygon(r, [[x - 8, y - 3], [x - 5, y - 10], [x + 2, y - 12], [x + 8, y - 5], [x + 4, y]], '#d5d7bb');
@@ -240,8 +253,6 @@ function drawBoard(r, game, now, rect, guide) {
       if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false, r.atmosphereMood, wind) });
       else if (cell % 2) actors.push({ y, draw: () => grass(r, x + 5, y - 4, 6, time, '#b1c293', wind) });
     } else {
-      // Shallow bevels keep the original tappable floor plane exact.
-      r.line([[x - hw + 2, y + 1], [x, y + hh - 1.4], [x + hw - 2, y + 1]], '#c4ccb178', .8);
       groundDetail(r, game, time, cell, p);
       if (cell === l.exit) {
         diamond(r, x, y, hw - 2, hh - 1.5, '#cbd9b6', '#eff1ce');
@@ -252,11 +263,15 @@ function drawBoard(r, game, now, rect, guide) {
         } });
       }
       if (!game.reviewing && s.status === 'playing' && adjacent.has(cell) && (!guide || guide.visual.tapCell === cell)) {
-        diamond(r, x, y, hw - 3, hh - 2, '#f4d49b66', null);
-        floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#c69755', 1.45);
-        ellipse(r, x, y + hh * .43, hw * .12, hh * .14, '#b68b52');
+        drawTileFocus(r, x, y, hw, hh, pressedCell === cell);
+      }
+      if (cell === s.player && pressedCell === cell && !game.reviewing && s.status === 'playing' && !guide) {
+        drawTileFocus(r, x, y, hw, hh, true);
       }
       const selectProp = !game.reviewing && s.status === 'playing' ? cellAction(cell) : null;
+      if (s.lights.includes(cell) || s.letters.includes(cell) || s.seals.includes(cell)) {
+        drawGroundGlow(r, x, y, hw, hh, s.seals.includes(cell) ? '#5cc9c6' : '#eac278');
+      }
       if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, time, selectProp) });
       if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false, selectProp) });
       if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, time, cell, true, selectProp) });
@@ -264,23 +279,25 @@ function drawBoard(r, game, now, rect, guide) {
     // The courier remains visual only; uncovered floor tiles keep their normal actions.
     r.hit(x - hw, y - hh, hw * 2, hh * 2, cellAction(cell), (hx, hy) => p.contains(cell, hx, hy));
   }
+  drawFloorLighting(r, corners);
   if (game.reviewing) r.line((s.history || []).map(point), '#c8874eca', 2, [3, 4]);
   drawRoutePreview(target, game, p, guide);
+  drawEffects(target, game, now, point, hw * 1.7, { ...options, layer: 'ground' });
   drawActorTrails(r, game, now, point, hw * 1.7, options);
   [true, false].forEach(ghost => {
     const frame = actorFrame(game, now, point, ghost, options), shared = ghost && s.echo === s.player;
     if (!frame.alpha) return;
     if (shared) frame.x += hw * .28;
+    drawActorShadow(r, frame, hw, hh, ghost);
     actors.push({ y: frame.y + (ghost ? 2.5 : 3), draw: () => {
-      if (!ghost) { ellipse(r, frame.x, frame.y + 2, hw * .46, hh * .28, '#344b3b40'); ellipse(r, frame.x, frame.y + 2, hw * .59, hh * .4, '#f5d89420'); }
       const size = hw * (shared ? .85 : 1.16);
-      r.courier(frame.x, frame.y - frame.lift - hw * .38, size, ghost, frame);
+      r.courier(frame.x, frame.y - frame.lift - hw * .38, size, ghost, { ...frame, grounded: true });
     } });
   });
   actors.sort((a, b) => a.y - b.y).forEach(actor => actor.draw());
   drawGuideTargets(r, guide, p, time);
   drawDestination(r, game, time, p, options, enterOffice);
-  drawEffects(target, game, now, point, hw * 1.7, options);
+  drawEffects(target, game, now, point, hw * 1.7, { ...options, layer: 'air' });
   c.restore();
 }
 

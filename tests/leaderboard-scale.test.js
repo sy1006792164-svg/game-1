@@ -104,9 +104,9 @@ function harness(t, pixelRatio) {
 }
 
 function assertFullSize(frame, width = 354) {
-  const hero = frame.fills.find(item => item.color === '#316c5f' && item.w > 50);
+  const hero = frame.fills.find(item => item.color === '#285a50' && item.w > 50);
   assert.ok(hero, 'the scorecard must remain painted during cached re-entry');
-  assert.deepEqual(hero, { color: '#316c5f', x: 18, y: 120, w: width, h: 126 }, 'the card occupies its full main-domain viewport');
+  assert.deepEqual(hero, { color: '#285a50', x: 18, y: 120, w: width, h: 126 }, 'the card occupies its full main-domain viewport');
   const name = frame.labels.find(item => item.value === '本人');
   assert.deepEqual(name, { value: '本人', x: 85, y: 147, size: 15 }, 'cached text keeps its rendered position and font size');
 }

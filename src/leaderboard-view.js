@@ -45,7 +45,11 @@ function drawFooter(r, note, warning) {
 }
 
 function drawRankPlaceholder(r, game, box) {
-  r.round(box.x, box.y, box.w, 126, 19, C.green);
+  r.round(box.x + 1, box.y + 3, box.w - 2, 126, 19, C.contact);
+  r.round(box.x, box.y + 2, box.w, 126, 19, '#183e36');
+  r.round(box.x, box.y, box.w, 126, 19, '#285a50', C.brassDark);
+  r.round(box.x + 8, box.y + 8, box.w - 16, 110, 13, null, '#cfb37b69');
+  r.round(box.x + 19, box.y + 1, box.w - 38, 1, .5, '#e6d3a66e');
   r.circle(55, box.y + 37, 19, '#dce9d8');
   r.text('我的邮路', 88, box.y + 31, 15, C.white, 'left', '600');
   ['总星数', '已通关', '最佳总步数'].forEach((label, i) => {

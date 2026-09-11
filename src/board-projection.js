@@ -71,4 +71,4 @@ function createProjection(level, rect, view) {
   return { halfW, halfH, bounds, centerX, centerY, floor, corner, point, visible, contains, cellAt, direction, vector, corners, toScreen, toWorld };
 }
 
-module.exports = { createProjection, insideRect };
+module.exports = { createProjection, insideRect, TILT };
