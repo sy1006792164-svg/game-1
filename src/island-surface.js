@@ -10,14 +10,21 @@ function edgePoint(a, b, fraction, drop = 0) {
   return [a[0] + (b[0] - a[0]) * fraction, a[1] + (b[1] - a[1]) * fraction + drop];
 }
 
-function drawIslandSurface(r, corners, depth, now) {
+function drawIslandSurface(r, corners, depth, now, limitBottom = Infinity) {
   const c = r.ctx;
   if (depth > 0) {
     const xs = corners.map(point => point[0]), ys = corners.map(point => point[1]);
     const left = Math.min(...xs), right = Math.max(...xs), front = Math.max(...ys);
-    c.save(); c.globalAlpha *= Math.min(1, depth / 26);
-    c.beginPath(); c.ellipse((left + right) / 2, front + depth + 7, (right - left) * .34, 10, 0, 0, Math.PI * 2);
-    c.fillStyle = '#64816c18'; c.fill(); c.restore();
+    // A short viewport may leave only a few pixels below the stone base. Fit
+    // just its soft shadow there instead of cutting a wide ellipse in half.
+    const shadowRoom = limitBottom - front - depth;
+    const shadowGap = Math.min(7, Math.max(0, shadowRoom / 2));
+    const shadowRadius = Math.min(10, Math.max(0, shadowRoom - shadowGap));
+    if (shadowRadius > 0) {
+      c.save(); c.globalAlpha *= Math.min(1, depth / 26);
+      c.beginPath(); c.ellipse((left + right) / 2, front + depth + shadowGap, (right - left) * .34, shadowRadius, 0, 0, Math.PI * 2);
+      c.fillStyle = '#64816c18'; c.fill(); c.restore();
+    }
     corners.forEach((a, index) => {
       const b = corners[(index + 1) % corners.length];
       // Clockwise screen-space edges face the viewer when they run right to left.

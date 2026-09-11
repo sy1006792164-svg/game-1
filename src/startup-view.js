@@ -36,7 +36,7 @@ function drawLoading(r, game, y, now) {
   r.text(Math.floor(progress * 100) + '%', 348, y + 7, 13, C.green, 'right', '600');
   r.round(42, y + 25, 306, 12, 6, C.soft, C.line);
   if (progress > 0) r.round(42, y + 25, 306 * progress, 12, 6, C.green);
-  if (progress > 0 && !r.reducedMotion) {
+  if (progress > 0 && !r.reducedMotion && r.effectsQuality !== 'low') {
     const width = 306 * progress, sweep = (now % 1350) / 1350;
     r.ctx.save(); r.round(42, y + 25, width, 12, 6); r.ctx.clip();
     r.round(42 - 36 + (width + 36) * sweep, y + 25, 36, 12, 6, '#e4f5d85c');
@@ -48,12 +48,13 @@ function drawLoading(r, game, y, now) {
 function drawStartup(r, game, now) {
   const ui = startupLayout(r.H), bounds = r.viewport || { x: 0, w: 390 };
   const mood = r.atmosphereMood, quietMotion = r.reducedMotion || r.effectsQuality === 'low';
+  const sceneNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   drawBrand(r, ui.top);
-  drawAmbientOverlay(r, now, 'startup', { x: bounds.x, y: ui.heroY, w: bounds.w, h: ui.heroH },
+  drawAmbientOverlay(r, sceneNow, 'startup', { x: bounds.x, y: ui.heroY, w: bounds.w, h: ui.heroH },
     { reducedMotion: quietMotion, quality: r.effectsQuality, mood, treatment: atmosphereTreatment('startup') });
   const hero = { x: 13, y: ui.heroY, w: 364, h: ui.heroH };
-  drawVignette(r, now, hero, { reducedMotion: quietMotion, mood });
-  drawStartupJourney(r, game.startup && game.startup.progress, hero, now, { reducedMotion: quietMotion });
+  drawVignette(r, sceneNow, hero, { reducedMotion: quietMotion, mood });
+  drawStartupJourney(r, game.startup && game.startup.progress, hero, sceneNow, { reducedMotion: quietMotion });
   r.panel(22, ui.adviceY, 346, ui.adviceH, { fill: C.panel, stroke: '#9ab8a5', accent: C.green });
   r.text(HEALTH_ADVICE_TITLE, 195, ui.adviceY + 27, 17, C.ink, 'center', '700');
   HEALTH_ADVICE_LINES.forEach((text, index) => r.text(text, 195, ui.adviceY + 62 + index * 22, 15, C.ink, 'center'));

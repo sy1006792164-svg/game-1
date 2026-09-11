@@ -232,7 +232,7 @@ function createPlatform(environment) {
           } else {
             if (source !== 'mouse') return;
             if (type === 'end' && event.button != null && event.button !== 0) return;
-            if (type === 'move' && event.buttons === 0) { cancel(); return; }
+            if (type === 'move' && Number.isFinite(event.buttons) && !(event.buttons & 1)) { cancel(); return; }
             const point = canvasPoint(event);
             if (!finitePoint(point)) { cancel(); return; }
             last = point;
@@ -245,6 +245,7 @@ function createPlatform(environment) {
         listen(releaseTarget, 'mousemove', function (event) { mouse('move', event); });
         listen(releaseTarget, 'mouseup', function (event) { mouse('end', event); });
         listen(canvas, 'mouseleave', cancel);
+        listen(canvas, 'contextmenu', cancel);
         listen(windowTarget, 'blur', cancel);
         listenWheel();
       }
@@ -272,6 +273,11 @@ function createPlatform(environment) {
           }
         } else if (activeId === null || (event.pointerId !== activeId && !(type === 'cancel' && event.pointerId == null))) return;
         if (event.preventDefault) event.preventDefault();
+        // A context menu or host overlay can swallow the primary release. The
+        // next hover (or secondary-button move) must cancel, never finish a tap.
+        if (type === 'move' && event.pointerType === 'mouse' && Number.isFinite(event.buttons) && !(event.buttons & 1)) {
+          cancel(); return;
+        }
         if (type === 'cancel') { if (finitePoint(point)) last = point; cancel(); return; }
         if (!finitePoint(point)) return;
         last = point;
@@ -280,6 +286,7 @@ function createPlatform(environment) {
       });
     });
     listenWheel();
+    listen(canvas, 'contextmenu', cancel);
     listen(win, 'blur', cancel);
     listen(doc, 'visibilitychange', function () { if (doc.hidden) cancel(); });
     return cleanup;
@@ -288,7 +295,9 @@ function createPlatform(environment) {
   function onKey(listener) {
     if (!win || typeof win.addEventListener !== 'function') return function () {};
     const handler = function (event) {
-      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+      // IME navigation belongs to candidate selection, including boundary
+      // events where isComposing has already reset but the legacy code is 229.
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
       const tag = event.target && event.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (event.target && event.target.isContentEditable)) return;
       if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].indexOf(event.key) !== -1) event.preventDefault();

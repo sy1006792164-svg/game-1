@@ -43,8 +43,9 @@ function drawStampArt(r, stamp, rect, { next = false, held = false } = {}) {
   r.circle(middle, 62, 28, owned ? '#eff1df' : next ? '#f9e6bd' : '#d9e5d5', owned ? '#c3d0b1' : next ? '#d7b777' : '#b6cbb6');
   r.circle(middle, 62, 23, null, owned ? '#fffdf4' : next ? '#fff2d8' : '#ecf1e7');
   r.icon(stamp.icon, middle, 63, 39, ink);
-  if (next && !r.reducedMotion) {
-    const pulse = .45 + Math.sin(r.now / 850) * .2, angle = r.now / 2300;
+  if (next && !r.reducedMotion && r.effectsQuality !== 'low') {
+    const time = Number.isFinite(r.ambientNow) ? r.ambientNow : r.now;
+    const pulse = .45 + Math.sin(time / 850) * .2, angle = time / 2300;
     c.save(); c.globalAlpha *= pulse;
     r.circle(middle + Math.cos(angle) * 28, 63 + Math.sin(angle) * 28, 2, C.gold);
     r.circle(middle - Math.cos(angle) * 28, 63 - Math.sin(angle) * 28, 1.2, '#c79c53');

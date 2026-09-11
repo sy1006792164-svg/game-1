@@ -130,14 +130,16 @@ function drawHomeDelivery(r, time, mood, amount = 1, reducedMotion = false) {
   if (phase > .38) return;
   const t = ease(phase / .38), fade = Math.sin(t * Math.PI);
   const x = -170 + t * 139, y = -37 + Math.sin(t * Math.PI) * -23 + t * 52;
-  const c = r.ctx;
+  const c = r.ctx, alpha = c.globalAlpha;
   c.save(); c.globalAlpha *= amount * fade * .78;
   for (let i = 3; i > 0; i--) {
     const trailT = Math.max(0, t - i * .045), tx = -170 + trailT * 139;
     const ty = -37 + Math.sin(trailT * Math.PI) * -23 + trailT * 52;
     c.globalAlpha *= .72; r.circle(tx, ty, 1.2, mood.light);
   }
-  c.globalAlpha = Math.max(.15, fade) * amount;
+  // The letter must reach zero opacity at both ends and inherit the vignette
+  // opacity; a visibility floor makes it pop in and out at the loop boundary.
+  c.globalAlpha = alpha * fade * amount;
   r.icon('letter', x, y, 14, mood.windWarm);
   if (t > .78) {
     c.globalAlpha *= (t - .78) / .22 * .17;

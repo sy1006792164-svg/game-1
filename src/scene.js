@@ -31,8 +31,10 @@ function ellipse(r, x, y, rx, ry, color) {
 }
 
 function glow(r, x, y, radius, color, alpha) {
-  const c = r.ctx; c.save();
-  for (let i = 3; i > 0; i--) { c.globalAlpha = alpha / i; r.circle(x, y, radius * i / 2, color); }
+  const c = r.ctx, parentAlpha = c.globalAlpha; c.save();
+  if (r.effectsQuality === 'low') {
+    c.globalAlpha = parentAlpha * alpha; r.circle(x, y, radius, color);
+  } else for (let i = 3; i > 0; i--) { c.globalAlpha = parentAlpha * alpha / i; r.circle(x, y, radius * i / 2, color); }
   c.restore();
 }
 
@@ -50,8 +52,7 @@ function hitProp(r, x, y, width, height, radius, angle, action) {
   });
 }
 
-function tree(r, x, y, size, now, distant, mood = chapterMood(0)) {
-  const wind = windState(now);
+function tree(r, x, y, size, now, distant, mood = chapterMood(0), wind = windState(now)) {
   const slowSway = distant ? .01 : .012;
   const impulse = distant ? 0 : Math.max(0, Number(r.ambientImpulse) || 0);
   const gustSway = distant ? .008 + wind.gust * .025 : .015 + wind.strength * .012 + wind.gust * .045 + impulse * .035;
@@ -64,8 +65,8 @@ function tree(r, x, y, size, now, distant, mood = chapterMood(0)) {
   if (!distant) r.line([[x - size * .09 + sway, y - size * .94], [x - size * .16 + sway, y - size * .83]], mood.celestialGlow, .85);
 }
 
-function grass(r, x, y, size, now, color) {
-  const wind = windState(now), impulse = Math.max(0, Number(r.ambientImpulse) || 0);
+function grass(r, x, y, size, now, color, wind = windState(now)) {
+  const impulse = Math.max(0, Number(r.ambientImpulse) || 0);
   const sway = Math.sin(now / 1100 + x) * (1.4 + wind.strength * .6 + wind.gust * 2 + impulse * 1.5);
   r.line([[x - size * .6, y - size * .45], [x, y + 1], [x - size * .12 + sway, y - size]], color || '#91b68a', 1.4);
   r.line([[x, y + 1], [x + size * .6 + sway, y - size * .6]], color || '#91b68a', 1.2);
@@ -181,7 +182,10 @@ function floatingMail(r, x, y, size, now, cell, seal, action) {
 
 function drawBoard(r, game, now, rect, guide) {
   const options = { reducedMotion: !!r.reducedMotion };
-  const time = options.reducedMotion ? 0 : Number.isFinite(r.ambientNow) ? r.ambientNow : now;
+  // Performance mode still animates a deliberate move, but idle scenery stays still.
+  const quietScenery = options.reducedMotion || r.effectsQuality === 'low';
+  const time = quietScenery ? 0 : Number.isFinite(r.ambientNow) ? r.ambientNow : now;
+  const wind = windState(time, quietScenery);
   const l = game.level, s = game.state;
   const view = options.reducedMotion
     ? { scale: game.camera.zoom, panX: game.camera.panX, panY: game.camera.panY }
@@ -201,7 +205,8 @@ function drawBoard(r, game, now, rect, guide) {
   c.translate(p.centerX + view.panX * rect.w, p.centerY + view.panY * rect.h);
   c.scale(view.scale, view.scale); c.translate(-p.centerX, -p.centerY);
   glow(r, rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w * .32, '#f9f3d3', .026);
-  drawIslandSurface(r, corners, 26, time);
+  const shadowBottom = p.toWorld(p.centerX, rect.y + rect.h - 1)[1];
+  drawIslandSurface(r, corners, 26, time, shadowBottom);
   const { walls, adjacent, ordered } = geometry;
   const selectCell = cell => {
     if (game.inspectGuideCell(cell)) return;
@@ -227,12 +232,12 @@ function drawBoard(r, game, now, rect, guide) {
         polygon(r, [[x - 8, y - 3], [x - 5, y - 10], [x + 2, y - 12], [x + 8, y - 5], [x + 4, y]], '#d5d7bb');
         polygon(r, [[x + 2, y - 12], [x + 8, y - 5], [x + 4, y], [x, y - 4]], '#a3b29a');
         r.line([[x - 5, y - 10], [x + 2, y - 12], [x + 6, y - 7]], '#f6efd6', 1);
-        grass(r, x - 8, y - 1, 5, time);
+        grass(r, x - 8, y - 1, 5, time, undefined, wind);
       } });
       // Trees only line the rear rim, so they never hide a floor tile.
       const onRim = Math.floor(cell / l.width) === p.bounds.minRow || cell % l.width === p.bounds.minCol;
-      if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false, r.atmosphereMood) });
-      else if (cell % 2) actors.push({ y, draw: () => grass(r, x + 5, y - 4, 6, time, '#b1c293') });
+      if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false, r.atmosphereMood, wind) });
+      else if (cell % 2) actors.push({ y, draw: () => grass(r, x + 5, y - 4, 6, time, '#b1c293', wind) });
     } else {
       // Shallow bevels keep the original tappable floor plane exact.
       r.line([[x - hw + 2, y + 1], [x, y + hh - 1.4], [x + hw - 2, y + 1]], '#c4ccb178', .8);
@@ -287,7 +292,9 @@ function drawBoard(r, game, now, rect, guide) {
 }
 
 function drawBackdrop(r, now, chapter, options = {}) {
-  if (options.reducedMotion) now = 0;
+  const quietScenery = options.reducedMotion || r.reducedMotion || options.quality === 'low' || r.effectsQuality === 'low';
+  if (quietScenery) now = 0;
+  const wind = windState(now, quietScenery);
   const H = r.H, c = r.ctx;
   const mood = options.mood || chapterMood(chapter, options.totalChapters);
   const bounds = r.viewport || { x: 0, y: 0, w: 390, h: H };
@@ -318,16 +325,17 @@ function drawBackdrop(r, now, chapter, options = {}) {
   c.lineTo(mapX(390), H * .64); c.closePath(); c.fillStyle = mood.ridgeNear; c.fill();
   ellipse(r, mapX(167 + drift), H * .49, 247 * spread, 31, mood.fogFar);
   ellipse(r, mapX(272 - drift), H * .58, 216 * spread, 35, mood.fogNear);
-  [-20, 403].forEach((x, i) => tree(r, mapX(x), H * .69, 96 + i * 19, now, true, mood));
+  [-20, 403].forEach((x, i) => tree(r, mapX(x), H * .69, 96 + i * 19, now, true, mood, wind));
   ellipse(r, mapX(195), H * .77, 235 * spread, 53, mood.fogFar);
-  drawDistantAtmosphere(r, now, { x: bounds.x, y: 64, w: bounds.w, h: H - 130 }, { ...options, mood });
+  drawDistantAtmosphere(r, now, { x: bounds.x, y: 64, w: bounds.w, h: H - 130 }, { ...options, reducedMotion: quietScenery, mood });
 }
 
 function drawVignette(r, now, rect, options = {}) {
-  if (options.reducedMotion) now = 0;
+  const quietScenery = options.reducedMotion || r.reducedMotion || options.quality === 'low' || r.effectsQuality === 'low';
+  if (quietScenery) now = 0;
   const c = r.ctx, scale = Math.min(rect.w / 350, rect.h / 285), x = rect.x + rect.w / 2, y = rect.y + rect.h * .53;
   c.save(); c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip(); c.translate(x, y); c.scale(scale, scale);
-  drawHomeArchitecture(r, now);
+  drawHomeArchitecture(r, now, { ...options, reducedMotion: quietScenery });
   r.line([[-28, 36], [-9, 45], [11, 35], [26, 27]], '#5a9f9c99', 1.3, [2, 5]);
   const bob = Math.sin(now / 1150) * 3.2, breath = Math.sin(now / 1500);
   r.courier(-31 + Math.sin(now / 2100), 25 + bob, 25, true, { alpha: .66 + breath * .07, stride: 0, facing: 1 });
@@ -336,7 +344,7 @@ function drawVignette(r, now, rect, options = {}) {
   c.restore();
   floatingMail(r, -100 + Math.sin(now / 1800) * 3.5, -53 + Math.sin(now / 1200) * 3, 19, now, 5, false);
   floatingMail(r, -69 + Math.sin(now / 1700 + 1) * 2.5, -83 + Math.sin(now / 1300) * 4, 13, now, 2, true);
-  if (options.deliveryStory) drawHomeDelivery(r, now, options.mood || chapterMood(0), .9, options.reducedMotion);
+  if (options.deliveryStory) drawHomeDelivery(r, now, options.mood || chapterMood(0), .9, quietScenery);
   // Two distant swifts add life without competing with the architectural silhouette.
   [-1, 1].forEach((side, i) => {
     const sx = side * 120 + Math.sin(now / 2300 + i) * 4, sy = -105 + i * 16 + Math.sin(now / 1500 + i) * 2, flap = Math.sin(now / 500 + i) * 2.1;

@@ -48,7 +48,10 @@ function drawMist(r, time, rect, amount, mood, low = false) {
     const direction = i === 1 ? 1 - phase : phase;
     const x = rect.x - rect.w * .38 + direction * rect.w * 1.76;
     const y = rect.y + rect.h * (.28 + i * .23) + Math.sin(time / 3600 + i * 2.1) * 4;
-    c.globalAlpha = alpha * amount * (.075 + i * .018);
+    // These wide ellipses still touch the viewport when their carrier wraps.
+    // Fade both ends of the loop to keep the fog from jumping between edges.
+    const fade = smoothstep(Math.min(phase, 1 - phase) / .12);
+    c.globalAlpha = alpha * amount * fade * (.075 + i * .018);
     c.fillStyle = i === 1 ? mood.fogNear : mood.fogFar;
     for (let layer = low ? 1 : 3; layer > 0; layer--) {
       c.beginPath();

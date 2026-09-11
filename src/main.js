@@ -87,6 +87,7 @@ class Game {
       }
     });
     platform.onHide(() => {
+      this.renderer.pauseAmbient(platform.now());
       this.startupLastAt = null;
       this.friendResumeRevision++;
       this.cancelRankingPointer();
@@ -306,6 +307,13 @@ class Game {
   }
   restore() {
     if (this.startupActive()) return false;
+    if (this.store.hasPendingReads()) {
+      this.store.flush();
+      if (this.store.hasPendingReads()) {
+        this.toast('本地进度暂时无法读取，原存档已保留，请稍后再试');
+        return false;
+      }
+    }
     this.cancelRankingPointer();
     this.pendingAction = null; this.blockedAt = null;
     const run = this.store.loadRun();
@@ -360,6 +368,13 @@ class Game {
     this.persist(); this.cue('start');
   }
   primary() {
+    if (this.store.hasPendingReads()) {
+      this.store.flush();
+      if (this.store.hasPendingReads()) {
+        this.toast('本地进度暂时无法读取，原存档已保留，请稍后再试');
+        return;
+      }
+    }
     if (this.store.loadRun() && this.restore()) return;
     this.start(this.nextLevel(), 'campaign');
   }
@@ -477,7 +492,7 @@ class Game {
     this.pendingAction = null;
     const old = this.modal, l = this.page === 'game' ? this.level : null;
     this.modal = { kind: 'help', title: '和回声一起送信',
-      ...helpContent(l, this.state ? this.state.reviveCount : 0, this.platform.kind),
+      ...helpContent(l, this.state ? this.state.reviveCount : 0, this.platform.kind, { canRevive: this.platform.kind === 'wechat' && this.ads.isConfigured() }),
       buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
   }
   home() { if (this.busy || this.startupActive()) return; this.cancelRankingPointer(); this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
@@ -589,7 +604,9 @@ class Game {
     const p = this.renderer.toLogical(x, y), b = this.renderer.boardRect;
     if (!b || !insideRect(b, p.x, p.y)) return;
     this.pointer = null; this.pendingAction = null;
-    this.camera.zoomAt(factor, (p.x - b.x - b.w / 2) / b.w, (p.y - b.y - b.h / 2 - 4) / b.h);
+    const projection = this.renderer.boardProjection;
+    if (!projection) return;
+    this.camera.zoomAt(factor, (p.x - projection.centerX) / b.w, (p.y - projection.centerY) / b.h);
     this.cameraMovedAt = this.platform.now();
   }
   pointerEvent(x, y, type) {
@@ -688,14 +705,17 @@ class Game {
     const list = this.listScroll();
     const activeList = !!list && (list.touching || Math.abs(list.velocity) > 4 || list.wheelTarget !== null ||
       list.offset < 0 || list.offset > list.max);
-    const smoothList = !!list && !this.modal && (this.platform.effectsQuality !== 'low' || activeList);
+    const quietMotion = this.platform.reducedMotion || this.platform.effectsQuality === 'low';
+    const listTransition = !!list && !quietMotion &&
+      (now - list.enteredAt < 600 || now - list.activeAt < 360);
+    const smoothList = !!list && !this.modal && (activeList || listTransition);
     const smoothScene = this.page === 'game' && !this.modal && (
       now - this.transitionAt < MOVE_MS || now - this.camera.enteredAt < INTRO_MS ||
       now - this.camera.shakeAt < SHAKE_MS || now - this.cameraMovedAt < 250 || !!this.pointer);
     const smooth = smoothList || smoothScene || this.rankingInteractive();
     if (this.platform.setFrameRate) this.platform.setFrameRate(smooth ? 60 : 30);
     // Idle scenes use 30 FPS; input and movement use every RAF.
-    const frameInterval = this.platform.kind === 'wechat' ? smooth ? 0 : 1000 / 30 : 16;
+    const frameInterval = smooth ? 0 : 1000 / 30;
     if (now - this.lastFrame >= frameInterval - .5) { this.renderer.draw(this, now, this.metrics); this.lastFrame = now; }
     this.frameId = this.platform.raf(() => this.loop());
   }

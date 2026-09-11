@@ -49,16 +49,17 @@ function drawHome(r, game, now) {
   const saved = game.savedRun(), completed = game.completion();
   const route = departure(game.nextLevel(), saved, completed), ui = layout(r.H), bounds = r.viewport || { x: 0, w: 390 };
   const mood = r.atmosphereMood, quietMotion = r.reducedMotion || r.effectsQuality === 'low';
+  const sceneNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   drawBrand(r, ui.top);
-  drawAmbientOverlay(r, now, 'home', { x: bounds.x, y: ui.heroY, w: bounds.w, h: ui.heroH },
+  drawAmbientOverlay(r, sceneNow, 'home', { x: bounds.x, y: ui.heroY, w: bounds.w, h: ui.heroH },
     { reducedMotion: quietMotion, quality: r.effectsQuality, mood, treatment: atmosphereTreatment('home') });
-  drawVignette(r, now, { x: 5, y: ui.heroY, w: 380, h: ui.heroH },
+  drawVignette(r, sceneNow, { x: 5, y: ui.heroY, w: 380, h: ui.heroH },
     { reducedMotion: quietMotion, mood, deliveryStory: r.effectsQuality !== 'low' });
   r.line([[171, ui.routeY - 13], [219, ui.routeY - 13]], '#a6bfa6', .8);
   r.label(route.detail, 195, ui.routeY + 6, 324, 12, C.ink, 'center', '600');
   r.text(saved ? '路线已留好，随时接着走' : '你拾起信笺 · 回声收集邮票', 195, ui.routeY + 28, 10, C.muted, 'center');
   if (!quietMotion) {
-    const breath = (1 + Math.sin(now / 1200)) / 2;
+    const breath = (1 + Math.sin(sceneNow / 1200)) / 2;
     const alpha = Math.round(12 + breath * 16).toString(16).padStart(2, '0');
     r.round(38 - breath * 2, ui.buttonY - 4 - breath * 2, 314 + breath * 4,
       CONTROL.height + 8 + breath * 4, 17, C.green + alpha);

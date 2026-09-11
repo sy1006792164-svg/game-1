@@ -165,3 +165,12 @@ test('a new mouse press recovers if a simulator overlay swallowed the previous r
   h.advance(1000); h.mouse('mousedown', 80, 100); h.mouse('mouseup', 80, 100);
   assert.deepEqual(h.seen, [[100, 120, 'start'], [100, 120, 'cancel'], [120, 140, 'start'], [120, 140, 'end']]);
 });
+
+test('devtools cancels context menus and mouse movement after the primary button is released', () => {
+  const h = harness();
+  h.mouse('mousedown'); h.canvas.emit('contextmenu', {}); h.mouse('mouseup');
+  h.mouse('mousedown'); h.mouse('mousemove', 80, 100, { buttons: 2 }); h.mouse('mouseup');
+  h.mouse('mousedown'); h.mouse('mouseup');
+  assert.equal(h.seen.filter(p => p[2] === 'cancel').length, 2);
+  assert.equal(h.seen.filter(p => p[2] === 'end').length, 1);
+});

@@ -115,6 +115,25 @@ function harness(options = {}) {
   };
 }
 
+test('zooming at a floor tile preserves its screen anchor with the shared guide framing', t => {
+  for (const metrics of [
+    { width: 320, height: 568, pixelRatio: 2, safeTop: 72, safeBottom: 0 },
+    { width: 390, height: 844, pixelRatio: 3, safeTop: 96, safeBottom: 34 },
+    { width: 430, height: 932, pixelRatio: 3, safeTop: 96, safeBottom: 34 }
+  ]) {
+    const h = harness({ guide: true, metrics }); t.after(() => h.destroy());
+    h.start(); h.draw(1200);
+    const r = h.game.renderer, cell = h.game.level.seals[0];
+    const before = r.boardProjection.point(cell);
+    h.game.zoomScene(before[0] * r.scale + r.ox, before[1] * r.scale + r.oy, 1.3);
+    h.draw();
+    const after = r.boardProjection.point(cell);
+    assert.ok(Math.abs(before[0] - after[0]) < 1e-8);
+    assert.ok(Math.abs(before[1] - after[1]) < 1e-8, 'vertical zoom must use the actual projection center');
+    assert.equal(h.game.state.turn, 0);
+  }
+});
+
 test('new mechanics use two actual board taps on small phones without spending a turn or accepting stray input', t => {
   for (const [id, seen] of [[13, {}], [16, { wind: true }], [19, { wind: true, bridge: true }]]) {
     const h = harness({ mechanics: true, development: true,
@@ -650,6 +669,40 @@ test('WeChat lists draw every RAF at 60 FPS and restore 30 FPS for modals and ot
   frame(1000 / 60);
   assert.equal(drawnAt.length, before + 1, 'leaving a list restores 30 FPS rendering');
   h.destroy();
+});
+
+test('browser idle scenery paints at 30 FPS while input and active scrolling remain responsive', t => {
+  for (const quiet of [false, true]) {
+    const h = harness({ kind: 'browser' }); t.after(() => h.destroy());
+    h.platform.reducedMotion = quiet;
+    let paints = 0;
+    h.game.renderer.draw = () => { paints++; };
+    const frame = () => { h.advance(1000 / 60, false); h.callbacks.frame(); };
+    h.game.lastFrame = h.platform.now();
+    for (let i = 0; i < 60; i++) frame();
+    assert.equal(paints, 30, 'idle browser backgrounds no longer redraw 60 times a second');
+    h.game.openPage('levels'); frame();
+    h.advance(700, false); frame();
+    paints = 0; h.game.lastFrame = h.platform.now();
+    for (let i = 0; i < 60; i++) frame();
+    assert.equal(paints, 30, 'settled lists use the same idle cadence in either motion mode');
+    h.game.levelScroll.touching = true;
+    paints = 0;
+    for (let i = 0; i < 6; i++) frame();
+    assert.equal(paints, 6, 'a held list still paints each incoming frame');
+  }
+});
+
+test('backgrounding resumes decorative phases without changing action feedback deadlines', t => {
+  const h = harness(); t.after(() => h.destroy());
+  h.draw(1000);
+  const homeTime = h.game.renderer.ambientNow;
+  h.callbacks.hide(); h.advance(60000, false); h.callbacks.show();
+  assert.equal(h.game.renderer.ambientNow, homeTime, 'home scenery resumes exactly where it stopped');
+  h.start(); h.draw(1200);
+  h.act('right'); h.draw(50);
+  assert.ok(h.game.renderer.ambientImpulse > 0, 'new action feedback still uses its real deadline after a long suspension');
+  assert.equal(h.game.state.turn, 1);
 });
 
 test('native music stays enabled across navigation and full animations remain enabled', () => {
@@ -1190,6 +1243,87 @@ test('a real route finishing within the two-star limit still earns two stars aft
   h.destroy();
 });
 
+
+test('a transient profile read failure retries before checking whether the saved route is unlocked', t => {
+  const progress = { mode: 'campaign', levelId: 2, revision: CAMPAIGN[1].revision,
+    actions: ['right'], reviveHistory: [], undosUsed: 0 };
+  const data = new Map([
+    [PROFILE_KEY, { version: 1, completed: { 1: { stars: 3, bestTurns: 4 } }, daily: {}, totalWins: 1 }],
+    [RUN_KEY, progress]
+  ]);
+  const get = data.get.bind(data);
+  let firstRead = true;
+  data.get = key => {
+    if (key === PROFILE_KEY && firstRead) { firstRead = false; throw new Error('temporary read failure'); }
+    return get(key);
+  };
+  const h = harness({ data }); t.after(() => h.destroy());
+  assert.equal(h.game.store.hasPendingReads(), true);
+  h.game.primary();
+  assert.equal(h.game.page, 'game');
+  assert.equal(h.game.level.id, 2);
+  assert.deepEqual(h.game.state, replayed(CAMPAIGN[1], ['right']));
+  assert.equal(h.game.store.hasPendingReads(), false);
+  assert.deepEqual(h.game.profile().completed['1'], { stars: 3, bestTurns: 4 });
+  assert.deepEqual(get(RUN_KEY), progress, 'a recovered profile never makes a valid route look locked');
+});
+
+test('unread profile or route data cannot be cleared or replaced by a continue attempt', t => {
+  for (const unreadKey of [PROFILE_KEY, RUN_KEY]) for (const entry of ['primary', 'restore']) {
+    const profile = { version: 1, completed: { 1: { stars: 3, bestTurns: 4 } }, daily: {}, totalWins: 1 };
+    const progress = { mode: 'campaign', levelId: 2, revision: CAMPAIGN[1].revision,
+      actions: ['right'], reviveHistory: [], undosUsed: 0 };
+    const data = new Map([[PROFILE_KEY, clone(profile)], [RUN_KEY, clone(progress)]]), get = data.get.bind(data);
+    let unavailable = true;
+    data.get = key => {
+      if (key === unreadKey && unavailable) throw new Error('storage remains unavailable');
+      return get(key);
+    };
+    const h = harness({ data }); t.after(() => h.destroy());
+    h.game[entry]();
+    assert.equal(h.game.page, 'home', entry);
+    assert.equal(h.game.state, null, entry + ' cannot silently start a replacement route');
+    assert.equal(h.game.store.hasPendingReads(), true);
+    assert.match(h.game.toastText, /原存档已保留.*稍后再试/);
+    assert.deepEqual(get(PROFILE_KEY), profile);
+    assert.deepEqual(get(RUN_KEY), progress);
+    unavailable = false;
+    h.game[entry]();
+    assert.equal(h.game.page, 'game');
+    assert.equal(h.game.level.id, 2);
+    assert.deepEqual(h.game.state, replayed(CAMPAIGN[1], ['right']));
+    assert.equal(h.game.store.hasPendingReads(), false);
+    assert.deepEqual(get(RUN_KEY), progress);
+  }
+});
+
+test('read recovery still starts a new game when storage is empty and never blocks an active route', t => {
+  const empty = new Map(), emptyGet = empty.get.bind(empty);
+  let unavailable = true;
+  empty.get = key => { if (unavailable) throw new Error('temporary read failure'); return emptyGet(key); };
+  const fresh = harness({ data: empty }); t.after(() => fresh.destroy());
+  unavailable = false;
+  fresh.game.primary();
+  assert.equal(fresh.game.page, 'game');
+  assert.equal(fresh.game.level.id, 1);
+  assert.equal(fresh.game.state.turn, 0);
+
+  const savedProfile = { version: 1, completed: { 1: { stars: 3, bestTurns: 4 } }, daily: {}, totalWins: 1 };
+  const data = new Map([[PROFILE_KEY, clone(savedProfile)]]), get = data.get.bind(data);
+  unavailable = true;
+  data.get = key => { if (key === PROFILE_KEY && unavailable) throw new Error('temporary read failure'); return get(key); };
+  const active = harness({ data }); t.after(() => active.destroy());
+  active.start(); active.act('right');
+  assert.equal(active.game.store.hasPendingReads(), true);
+  assert.equal(active.game.state.turn, 1, 'normal play does not depend on a recovered profile');
+  assert.deepEqual(get(RUN_KEY).actions, ['right'], 'the current playable route is still persisted');
+  assert.deepEqual(get(PROFILE_KEY), savedProfile, 'an unread profile is never overwritten with empty defaults');
+  unavailable = false;
+  active.callbacks.hide();
+  assert.equal(active.game.store.hasPendingReads(), false);
+  assert.deepEqual(active.game.profile().completed, savedProfile.completed);
+  assert.deepEqual(get(RUN_KEY).actions, ['right']);
+});
 
 test('an interrupted or invalid replay is discarded without erasing completed deliveries', () => {
   const h = harness(); h.start();

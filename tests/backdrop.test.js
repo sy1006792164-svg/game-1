@@ -253,6 +253,40 @@ test('modal dimming also covers the entire canvas on compact and wide screens', 
   }
 });
 
+test('decorative time resumes at the same phase after nested modals and preference changes', () => {
+  const record = canvasRecorder(), r = new Renderer(record.canvas);
+  r.home = () => {}; r.modal = () => null;
+  const platform = { reducedMotion: false, effectsQuality: 'high' };
+  const game = { page: 'home', modal: null, platform, store: { getStatus: () => ({ persisted: true }) } };
+  r.draw(game, 1000, screens[0]);
+  r.draw(game, 1100, screens[0]);
+  assert.equal(r.ambientNow, 1100);
+  game.modal = { kind: 'pause' }; r.draw(game, 1200, screens[0]);
+  game.modal = { kind: 'help' }; r.draw(game, 60000, screens[0]);
+  game.modal = null; r.draw(game, 60016, screens[0]);
+  assert.equal(r.ambientNow, 1100, 'closing help must not fast-forward clouds or home artwork');
+  assert.equal(r.pageNow, 60016, 'content scrolling keeps its real event clock');
+  r.draw(game, 60050, screens[0]);
+  assert.equal(r.ambientNow, 1134);
+  for (const [key, value, restored] of [['reducedMotion', true, false], ['effectsQuality', 'low', 'high']]) {
+    platform[key] = value; r.draw(game, 70000, screens[0]);
+    r.draw(game, 90000, screens[0]);
+    platform[key] = restored; r.draw(game, 100000, screens[0]);
+    assert.equal(r.ambientNow, 1134, key + ' cannot accumulate hidden decorative motion');
+  }
+  r.draw(game, 100040, screens[0]);
+  assert.equal(r.ambientNow, 1174);
+});
+
+test('reduced-motion and low-quality loading keep progress but omit the decorative sweep', () => {
+  for (const platform of [{ reducedMotion: true }, { effectsQuality: 'low' }]) {
+    const { paths, rectangles } = draw(screens[0], 'startup', null, { platform });
+    assert.ok(paths.some(path => path.style === C.green), 'the real progress bar remains visible');
+    assert.ok(!paths.some(path => path.style === '#e4f5d85c'));
+    assert.ok(rectangles.length > 0);
+  }
+});
+
 test('full canvas painting preserves content height, safe-area placement and touch conversion', () => {
   for (const metrics of screens) {
     const { renderer } = draw(metrics, 'home');

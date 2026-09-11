@@ -2,20 +2,28 @@
 
 const { DIRECTIONS, neighbor } = require('./engine');
 
-// This only rules out definite dead ends after a bridge has torn. Ignoring
-// wind pushes and future bridge damage gives an optimistic reachable area,
-// so a connected route is not a promise that the remaining delivery is solvable.
+// This only rules out definite dead ends after a bridge has torn. Follow wind
+// landings because a forced push can prevent returning through an open corridor.
+// Future bridge damage is still optimistic, so reachable targets do not promise
+// that one route can collect them all within the remaining energy.
 function isReviveRouteBlocked(level, state) {
   if (!level || !state || !(level.bridges || []).some(cell => !(state.bridges || []).includes(cell))) return false;
 
   const reachable = new Set([state.player]), queue = [state.player];
+  function add(cell) {
+    if (!reachable.has(cell)) { reachable.add(cell); queue.push(cell); }
+  }
   for (let index = 0; index < queue.length; index++) {
     for (const direction of Object.keys(DIRECTIONS)) {
-      const next = neighbor(level, queue[index], direction, state);
-      if (next !== null && !reachable.has(next)) {
-        reachable.add(next);
-        queue.push(next);
-      }
+      const entered = neighbor(level, queue[index], direction, state);
+      if (entered === null) continue;
+      const wind = level.winds && level.winds[entered];
+      const pushed = wind ? neighbor(level, entered, wind, state) : null;
+      add(pushed === null ? entered : pushed);
+      // A currently intact bridge may tear later and stop this wind push.
+      // Include that possible landing too: rejecting a usable relight is worse
+      // than retaining one whose full solution is not proven by this check.
+      if (pushed !== null && (state.bridges || []).includes(pushed)) add(entered);
     }
   }
 

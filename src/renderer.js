@@ -17,6 +17,7 @@ const { drawBackdrop } = require('./scene');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
 const { chapterNames } = require('./levels');
 const { chapterMood } = require('./chapter-atmosphere');
+const { AmbientClock } = require('./ambient-clock');
 const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑': 'arrow-up', '↓': 'arrow-down', '↗': 'arrow-ne', '↘': 'arrow-se', '↙': 'arrow-sw', '↖': 'arrow-nw', '✓': 'check' });
 const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2, ne: -Math.PI / 4, se: Math.PI / 4, sw: Math.PI * .75, nw: -Math.PI * .75 });
 
@@ -41,7 +42,9 @@ class Renderer {
   constructor(canvas) {
     this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.hits = []; this.scale = 1;
     this.ox = 0; this.oy = 0; this.H = 844; this.safeBottom = 0; this.ambientFreezeAt = null;
+    this.ambientClock = new AmbientClock();
   }
+  pauseAmbient(now) { this.ambientClock.sample(now, true); }
   clearCaches() {
     if (this.wrapCache) this.wrapCache.clear();
     this.boardGeometry = null; this.motionEffects = null;
@@ -212,7 +215,8 @@ class Renderer {
     this.ambientImpulse = 0;
     if (!game.modal) this.ambientFreezeAt = null;
     else if (!Number.isFinite(this.ambientFreezeAt)) this.ambientFreezeAt = now;
-    const backgroundNow = game.modal ? this.ambientFreezeAt : now;
+    const backgroundNow = this.ambientClock.sample(now,
+      !!game.modal || this.reducedMotion || this.effectsQuality === 'low');
     this.ambientNow = backgroundNow;
     c.save();
     const treatment = atmosphereTreatment(game.page);
@@ -232,7 +236,7 @@ class Renderer {
     }
     // Gameplay keeps real time for short-lived movement and camera feedback;
     // its decorative layers read ambientNow and remain frozen behind a modal.
-    const pageNow = game.modal && game.page !== 'game' ? backgroundNow : now;
+    const pageNow = game.modal && game.page !== 'game' ? this.ambientFreezeAt : now;
     this.pageNow = pageNow;
     if (game.page === 'startup') drawStartup(this, game, pageNow);
     else if (game.page === 'publication') drawPublication(this, game);

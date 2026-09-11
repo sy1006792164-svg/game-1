@@ -14,7 +14,8 @@ for (const file of fs.readdirSync(path.join(root, 'src')).filter(f => f.endsWith
   const source = read('src/' + file);
   try { new vm.Script(source, { filename: file }); } catch (error) { check(false, error.message); }
   check(!/wx\.(request|connectSocket|getLocation|getFriendCloudStorage)\b/.test(source), file + ': no unrelated network, location or friend reads in the main domain.');
-  check(!/\.cloud\b|\bcallFunction\s*\(/.test(source), file + ': friend leaderboard has no cloud development dependency.');
+  // Check SDK access, not the unrelated mood.cloud sky-palette color.
+  check(!/\b(?:wx|api)\s*\.\s*cloud\b|\bcallFunction\s*\(/.test(source), file + ': friend leaderboard has no cloud development dependency.');
   bytes += Buffer.byteLength(source);
 }
 for (const name of require('../src/sound').SOUND_TYPES) {

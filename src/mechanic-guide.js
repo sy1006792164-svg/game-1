@@ -43,21 +43,24 @@ function mechanicStep(game) {
   const used = !available.includes(cell);
   const landing = id === 'wind' ? neighbor(l, cell, l.winds[cell], s) : null;
   const focusCell = phase && landing !== null ? landing : cell;
-  const titles = { wind: '风口会再推一格', light: '风灯只补一次', bridge: '离开纸桥，它就会碎' };
+  const titles = { wind: '顺着风口，多走一格', light: '走上风灯，补回三拍', bridge: '离开纸桥，无法折返' };
   const rules = {
-    wind: landing === null ? '走进箭头格，只扣 1 拍。\n前方被挡住时，就停在箭头格。'
-      : '点相邻箭头格，会顺风再走一格。\n光圈是落点；只扣 1 拍，不连续吹。',
-    light: used ? '这盏灯已在本次路线中用过。\n每盏只补 3 拍，回头不会再补。'
-      : '走到风灯格，移动扣 1 拍后补 3 拍。\n每盏只能补一次，要沿路安排好。',
-    bridge: used ? '这座纸桥已经碎了，不能再走。\n回声仍会沿旧脚印经过，不受影响。'
-      : '可以走上纸桥；离开后，桥就会碎。\n你不能再回来，回声仍可沿脚印通过。'
+    wind: landing === null ? '前方被挡住时，就停在箭头格。'
+      : '走进箭头格，顺风多走一格。\n只扣 1 拍，不连续吹。',
+    light: used ? '这盏灯已在本次路线中用过。'
+      : '移动扣 1 拍后补 3 拍，每盏仅一次。',
+    bridge: used ? '这座纸桥已经碎了，不能再走。'
+      : '可以走上纸桥；离开后，桥就会碎。'
   };
   return {
     kind: 'mechanic', mechanic: id, step: phase + 1, total: 2, action: null,
     control: 'mechanic-next', buttonLabel: phase ? lesson.ids.length > 1 ? '认识下个道具' : '开始投递' : '看看规则',
     title: phase ? titles[id] : '新' + (id === 'light' ? '道具' : '机关') + '：' + NAMES[id],
-    text: phase ? rules[id] : '手指指向本关的' + NAMES[id] + '。\n先点它认识规则，再自己规划路线。',
-    tip: phase && id === 'wind' ? '原地等待不会触发风；收集以最终落点为准。' : '讲解不会移动、不扣拍；也可以点“跳过”。',
+    text: phase ? rules[id] : '点手指指向的' + NAMES[id] + '，看看它的用法。',
+    tip: !phase ? '这里只看规则，不移动也不扣拍。'
+      : id === 'wind' ? '等待不会触发风；只在落点收集。'
+      : id === 'bridge' ? '回声仍可沿旧脚印通过。'
+      : used ? '回头经过不会再次补拍。' : '尽量顺路取灯，留好回邮局的拍数。',
     visual: { focus: { cell: focusCell, kind: id }, tapCell: focusCell, player: s.player,
       label: phase ? '记住了' : '认识' + NAMES[id],
       fromCell: phase && id === 'wind' && landing !== null ? cell : null }

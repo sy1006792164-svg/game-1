@@ -38,41 +38,42 @@ function guideStep(game, now) {
     total: 4, action: action || null, control: action === 'wait' ? 'wait' : null,
     visual: { focus, tapCell: focus ? cell : null, echo, player: s.player,
       label: kind === 'home' ? '点邮局' : collecting ? '点信封' : '点这里' },
-    tip: '1 拍就是行动 1 次；不点就不会扣拍。'
+    tip: '每次行动扣 1 拍，不操作不扣拍。'
   };
   if (!action) {
     lesson.control = game.canUndo() ? 'undo' : 'restart';
-    lesson.title = lesson.control === 'undo' ? '拍数不够，先撤回一步' : '拍数不够，重新学一遍';
-    lesson.text = '剩余拍数不够完成这次投递。\n' + (lesson.control === 'undo' ? '点下方“撤回”，恢复上一步和拍数。' : '点下方“重新学一遍”，从起点跟着走。');
-    lesson.tip = '重新开始不会影响已获得的通关成绩。';
+    lesson.title = lesson.control === 'undo' ? '拍数不够，先撤回' : '拍数不够，重新开始';
+    lesson.text = lesson.control === 'undo' ? '点下方“撤回”，找回上一步的拍数。' : '点下方“重新学一遍”，从起点跟着走。';
+    lesson.tip = '重新开始不影响已有通关成绩。';
     return lesson;
   }
   if (first) {
-    lesson.title = '点亮格，先走一步';
-    lesson.text = '你是橙衣送信员，不用先点人物。\n直接点手指指向的格子，每次走一格。';
+    lesson.title = '点亮格，走出第一步';
+    lesson.text = '点手指指向的格子，送信员就会走过去。';
   } else if (action === 'wait') {
-    lesson.title = '点“等一拍”，让回声跟上';
-    lesson.text = '你已到邮局，蓝票还在回声路上。\n等待也算一次行动，回声才会继续走。';
+    lesson.title = '等一拍，让回声跟上';
+    lesson.text = '点下方“等一拍”，等回声收齐蓝票。';
+    lesson.tip = '等待也算行动，会让回声继续走。';
   } else if (next.state.status === 'won') {
     lesson.title = '点邮局，完成投递';
-    lesson.text = s.seals.length ? '信已收好！这一步回声会收齐蓝票。\n走进邮局，就能完成投递。'
-      : '信和蓝票都已收齐。\n点手指指向的邮局，就能过关。';
+    lesson.text = s.seals.length ? '信已收好，走进邮局时回声会收齐蓝票。'
+      : '信和蓝票已收齐，走进邮局就能过关。';
   } else if (collecting) {
     lesson.title = '点信封，把信收好';
-    lesson.text = (echo ? '蓝票还要 ' + echo.turns + ' 次行动才会收起。' : '橙色信封由你来收取。') + '\n走到信封所在格，就会自动收信。';
+    lesson.text = '走到橙色信封所在格，就会自动收信。';
   } else if (echo) {
-    lesson.title = '再点下一格，继续走';
-    lesson.text = (s.seals.includes(s.player) ? '已走上蓝票格！现在不会收起。' : '蓝票已在回声路上，不用回头。')
-      + '\n再行动 ' + echo.turns + ' 次，回声会来收票。';
+    lesson.title = '继续走，让回声跟上';
+    lesson.text = s.seals.includes(s.player) ? '蓝票由回声收取，它会晚你 3 次行动。' : '沿亮格继续前进，蓝票交给回声。';
+    lesson.tip = '回声晚 3 次行动，沿你的脚印前进。';
   } else if (s.seals.length) {
     lesson.title = kind === 'echo' ? '点蓝票格，留下脚印' : '沿亮格走，先经过蓝票';
-    lesson.text = '蓝票由晚 3 次行动的回声收取。\n你先走过它，再继续走，回声会跟上。';
+    lesson.text = '先走过蓝票格，回声晚 3 次行动来收票。';
   } else {
     lesson.title = s.letters.length ? '沿亮格走，去收信' : '沿亮格走回邮局';
-    lesson.text = s.letters.length ? '蓝票已收好，继续沿亮格去拿信封。\n信和票收齐后，再回邮局。'
-      : '信和蓝票都已收齐。\n跟着手指逐格走回邮局。';
+    lesson.text = s.letters.length ? '蓝票已收好，跟着手指去拿橙色信封。'
+      : '信和蓝票已收齐，跟着手指走回邮局。';
   }
-  if (game.blockedAt != null && now - game.blockedAt < 1400) lesson.tip = '引导中跟着手指走；点“跳过”可自由操作。';
+  if (game.blockedAt != null && now - game.blockedAt < 1400) lesson.tip = '跟着手指走；点“跳过”可自由操作。';
   return lesson;
 }
 

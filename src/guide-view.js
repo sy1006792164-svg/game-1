@@ -3,7 +3,7 @@
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 
-const GUIDE_HEIGHT = 152;
+const GUIDE_HEIGHT = 144;
 const MARKERS = {
   move: { color: C.gold },
   letter: { color: C.gold, icon: 'letter' },
@@ -15,42 +15,48 @@ const MARKERS = {
 };
 
 function guideCardLayout(r, guide) {
-  const titleLines = r.wrapLines(guide.title, 180, 15, '600');
-  const bodyLines = r.wrapLines(guide.text, 310, 12);
-  const titleExtra = Math.max(0, titleLines.length - 1) * 19;
-  const contentExtra = titleExtra + Math.max(0, bodyLines.length - 2) * 18;
-  return { titleLines, bodyLines, titleExtra, contentExtra, height: GUIDE_HEIGHT + contentExtra };
+  const titleLines = r.wrapLines(guide.title, 186, 16, '600');
+  const bodyLines = r.wrapLines(guide.text, 306, 14);
+  const tipLines = guide.visual && guide.visual.echo ? [] : r.wrapLines(guide.tip, 282, 11);
+  const titleExtra = Math.max(0, titleLines.length - 1) * 21;
+  const contentExtra = titleExtra + Math.max(0, bodyLines.length - 2) * 21;
+  const footerHeight = 24 + Math.max(0, tipLines.length - 1) * 16;
+  return { titleLines, bodyLines, tipLines, titleExtra, contentExtra,
+    bodyY: 73 + titleExtra, footerY: 108 + contentExtra, footerHeight,
+    height: GUIDE_HEIGHT + contentExtra + footerHeight - 24 };
 }
 
 function drawGuideCard(r, game, guide, y) {
   const total = guide.total || 4, ui = guideCardLayout(r, guide);
   r.panel(24, y, 342, ui.height, { fill: '#fffaf0', stroke: '#c9d2b9', radius: 16 });
-  r.round(25, y + 19, 3, ui.height - 38, 1.5, '#d1a56e');
-  r.round(40, y + 18, 34, 28, 9, '#e5eddd', '#b9cdb1');
-  r.text(guide.step + '/' + total, 57, y + 32, 11, '#316c5f', 'center', '600');
-  ui.titleLines.forEach((line, index) => r.text(line, 86, y + 32 + index * 19, 15, C.ink, 'left', '600'));
-  r.button('跳过', 278, y + 10, 72, CONTROL.compactHeight, () => game.dismissGuide(), {
+  r.round(42, y + 18, 34, 28, 9, '#e5eddd', '#b9cdb1');
+  r.text(guide.step + '/' + total, 59, y + 32, 11, '#316c5f', 'center', '600');
+  ui.titleLines.forEach((line, index) => r.text(line, 86, y + 30 + index * 21, 16, C.ink, 'left', '600'));
+  // Progress belongs with the step heading, leaving the rule its own quiet row.
+  const segment = 96 / total;
+  for (let index = 0; index < total; index++) {
+    r.round(86 + index * segment, y + 48 + ui.titleExtra, segment - 5, 3, 1.5,
+      index < guide.step ? C.green : '#e0e5d8');
+  }
+  // The full 44px hit target sits inside the card, clear of both title and body.
+  r.button('跳过', 284, y + 14, 64, CONTROL.compactHeight, () => game.dismissGuide(), {
     style: 'quiet', disabled: !!game.modal || game.busy
   });
-  ui.bodyLines.forEach((line, index) => r.text(line, 40, y + 70 + ui.titleExtra + index * 18, 12, C.ink));
-  const footerY = y + ui.contentExtra;
-  r.line([[40, footerY + 101], [350, footerY + 101]], '#e5e6d6', 1);
+  ui.bodyLines.forEach((line, index) => r.text(line, 42, y + ui.bodyY + index * 21, 14, C.ink));
+  const footerY = y + ui.footerY;
   const echo = guide.visual && guide.visual.echo;
+  r.round(42, footerY, 306, ui.footerHeight, 8, echo ? '#e9f2ee' : '#f0f2e8');
   if (echo) {
-    r.label(guide.tip, 40, footerY + 110, 310, 10, C.muted);
-    r.icon('echo', 49, footerY + 128, 17, C.blue);
-    r.text('再行动 ' + echo.turns + ' 次，回声自动收票', 66, footerY + 128, 11, '#2b737b');
+    r.icon('echo', 56, footerY + 12, 14, C.blue);
+    r.text('再行动 ' + echo.turns + ' 次，回声收票', 70, footerY + 12, 11, '#2b737b');
     for (let index = 0; index < 3; index++) {
       const turns = 3 - index, done = echo.turns < turns;
-      r.circle(296 + index * 22, footerY + 128, 8, done ? C.blue : '#e1eeea', echo.turns === turns ? C.blue : '#b4cfca');
-      if (done) r.icon('check', 296 + index * 22, footerY + 128, 9, C.white);
-      else r.text(turns, 296 + index * 22, footerY + 128, 10, echo.turns === turns ? '#2b737b' : C.muted, 'center', echo.turns === turns ? '600' : '400');
+      r.circle(292 + index * 21, footerY + 12, 7, done ? C.blue : '#e1eeea', echo.turns === turns ? C.blue : '#b4cfca');
+      if (done) r.icon('check', 292 + index * 21, footerY + 12, 9, C.white);
+      else r.text(turns, 292 + index * 21, footerY + 12, 10, echo.turns === turns ? '#2b737b' : C.muted, 'center', echo.turns === turns ? '600' : '400');
     }
-  } else r.label(guide.tip, 40, footerY + 121, 310, 11, game.state.energy <= 3 ? '#925e37' : C.muted);
-  const segment = 310 / total;
-  for (let index = 0; index < total; index++) {
-    r.round(40 + index * segment, footerY + 145, segment - 5, 3, 1.5, index < guide.step ? C.green : '#e0e5d8');
-  }
+  } else ui.tipLines.forEach((line, index) => r.text(line, 54, footerY + 12 + index * 16, 11,
+    game.state.energy <= 3 ? '#925e37' : C.muted));
 }
 
 // Painted in the board's existing projection; markers never add click targets.

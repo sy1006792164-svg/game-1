@@ -16,6 +16,11 @@ function handleGameKey(game, key) {
   }
   if (stampDetailKey(game, key)) return true;
   if (game.modal) {
+    const navigation = game.renderer.helpNavigation;
+    if (game.modal.kind === 'help' && navigation && navigation.modal === game.modal) {
+      if ((key === 'ArrowLeft' || key === 'PageUp') && navigation.page > 0) navigation.previous();
+      else if ((key === 'ArrowRight' || key === 'PageDown') && navigation.page + 1 < navigation.count) navigation.next();
+    }
     if (key === 'Escape') {
       if (game.modal.kind === 'help') {
         game.modal.buttons[0].action();

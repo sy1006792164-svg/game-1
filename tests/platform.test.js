@@ -112,6 +112,35 @@ test('browser multi-touch neither zooms nor releases a tap and the next single-f
   assert.deepEqual(points.slice(2), [[100, 200, 'start'], [100, 200, 'end']]);
 });
 
+test('browser mouse release lost to an overlay cancels instead of continuing a drag or spending a turn', () => {
+  for (const buttons of [0, 2, 4]) {
+    const { platform, canvas } = browser(); platform.resize();
+    const points = [];
+    platform.onPointer((...args) => points.push(args));
+    const event = { pointerType: 'mouse', pointerId: 1, clientX: 120, clientY: 210, button: 0, buttons: 1 };
+    canvas.emit('pointerdown', event);
+    canvas.emit('pointermove', { ...event, clientX: 130, buttons });
+    canvas.emit('pointerup', { ...event, buttons: 0 });
+    assert.deepEqual(points, [[100, 200, 'start'], [100, 200, 'cancel']]);
+    canvas.emit('pointerdown', event);
+    canvas.emit('pointerup', { ...event, buttons: 0 });
+    assert.deepEqual(points.slice(2), [[100, 200, 'start'], [100, 200, 'end']]);
+  }
+});
+
+test('a context menu aborts the held browser gesture and the next click remains usable', () => {
+  const { platform, canvas } = browser(); platform.resize();
+  const points = [];
+  platform.onPointer((...args) => points.push(args));
+  const event = { pointerType: 'mouse', pointerId: 1, clientX: 120, clientY: 210, button: 0, buttons: 1 };
+  canvas.emit('pointerdown', event);
+  canvas.emit('contextmenu', {});
+  canvas.emit('pointerup', { ...event, buttons: 0 });
+  canvas.emit('pointerdown', event);
+  canvas.emit('pointerup', { ...event, buttons: 0 });
+  assert.deepEqual(points, [[100, 200, 'start'], [100, 200, 'cancel'], [100, 200, 'start'], [100, 200, 'end']]);
+});
+
 test('browser storage roundtrips objects and surfaces corrupt/quota errors to the store', () => {
   const { platform, saved } = browser();
   platform.storage.set('a', { turns: 4 });
@@ -139,6 +168,22 @@ test('browser lifecycle, resize and keyboard callbacks can unsubscribe', () => {
   offHide(); offResize(); offKey();
   doc.hidden = true; doc.emit('visibilitychange'); win.emit('resize'); win.emit('keydown', event);
   assert.deepEqual(seen, ['hide', 'show', 'resize', 'ArrowLeft']);
+});
+
+test('IME candidate navigation and already handled keys cannot spend game turns', () => {
+  const { platform, win } = browser();
+  const keys = [];
+  let prevented = 0;
+  platform.onKey(key => keys.push(key));
+  const event = { key: 'ArrowLeft', target: { tagName: 'CANVAS' }, preventDefault() { prevented++; } };
+  win.emit('keydown', { ...event, isComposing: true });
+  win.emit('keydown', { ...event, keyCode: 229 });
+  win.emit('keydown', { ...event, defaultPrevented: true });
+  assert.deepEqual(keys, []);
+  assert.equal(prevented, 0, 'the IME and prior event owner retain their own input');
+  win.emit('keydown', event);
+  assert.deepEqual(keys, ['ArrowLeft']);
+  assert.equal(prevented, 1);
 });
 
 test('WeChat reserves capsule/safe area, uses native local storage and single-touch gesture input', () => {

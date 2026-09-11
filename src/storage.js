@@ -216,6 +216,7 @@ function createStore(adapter, options = {}) {
     getProfile: snapshot,
     revision: function () { return revision; },
     getStatus: function () { return Object.assign({}, status); },
+    hasPendingReads: function () { return unread.size > 0; },
     flush,
     setGuideDismissed: function (dismissed) {
       if (typeof dismissed !== 'boolean') return false;
