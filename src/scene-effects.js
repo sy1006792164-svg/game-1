@@ -3,7 +3,7 @@
 const { actorFrame, MOVE_MS } = require('./motion');
 
 function drawActorTrails(r, game, now, point, unit, options = {}) {
-  if (options.reducedMotion || game.reviewing || now < game.transitionAt || now - game.transitionAt > MOVE_MS + 90) return;
+  if (options.reducedMotion || r.effectsQuality === 'low' || game.reviewing || now < game.transitionAt || now - game.transitionAt > MOVE_MS + 90) return;
   const c = r.ctx;
   [false, true].forEach(ghost => {
     const frame = actorFrame(game, now, point, ghost), fade = Math.max(0, 1 - Math.max(0, now - game.transitionAt - MOVE_MS) / 90);

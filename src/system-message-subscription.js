@@ -155,7 +155,8 @@ function createSystemMessageSubscription(platform, messageTypes) {
     }
 
     const token = ++revision;
-    setState('checking', '正在检查订阅消息状态…');
+    // Keep a confirmed acceptance visible to callers during a silent recheck.
+    if (!acceptedSnapshot) setState('checking', '正在检查订阅消息状态…');
     let tracked;
     tracked = callNative(api.getSetting, { withSubscriptions: true }).then(function (result) {
       if (revision !== token) return getState();

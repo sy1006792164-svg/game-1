@@ -48,7 +48,7 @@ class Renderer {
   pauseAmbient(now) { this.ambientClock.sample(now, true); }
   clearCaches() {
     if (this.wrapCache) this.wrapCache.clear();
-    this.boardGeometry = null; this.motionEffects = null;
+    this.boardGeometry = null; this.motionEffects = null; this.routePreview = null;
     this.hits = []; this.boardProjection = null; this.boardRect = null; this.collectionRect = null; this.levelRect = null;
   }
   toLogical(x, y) { return { x: (x - this.ox) / this.scale, y: (y - this.oy) / this.scale }; }

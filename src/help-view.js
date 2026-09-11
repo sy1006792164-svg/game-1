@@ -23,7 +23,7 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
       text: reviveCount ? '已续灯 ' + reviveCount + ' 次，' + (options.turn >= two ? '本次最多一星。' : '续灯封顶二星。') + '\n总计 ' + two + ' 拍内通关得二星，超出得一星。'
         : '三星：' + level.par + ' 拍内 · 二星：' + two + ' 拍内\n超过 ' + two + ' 拍通关得一星。' });
     if (platformKind === 'browser') sections.push({ title: '电脑操作', icon: 'grid', color: C.green,
-      text: '方向键 / WASD：移动\n空格：等一拍 · Z / 退格：撤回\nEsc：暂停或返回\n滚轮缩放，放大后可拖动棋盘。' });
+      text: '方向键 / WASD：移动\n空格：等一拍 · Z / 退格：撤回\nEsc：暂停或返回\n滚轮缩放，放大后可拖动棋盘。\n暂停里的「恢复视角」可还原棋盘。' });
   }
   return { sections, lines: level && platformKind === 'wechat' && options.canRevive
     ? ['可用时可看广告续灯；灯再次熄灭后仍可选择续灯。', '续灯封顶二星，并按总拍数结算。'] : [] };

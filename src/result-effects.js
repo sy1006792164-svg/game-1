@@ -2,8 +2,8 @@
 
 const { C } = require('./theme');
 const { drawBurst } = require('./motion');
+const { RESULT_DELAY_MS, RESULT_ANIMATION_MS } = require('./feedback-timing');
 
-const RESULT_DELAY_MS = 400;
 const clamp = value => Math.max(0, Math.min(1, value));
 const easeOut = value => 1 - (1 - value) ** 3;
 
@@ -13,7 +13,7 @@ function drawDelivery(r, x, y, age) {
     const spread = clamp(age / 1100);
     c.save(); c.globalAlpha *= (1 - spread) * .55;
     r.circle(x, y, 26 + spread * 30, null, C.gold);
-    r.circle(x, y, 22 + spread * 18, null, C.green);
+    if (r.effectsQuality !== 'low') r.circle(x, y, 22 + spread * 18, null, C.green);
     c.restore();
   }
   const paper = (age - 140) / 1050;
@@ -60,7 +60,7 @@ function drawFadingLamp(r, x, y, age) {
   const ember = (age - 100) / 850;
   if (ember > 0 && ember < 1) {
     c.save(); c.globalAlpha *= Math.sin(ember * Math.PI) * .6;
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < (r.effectsQuality === 'low' ? 2 : 4); index++) {
       const drift = Math.sin(index * 2.1 + ember * 3) * (5 + index * 2);
       r.circle(x + drift, y - 11 - ember * (18 + index * 4), 1.5 - ember * .7, index % 2 ? C.gold : C.muted);
     }
@@ -70,7 +70,7 @@ function drawFadingLamp(r, x, y, age) {
 
 function drawResultHeader(r, kind, ui, age) {
   const c = r.ctx, won = kind === 'win', x = ui.x + ui.w / 2, y = ui.y + 52;
-  const elapsed = age === null || r.reducedMotion ? 1400 : Math.max(0, age);
+  const elapsed = age === null || r.reducedMotion ? RESULT_ANIMATION_MS : Math.max(0, age);
   c.save();
   // Decoration stays in the existing emblem area, above every title and button.
   c.beginPath(); c.rect(ui.x + 8, ui.y + 8, ui.w - 16, 82); c.clip();
@@ -101,7 +101,7 @@ function drawResultStars(r, stars, y, age) {
     r.ctx.save(); r.ctx.globalAlpha *= eased;
     r.icon('star', x, y, size * (.6 + eased * .4 + pulse * .14), C.yellow);
     r.ctx.restore();
-    if (progress === 1) continue;
+    if (progress === 1 || r.effectsQuality === 'low') continue;
     r.ctx.save(); r.ctx.globalAlpha *= pulse * .8;
     for (let side = -1; side <= 1; side += 2) {
       const sparkX = x + side * (14 + progress * 8), sparkY = y - 12 - progress * 5;

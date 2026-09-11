@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { createOpenDataLeaderboard } = require('../open-data/index');
-const { DEFAULT_KEY: KEY } = require('../open-data/leaderboard-data');
+const { DEFAULT_KEY: KEY, serializeScore } = require('../open-data/leaderboard-data');
 const { historyKey } = require('../open-data/rank-history');
 const score = extra => ({ v: 2, stars: 30, completed: 10, turns: 100, name: '本人', ownerToken: 'wl1_' + 'a'.repeat(48), ...extra });
 
@@ -141,7 +141,7 @@ test('a verified foreground can resume score syncing after leaving during a cach
     h.send({ action: 'submit', score: score({ stars: 33, completed: 11 }) });
     assert.equal(h.requests.mine.length, before.mine + 1);
     assert.equal(h.requests.friends.length, before.friends);
-    h.requests.mine.at(-1).success({ KVDataList: [{ key: KEY, value: JSON.stringify(score()) }] });
+    h.requests.mine.at(-1).success({ KVDataList: [{ key: KEY, value: serializeScore(score(), KEY) }] });
     await new Promise(resolve => setImmediate(resolve));
     assert.ok(h.requests.writes.some(o => o.KVDataList[0].key === KEY && JSON.parse(o.KVDataList[0].value).stars === 33));
   } finally { h.send({ action: 'close' }); }

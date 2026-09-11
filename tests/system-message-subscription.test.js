@@ -135,6 +135,7 @@ test('silent refresh keeps a known acceptance unless WeChat explicitly revokes o
     { subscriptionsSetting: { mainSwitch: true, itemSettings: {} } },
   ]) {
     const refresh = h.subscription.refresh();
+    assert.equal(h.subscription.getState().status, 'accepted', 'a silent recheck cannot briefly restore the reminder entry');
     h.pending.setting.at(-1).success(result);
     const state = await refresh;
     assert.equal(state.status, 'accepted');

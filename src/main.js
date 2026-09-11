@@ -19,6 +19,7 @@ const { leaderboardRect } = require('./leaderboard-view');
 const { developmentLevelNumber } = require('./developer-view');
 const { Renderer } = require('./renderer');
 const { MOVE_MS } = require('./motion');
+const { hasActiveFeedback } = require('./feedback-timing');
 const { SceneCamera, INTRO_MS, SHAKE_MS } = require('./camera');
 const { insideRect } = require('./board-projection');
 const { BOARD_DRAG_SLOP, containsHit, captureBoardTap } = require('./board-input');
@@ -256,8 +257,9 @@ class Game {
     return this.development || index === 0 || !!this.profile().completed[String(CAMPAIGN[index - 1].id)];
   }
   selectLevel(id) {
-    if (this.hidden || this.busy || !Number.isInteger(id) || !this.unlocked(id - 1)) return false;
+    if (this.hidden || this.busy || !Number.isInteger(id)) return false;
     if (this.modal && this.modal.kind !== 'developer-level') return false;
+    if (!this.ensureStoredProgressReady() || !this.unlocked(id - 1)) return false;
     const saved = this.savedRun();
     if (saved && saved.levelId === id && this.restore()) return true;
     this.start(CAMPAIGN[id - 1], 'campaign');
@@ -342,8 +344,7 @@ class Game {
       ...(this.guideEnabled ? { guide: true } : {}) });
     else this.store.flush();
   }
-  restore() {
-    if (this.startupActive()) return false;
+  ensureStoredProgressReady() {
     if (this.store.hasPendingReads()) {
       this.store.flush();
       if (this.store.hasPendingReads()) {
@@ -351,6 +352,10 @@ class Game {
         return false;
       }
     }
+    return true;
+  }
+  restore() {
+    if (this.startupActive() || !this.ensureStoredProgressReady()) return false;
     this.cancelRankingPointer();
     this.pendingAction = null; this.blockedAt = null;
     const run = this.store.loadRun();
@@ -405,13 +410,7 @@ class Game {
     this.persist(); this.cue('start');
   }
   primary() {
-    if (this.store.hasPendingReads()) {
-      this.store.flush();
-      if (this.store.hasPendingReads()) {
-        this.toast('本地进度暂时无法读取，原存档已保留，请稍后再试');
-        return;
-      }
-    }
+    if (!this.ensureStoredProgressReady()) return;
     if (this.store.loadRun() && this.restore()) return;
     this.start(this.nextLevel(), 'campaign');
   }
@@ -507,6 +506,16 @@ class Game {
   failure() { reviveFlow.showFailure(this); }
   requestRevive() { return reviveFlow.requestRevive(this); }
   applyRevive() { reviveFlow.applyRevive(this); }
+  resetView() {
+    if (this.page !== 'game' || this.hidden || this.busy || !this.state ||
+        this.modal && this.modal.kind !== 'pause') return false;
+    this.pendingAction = null; this.pointer = null;
+    this.camera.reset(); this.cameraMovedAt = this.platform.now();
+    this.renderer.boardGeometry = null; this.renderer.hits = []; this.lastFrame = -Infinity;
+    if (this.modal) this.modal = null;
+    this.syncMusic();
+    return true;
+  }
   pause() {
     this.pendingAction = null;
     this.camera.stopShake();
@@ -518,6 +527,7 @@ class Game {
     this.modal = { kind: 'pause', title: '歇一会', lines: [saveLine], buttons: [
       { text: '继续投递', primary: true, action: () => { this.modal = null; this.syncMusic(); } },
       { text: '重新开始', icon: 'restart', action: () => this.start(this.level, this.mode) },
+      ...(this.camera.isAdjusted() ? [{ text: '恢复视角', textOnly: true, icon: 'grid', action: () => this.resetView() }] : []),
       ...(this.canShowGuide() ? [{ text: '操作引导', textOnly: true, icon: 'route', action: () => this.showGuide() }] : []),
       { text: '玩法说明', textOnly: true, icon: 'book', action: () => this.help() },
       { text: '返回邮局', textOnly: true, action: () => this.home() }
@@ -763,9 +773,9 @@ class Game {
     const smoothScene = this.page === 'game' && !this.modal && (
       now - this.transitionAt < MOVE_MS || now - this.camera.enteredAt < INTRO_MS ||
       now - this.camera.shakeAt < SHAKE_MS || now - this.cameraMovedAt < 250 || !!this.pointer);
-    const smooth = !reducedMotion && (smoothList || smoothScene || this.rankingInteractive());
+    const smooth = !reducedMotion && (smoothList || smoothScene || hasActiveFeedback(this, now) || this.rankingInteractive());
     if (this.platform.setFrameRate) this.platform.setFrameRate(smooth ? 60 : 30);
-    // Idle scenes use 30 FPS; input and movement use every RAF.
+    // Idle scenes use 30 FPS; input and unfinished feedback use every RAF.
     const frameInterval = smooth ? 0 : 1000 / 30;
     if (now - this.lastFrame >= frameInterval - .5) { this.renderer.draw(this, now, this.metrics); this.lastFrame = now; }
     this.frameId = this.platform.raf(() => this.loop());

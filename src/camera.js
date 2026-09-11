@@ -10,6 +10,8 @@ class SceneCamera {
 
   reset() { this.zoom = 1; this.panX = 0; this.panY = 0; this.enteredAt = -Infinity; this.stopShake(); }
 
+  isAdjusted() { return Math.abs(this.zoom - 1) > 1e-6 || Math.abs(this.panX) > 1e-6 || Math.abs(this.panY) > 1e-6; }
+
   enter(now) { this.reset(); this.enteredAt = now; }
 
   shake(now, strength = 1) {

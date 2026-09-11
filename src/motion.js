@@ -1,8 +1,8 @@
 'use strict';
 
 const { DIRECTIONS } = require('./engine');
+const { MOVE_MS, EVENT_TIMINGS, EFFECT_BATCH_MS } = require('./feedback-timing');
 
-const MOVE_MS = 180;
 const TAU = Math.PI * 2;
 const COLORS = { gold: '#ffdc8c', cyan: '#94ece7', paper: '#f4ddb5' };
 const clamp = value => Math.max(0, Math.min(1, value));
@@ -76,8 +76,9 @@ function random(seed) {
 }
 
 function burst(renderer, x, y, unit, progress, color, seed, paper) {
-  const c = renderer.ctx;
-  for (let index = 0; index < (paper ? 9 : 13); index++) {
+  const c = renderer.ctx, low = renderer.effectsQuality === 'low';
+  const count = low ? paper ? 4 : 5 : paper ? 9 : 13;
+  for (let index = 0; index < count; index++) {
     const n = seed + index * 31;
     const angle = random(n) * TAU;
     const distance = unit * (.16 + random(n + 1) * .43) * Math.sqrt(progress);
@@ -89,65 +90,59 @@ function burst(renderer, x, y, unit, progress, color, seed, paper) {
       renderer.round(-radius * 1.4, -radius * .6, radius * 2.8, radius * 1.2, .5, color); c.restore();
     } else {
       renderer.circle(px, py, radius * (1 - progress * .5), color);
-      if (index % 3 === 0) renderer.line([[px - radius * 2, py], [px + radius * 2, py]], color, .8);
+      if (!low && index % 3 === 0) renderer.line([[px - radius * 2, py], [px + radius * 2, py]], color, .8);
     }
   }
 }
 
 function drawEffectBatch(renderer, batch, now, point, scale) {
-  const c = renderer.ctx, age = now - batch.at, events = batch.events;
+  const c = renderer.ctx, age = now - batch.at, events = batch.events, low = renderer.effectsQuality === 'low';
   events.forEach((event, index) => {
     if (!event || !validCell(event.cell)) return;
+    const timing = EVENT_TIMINGS[event.type];
+    if (!timing || age < timing.delay || age >= timing.delay + timing.duration) return;
+    const progress = (age - timing.delay) / timing.duration;
     const [x, y] = position(point, event.cell);
     const seed = event.cell * 193 + index * 997;
     c.save();
-    if (event.type === 'move' && age >= MOVE_MS * .7 && age < 540) {
-      const progress = (age - MOVE_MS * .7) / (540 - MOVE_MS * .7);
+    if (event.type === 'move') {
       c.globalAlpha *= (1 - progress) * .48;
       c.beginPath(); c.ellipse(x, y + 2, scale * (.12 + progress * .23), scale * (.04 + progress * .1), 0, 0, TAU);
       c.strokeStyle = COLORS.gold; c.lineWidth = 1.2; c.stroke();
-      [-1, 1].forEach(side => renderer.line([[x + side * scale * .055, y], [x + side * scale * .055, y + scale * .05]], COLORS.paper, 2));
+      if (!low) [-1, 1].forEach(side => renderer.line([[x + side * scale * .055, y], [x + side * scale * .055, y + scale * .05]], COLORS.paper, 2));
     } else if (['letter', 'seal', 'light', 'bridge'].includes(event.type)) {
       const paper = event.type === 'bridge';
-      const delay = paper ? 25 : MOVE_MS * .6;
-      const progress = (age - delay) / (paper ? 700 : 650);
-      if (progress >= 0 && progress <= 1) {
-        const color = event.type === 'seal' ? COLORS.cyan : paper ? COLORS.paper : COLORS.gold;
-        c.globalAlpha *= 1 - progress;
-        renderer.circle(x, y - scale * .08, scale * (.15 + progress * .48), null, color);
-        burst(renderer, x, y - scale * .18, scale, progress, color, seed, paper);
-      }
-    } else if (event.type === 'wind' && age < 600) {
-      const progress = age / 600;
+      const color = event.type === 'seal' ? COLORS.cyan : paper ? COLORS.paper : COLORS.gold;
+      c.globalAlpha *= 1 - progress;
+      renderer.circle(x, y - scale * .08, scale * (.15 + progress * .48), null, color);
+      burst(renderer, x, y - scale * .18, scale, progress, color, seed, paper);
+    } else if (event.type === 'wind') {
       const entry = events.slice(0, index).find(item => item && item.type === 'move');
       const [sx, sy] = position(point, entry ? entry.cell : event.cell);
       c.globalAlpha *= (1 - progress) * .7;
-      for (let ribbon = 0; ribbon < 3; ribbon++) {
-        const offset = (ribbon - 1) * scale * .1;
+      for (let ribbon = 0; ribbon < (low ? 1 : 3); ribbon++) {
+        const offset = low ? 0 : (ribbon - 1) * scale * .1;
         const lead = clamp(progress * 1.7), tail = Math.max(0, lead - .65);
         renderer.line([[sx + (x - sx) * tail, sy + (y - sy) * tail + offset], [sx + (x - sx) * lead, sy + (y - sy) * lead + offset - Math.sin(progress * Math.PI) * 4]], COLORS.cyan, 1.4 - ribbon * .2);
       }
-    } else if (event.type === 'wait' && age < 650) {
-      const progress = age / 650;
+    } else if (event.type === 'wait') {
       c.globalAlpha *= (1 - progress) * .75;
       renderer.circle(x, y, scale * (.13 + progress * .42), null, COLORS.cyan);
-      renderer.circle(x, y, scale * (.07 + progress * .29), null, COLORS.gold);
-    } else if (event.type === 'echo-born' && age < 780) {
-      const progress = age / 780;
+      if (!low) renderer.circle(x, y, scale * (.07 + progress * .29), null, COLORS.gold);
+    } else if (event.type === 'echo-born') {
       c.globalAlpha *= 1 - progress;
       renderer.circle(x, y - scale * .2, scale * (.1 + progress * .45), null, COLORS.cyan);
       renderer.icon('echo', x, y - scale * (.64 + progress * .15), scale * .25, COLORS.cyan);
-    } else if (event.type === 'undo' && age < 650) {
-      const progress = age / 650;
+    } else if (event.type === 'undo') {
       c.globalAlpha *= 1 - progress;
-      for (let ring = 0; ring < 2; ring++) {
+      for (let ring = 0; ring < (low ? 1 : 2); ring++) {
         const radius = scale * (.22 + (1 - progress) * (.28 + ring * .12));
         c.beginPath(); c.ellipse(x, y, radius, radius * .47, -progress * .35, .2 + ring * Math.PI, Math.PI * 1.6 + ring * Math.PI);
         c.strokeStyle = COLORS.cyan; c.lineWidth = 1.4; c.stroke();
       }
       renderer.icon('undo', x, y - scale * .65, scale * .28, COLORS.cyan);
-    } else if (['ready', 'win', 'fail'].includes(event.type) && age < 950) {
-      const progress = age / 950, won = event.type === 'win', failed = event.type === 'fail';
+    } else if (['ready', 'win', 'fail'].includes(event.type)) {
+      const won = event.type === 'win', failed = event.type === 'fail';
       const color = failed ? '#f1b189' : COLORS.gold;
       c.globalAlpha *= 1 - progress;
       c.beginPath(); c.ellipse(x, y, scale * (.25 + progress * .75), scale * (.1 + progress * .34), 0, 0, TAU);
@@ -160,10 +155,10 @@ function drawEffectBatch(renderer, batch, now, point, scale) {
 
 function drawBlocked(renderer, game, now, point, scale, reduced) {
   if (!finite(game.blockedAt) || !validCell(game.state && game.state.player)) return;
-  const age = now - game.blockedAt;
-  if (age < 0 || age > 650) return;
+  const age = now - game.blockedAt, duration = EVENT_TIMINGS.blocked.duration;
+  if (age < 0 || age >= duration) return;
   const [x, y] = position(point, game.state.player), c = renderer.ctx;
-  const progress = reduced ? 0 : age / 650;
+  const progress = reduced ? 0 : age / duration;
   c.save(); c.globalAlpha *= reduced ? .85 : 1 - progress;
   c.beginPath(); c.ellipse(x, y + 1, scale * (.3 + progress * .09), scale * (.12 + progress * .04), 0, 0, TAU);
   c.strokeStyle = '#f1b189'; c.lineWidth = 1.8; c.stroke();
@@ -193,7 +188,7 @@ function drawEffects(renderer, game, now, point, unit, options = {}) {
     buffer.batches.push({ at: game.transitionAt, events });
   }
   buffer.at = game.transitionAt; buffer.events = game.moveEvents; buffer.turn = turn; buffer.undosUsed = game.undosUsed;
-  buffer.batches = buffer.batches.filter(batch => now >= batch.at && now - batch.at <= 950).slice(-8);
+  buffer.batches = buffer.batches.filter(batch => now >= batch.at && now - batch.at < EFFECT_BATCH_MS).slice(-8);
   if (game.reviewing) return;
   const scale = finite(unit) && unit > 0 ? unit : 40;
   // Text belongs to the fixed feedback row; the board only carries visual effects.

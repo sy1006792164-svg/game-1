@@ -1332,8 +1332,8 @@ test('a transient profile read failure retries before checking whether the saved
   assert.deepEqual(get(RUN_KEY), progress, 'a recovered profile never makes a valid route look locked');
 });
 
-test('unread profile or route data cannot be cleared or replaced by a continue attempt', t => {
-  for (const unreadKey of [PROFILE_KEY, RUN_KEY]) for (const entry of ['primary', 'restore']) {
+test('unread profile or route data cannot be cleared or replaced by continuing or selecting a level', t => {
+  for (const unreadKey of [PROFILE_KEY, RUN_KEY]) for (const entry of ['primary', 'restore', 'selectLevel']) {
     const profile = { version: 1, completed: { 1: { stars: 3, bestTurns: 4 } }, daily: {},
       settings: { sound: true, music: true, haptics: true, reducedMotion: false }, totalWins: 1 };
     const progress = { mode: 'campaign', levelId: 2, revision: CAMPAIGN[1].revision,
@@ -1345,7 +1345,7 @@ test('unread profile or route data cannot be cleared or replaced by a continue a
       return get(key);
     };
     const h = harness({ data }); t.after(() => h.destroy());
-    h.game[entry]();
+    h.game[entry](2);
     assert.equal(h.game.page, 'home', entry);
     assert.equal(h.game.state, null, entry + ' cannot silently start a replacement route');
     assert.equal(h.game.store.hasPendingReads(), true);
@@ -1353,7 +1353,7 @@ test('unread profile or route data cannot be cleared or replaced by a continue a
     assert.deepEqual(get(PROFILE_KEY), profile);
     assert.deepEqual(get(RUN_KEY), progress);
     unavailable = false;
-    h.game[entry]();
+    h.game[entry](2);
     assert.equal(h.game.page, 'game');
     assert.equal(h.game.level.id, 2);
     assert.deepEqual(h.game.state, replayed(CAMPAIGN[1], ['right']));
@@ -2882,7 +2882,9 @@ test('WeChat scene motion draws at 60 FPS and returns to 30 without accelerating
   assert.deepEqual(h.game.actions, ['right', 'right']);
   assert.equal(h.frameRates.at(-1), 60, 'the buffered movement also receives smooth frames');
   frame(MOVE_MS + 1);
-  assert.equal(h.frameRates.at(-1), 30, 'completed movement returns to the idle cadence');
+  assert.equal(h.frameRates.at(-1), 60, 'arrival feedback stays smooth after the actor finishes moving');
+  frame(600);
+  assert.equal(h.frameRates.at(-1), 30, 'completed movement and arrival feedback return to the idle cadence');
 
   h.game.act('down'); frame(10);
   assert.equal(h.frameRates.at(-1), 60);

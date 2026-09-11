@@ -183,12 +183,11 @@ test('ranking page exposes a direct, stateful entry for WeChat rank reminders', 
   const development = harness({ development: true, subscriptionState: { status: 'idle' } });
   assert.equal(development.labels.includes('开发测试榜'), false, 'the removed toolbar does not leave a development badge behind');
 
-  for (const [status, icon] of [['checking', 'hourglass'], ['requesting', 'hourglass'],
-    ['accepted', 'check'], ['banned', 'lock'], ['disabled', 'lock']]) {
+  for (const status of ['checking', 'requesting', 'banned', 'disabled']) {
     const state = harness({ subscriptionState: { status } });
     const button = reminderEntry(state);
     assert.ok(button, status + ' keeps the reminder status visible');
-    assert.equal(button.style.icon, icon);
+    assert.equal(button.style.icon, 'notification');
     assert.equal(button.style.disabled, true);
   }
 
@@ -197,6 +196,11 @@ test('ranking page exposes a direct, stateful entry for WeChat rank reminders', 
     const button = reminderEntry(state);
     assert.equal(button.style.icon, 'notification');
     assert.equal(button.style.disabled, false);
+  }
+
+  for (const status of ['accepted', 'unavailable']) {
+    assert.equal(reminderEntry(harness({ subscriptionState: { status } })), undefined,
+      status + ' leaves no reminder icon or action in the header');
   }
 
   const privacy = harness({ subscriptionState: { status: 'idle' }, authorization: { enabled: false, status: 'idle' } });

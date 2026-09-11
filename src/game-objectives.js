@@ -3,7 +3,8 @@
 const { C } = require('./theme');
 const { drawUiIcon } = require('./ui-icons');
 const { drawPaperPlaque } = require('./controls');
-const { COLLECTION_DELAY_MS, COLLECTION_FLIGHT_MS, objectiveFeedback, drawObjectiveFeedback } = require('./game-feedback');
+const { objectiveFeedback, drawObjectiveFeedback } = require('./game-feedback');
+const { COLLECTION_IMPACT_MS, OBJECTIVE_PULSE_MS } = require('./feedback-timing');
 
 const OBJECTIVES = Object.freeze({ x: 24, y: 81, w: 342, h: 62, column: 114 });
 const objectiveAnchor = index => ({ x: OBJECTIVES.x + index * OBJECTIVES.column + 22, y: 110 });
@@ -28,10 +29,10 @@ function drawObjectives(r, game, now, feedback) {
   ];
   objectives.forEach((objective, index) => {
     const left = x + index * column, anchor = objectiveAnchor(index), item = objectiveFeedback(feedback, index);
-    const impactAt = item && item.collection ? item.at + COLLECTION_DELAY_MS + COLLECTION_FLIGHT_MS : game.transitionAt;
+    const impactAt = item && item.collection ? item.at + COLLECTION_IMPACT_MS : game.transitionAt;
     const age = now - impactAt;
     const emphasized = index ? objective.changed || item : item;
-    const pulse = !r.reducedMotion && emphasized && age >= 0 && age < 480 ? Math.sin(age / 480 * Math.PI) : 0;
+    const pulse = !r.reducedMotion && emphasized && age >= 0 && age < OBJECTIVE_PULSE_MS ? Math.sin(age / OBJECTIVE_PULSE_MS * Math.PI) : 0;
     if (index) r.line([[left, 99], [left, 125]], '#d4dccd', .8);
     if (pulse) {
       r.ctx.save(); r.ctx.globalAlpha *= pulse * .32;

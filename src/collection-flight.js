@@ -1,6 +1,7 @@
 'use strict';
 
-const { STYLES, COLLECTION_DELAY_MS, COLLECTION_FLIGHT_MS } = require('./game-feedback');
+const { STYLES } = require('./game-feedback');
+const { COLLECTION_DELAY_MS, COLLECTION_FLIGHT_MS } = require('./feedback-timing');
 const { objectiveAnchor } = require('./game-objectives');
 const { insideRect } = require('./board-projection');
 
@@ -30,10 +31,12 @@ function drawCollectionFlights(r, game, now) {
       const to = objectiveAnchor(style.objective), side = event.type === 'seal' ? -1 : 1;
       const [x, y] = curve(from, to, eased, side), c = r.ctx;
       const alpha = Math.min(1, progress / .12, (1 - progress) / .18);
-      c.save(); c.globalAlpha *= alpha * .35;
-      const trail = Array.from({ length: 7 }, (_, i) => curve(from, to, Math.max(0, eased - (6 - i) * .018), side));
-      r.line(trail, style.color, 1.2);
-      c.restore();
+      if (r.effectsQuality !== 'low') {
+        c.save(); c.globalAlpha *= alpha * .35;
+        const trail = Array.from({ length: 7 }, (_, i) => curve(from, to, Math.max(0, eased - (6 - i) * .018), side));
+        r.line(trail, style.color, 1.2);
+        c.restore();
+      }
       c.save(); c.globalAlpha *= alpha;
       c.translate(x, y); c.rotate(Math.sin(progress * Math.PI) * side * .18);
       const size = 14 + Math.sin(progress * Math.PI) * 6;

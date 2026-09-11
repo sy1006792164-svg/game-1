@@ -6,27 +6,20 @@ const { CONTROL } = require('./controls');
 const HEADER_ACTION_X = 322;
 const CONTENT_Y = 94;
 
-const REMINDER_ICONS = Object.freeze({
-  checking: 'hourglass',
-  requesting: 'hourglass',
-  accepted: 'check',
-  banned: 'lock',
-  disabled: 'lock'
-});
-const DISABLED_REMINDER_STATES = Object.freeze(['checking', 'requesting', 'accepted', 'banned', 'disabled']);
+const DISABLED_REMINDER_STATES = Object.freeze(['checking', 'requesting', 'banned', 'disabled']);
 
 function drawIntro(r, game) {
   r.header('好友排行', '总星数优先 · 同星比较通关与步数', () => game.home());
   const subscription = game.rankMessageSubscription && game.rankMessageSubscription.getState();
   const authorization = game.rankingAuthorization.getState();
   const friend = game.friendLeaderboard && game.friendLeaderboard.getState();
-  const showReminder = subscription && subscription.status !== 'unavailable' &&
+  const showReminder = subscription && !['accepted', 'unavailable'].includes(subscription.status) &&
     friend && (authorization.enabled || authorization.canDisplay) && ['ready', 'preview'].includes(friend.status);
   if (showReminder) {
     const status = subscription.status;
     const disabled = DISABLED_REMINDER_STATES.includes(status);
     r.button('', HEADER_ACTION_X, 10, CONTROL.compactHeight, CONTROL.compactHeight,
-      () => game.subscribeRankReminder(), { style: 'quiet', icon: REMINDER_ICONS[status] || 'notification', disabled });
+      () => game.subscribeRankReminder(), { style: 'quiet', icon: 'notification', disabled });
   }
 }
 

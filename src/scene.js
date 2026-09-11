@@ -11,6 +11,7 @@ const { chapterMood } = require('./chapter-atmosphere');
 const { drawHomeDelivery } = require('./page-atmosphere');
 const { drawGuideTargets } = require('./guide-view');
 const { drawHomeArchitecture } = require('./world-art');
+const { drawRoutePreview } = require('./route-preview');
 
 const COLOR = {
   sky: '#e9efe7', forest: '#b8cebf', fog: '#d6e2d7', teal: '#60b4ba',
@@ -264,15 +265,7 @@ function drawBoard(r, game, now, rect, guide) {
     r.hit(x - hw, y - hh, hw * 2, hh * 2, cellAction(cell), (hx, hy) => p.contains(cell, hx, hy));
   }
   if (game.reviewing) r.line((s.history || []).map(point), '#c8874eca', 2, [3, 4]);
-  const forecast = (s.history || []).slice(-3); while (forecast.length < 3) forecast.unshift(null);
-  const echoRoute = [s.echo, ...forecast].filter(cell => cell != null).map(point);
-  if (echoRoute.length > 1 && !game.reviewing) r.line(echoRoute, '#65b9bfaa', 1.4, [3, 5]);
-  if (forecast[0] != null && !game.reviewing) {
-    const [x, y] = point(forecast[0]), c = r.ctx;
-    ellipse(r, x, y, hw * .49, hh * .49, '#83d8de24');
-    c.beginPath(); c.ellipse(x, y, hw * .49, hh * .49, 0, 0, Math.PI * 2); c.strokeStyle = '#77d2d9'; c.lineWidth = 1.6; c.stroke();
-    r.icon('echo', x - hw * .58, y - hh * .38, Math.max(10, hw * .34), '#69b9c2');
-  }
+  drawRoutePreview(target, game, p, guide);
   drawActorTrails(r, game, now, point, hw * 1.7, options);
   [true, false].forEach(ghost => {
     const frame = actorFrame(game, now, point, ghost, options), shared = ghost && s.echo === s.player;

@@ -1,9 +1,9 @@
 'use strict';
 
 const { C } = require('./theme');
+const { COLLECTION_DELAY_MS, COLLECTION_FLIGHT_MS, COLLECTION_IMPACT_MS,
+  FEEDBACK_ENTER_MS, FEEDBACK_FADE_MS } = require('./feedback-timing');
 
-const COLLECTION_DELAY_MS = 100;
-const COLLECTION_FLIGHT_MS = 520;
 const STYLES = {
   letter: { label: '信笺', objective: 1, icon: 'letter', color: '#98683f', collection: true, duration: 2200 },
   seal: { label: '邮票', objective: 2, icon: 'stamp', color: '#3c7c81', collection: true, duration: 2200 },
@@ -65,10 +65,10 @@ function gameFeedback(r, game, now) {
 
 function feedbackOpacity(r, item, now) {
   if (r.reducedMotion) return 1;
-  const delay = item.collection ? COLLECTION_DELAY_MS + COLLECTION_FLIGHT_MS : 0;
+  const delay = item.collection ? COLLECTION_IMPACT_MS : 0;
   const age = now - item.at - delay;
-  const enter = Math.max(0, Math.min(1, age / 160));
-  const fade = Math.max(0, Math.min(1, (item.duration - (now - item.at)) / 260));
+  const enter = Math.max(0, Math.min(1, age / FEEDBACK_ENTER_MS));
+  const fade = Math.max(0, Math.min(1, (item.duration - (now - item.at)) / FEEDBACK_FADE_MS));
   return enter * fade;
 }
 
@@ -88,7 +88,7 @@ function drawObjectiveFeedback(r, item, bounds, now) {
   r.font(13, '600');
   const size = Math.min(13, 13 * w / Math.max(1, c.measureText(item.value).width));
   const rise = r.reducedMotion ? 0 : (1 - Math.min(1, Math.max(0, now - item.at -
-    (item.collection ? COLLECTION_DELAY_MS + COLLECTION_FLIGHT_MS : 0)) / 260)) * 1.5;
+    (item.collection ? COLLECTION_IMPACT_MS : 0)) / FEEDBACK_FADE_MS)) * 1.5;
   r.text(item.value, x + w / 2, y + h / 2 + rise, size, item.color, 'center', '600');
   c.restore();
 }
