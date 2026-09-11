@@ -1,13 +1,32 @@
 'use strict';
 
 const { C } = require('./theme');
+const { CONTROL } = require('./controls');
+
+const HEADER_ACTION_X = 322;
+const CONTENT_Y = 94;
+
+const REMINDER_ICONS = Object.freeze({
+  checking: 'hourglass',
+  requesting: 'hourglass',
+  accepted: 'check',
+  banned: 'lock',
+  disabled: 'lock'
+});
+const DISABLED_REMINDER_STATES = Object.freeze(['checking', 'requesting', 'accepted', 'banned', 'disabled']);
 
 function drawIntro(r, game) {
   r.header('好友排行', '总星数优先 · 同星比较通关与步数', () => game.home());
-  r.text('把沿途的星光，收进这封来信', 24, 102, 12, C.muted);
-  if (game.development) {
-    r.round(286, 91, 80, 22, 11, C.soft);
-    r.text('开发测试榜', 326, 102, 10, C.green, 'center');
+  const subscription = game.rankMessageSubscription && game.rankMessageSubscription.getState();
+  const authorization = game.rankingAuthorization.getState();
+  const friend = game.friendLeaderboard && game.friendLeaderboard.getState();
+  const showReminder = subscription && subscription.status !== 'unavailable' &&
+    friend && (authorization.enabled || authorization.canDisplay) && ['ready', 'preview'].includes(friend.status);
+  if (showReminder) {
+    const status = subscription.status;
+    const disabled = DISABLED_REMINDER_STATES.includes(status);
+    r.button('', HEADER_ACTION_X, 10, CONTROL.compactHeight, CONTROL.compactHeight,
+      () => game.subscribeRankReminder(), { style: 'quiet', icon: REMINDER_ICONS[status] || 'notification', disabled });
   }
 }
 
@@ -115,6 +134,6 @@ function drawLeaderboard(r, game) {
   drawFriends(r, game, box);
 }
 
-function leaderboardRect(height) { return { x: 18, y: 120, w: 354, h: Math.max(280, height - 158) }; }
+function leaderboardRect(height) { return { x: 18, y: CONTENT_Y, w: 354, h: Math.max(280, height - CONTENT_Y - 38) }; }
 
 module.exports = { drawLeaderboard, leaderboardRect };

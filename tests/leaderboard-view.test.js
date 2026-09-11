@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { drawLeaderboard, leaderboardRect } = require('../src/leaderboard-view');
+const { CONTROL } = require('../src/controls');
 
 function harness(options = {}) {
   const calls = [], events = [], hits = [], buttons = [];
@@ -33,6 +34,10 @@ function harness(options = {}) {
       get rank() { throw new Error('Friend rank must remain in the child'); },
       get count() { throw new Error('Friend count must remain in the child'); },
     },
+    ...(options.subscriptionState ? {
+      rankMessageSubscription: { getState: () => options.subscriptionState },
+      subscribeRankReminder: () => events.push(['subscribe-rank'])
+    } : {}),
   };
   drawLeaderboard(r, game);
   return { r, calls, events, hits, buttons, game, labels: calls.filter(call => ['text', 'label'].includes(call.method)).map(call => call.args[0]) };
@@ -40,8 +45,8 @@ function harness(options = {}) {
 
 test('ready ranking paints the child without a duplicate host tap target or manual list controls', () => {
   const h = harness({ H: 760, scale: .8 });
-  assert.deepEqual(h.events.find(event => event[0] === 'resize'), ['resize', { width: 354, height: 602, pixelRatio: 2 }]);
-  assert.deepEqual(h.events.find(event => event[0] === 'draw').slice(2), [18, 120, 354, 602]);
+  assert.deepEqual(h.events.find(event => event[0] === 'resize'), ['resize', { width: 354, height: 628, pixelRatio: 2 }]);
+  assert.deepEqual(h.events.find(event => event[0] === 'draw').slice(2), [18, 94, 354, 628]);
   assert.equal(h.hits.length, 0, 'the full gesture bridge owns shared-canvas taps');
   assert.equal(h.events.some(event => event[0] === 'tap'), false);
   assert.deepEqual(h.buttons, [], 'the ranking has no continue, self-location, refresh or page buttons');
@@ -84,8 +89,8 @@ test('permission checks and loading use the normal ranking skeleton without anot
 test('a previously authorized preview draws cached rankings during a silent recheck without a waiting card', () => {
   const h = harness({ authorization: { enabled: false, canDisplay: true, status: 'authorizing', message: '正在确认微信授权' },
     friendState: { status: 'preview' } });
-  assert.deepEqual(h.events.find(event => event[0] === 'resize'), ['resize', { width: 354, height: 542, pixelRatio: 2 }]);
-  assert.deepEqual(h.events.find(event => event[0] === 'draw').slice(2), [18, 120, 354, 542]);
+  assert.deepEqual(h.events.find(event => event[0] === 'resize'), ['resize', { width: 354, height: 568, pixelRatio: 2 }]);
+  assert.deepEqual(h.events.find(event => event[0] === 'draw').slice(2), [18, 94, 354, 568]);
   assert.equal(h.labels.some(label => /等待|正在确认微信授权|我的邮路/.test(label)), false, 'cached child replaces both waiting card and empty skeleton');
   assert.deepEqual(h.buttons, []);
   assert.deepEqual(h.events[0], ['native-button', null]);
@@ -124,7 +129,8 @@ test('all ranking states keep content and actions inside the 700-point safe layo
   ];
   for (const H of [700, 760, 844, 1000]) for (const variant of variants) {
     const h = harness({ ...variant, H, development: true });
-    const footer = h.calls.find(call => call.method === 'label');
+    const footer = h.calls.find(call => call.method === 'label' && call.args[2] === H - 18);
+    assert.ok(footer, 'every ranking state keeps its footer note');
     assert.equal(footer.args[2], H - 18, 'only a note remains below the full-height ranking');
     assert.equal(h.buttons.some(button => /继续送信|定位我/.test(button.label)), false);
     for (const button of h.buttons) {
@@ -144,7 +150,7 @@ test('all ranking states keep content and actions inside the 700-point safe layo
 test('ranking drawing and gesture bounds reclaim the space previously used by the continue button', () => {
   for (const H of [700, 760, 844, 1000]) {
     const rect = leaderboardRect(H), h = harness({ H });
-    assert.deepEqual(rect, { x: 18, y: 120, w: 354, h: H - 158 });
+    assert.deepEqual(rect, { x: 18, y: 94, w: 354, h: H - 132 });
     assert.equal(rect.y + rect.h, H - 38, 'the scroll surface reaches the footer note');
     assert.deepEqual(h.events.find(event => event[0] === 'draw').slice(2), [rect.x, rect.y, rect.w, rect.h]);
   }
@@ -156,4 +162,45 @@ test('host footer reserves synchronization errors while ranking rules appear onl
   assert.equal(h.calls.find(call => call.method === 'header').args[0], '好友排行');
   assert.equal(h.calls.find(call => call.method === 'header').args[1], '总星数优先 · 同星比较通关与步数');
   assert.equal(h.labels.some(label => /星星优先|总星数|通关数/.test(label)), false);
+});
+
+test('ranking page exposes a direct, stateful entry for WeChat rank reminders', () => {
+  const reminderEntry = state => state.buttons.find(button => button.x === 322 && button.y === 10);
+  const idle = harness({ subscriptionState: { status: 'idle' } });
+  const entry = reminderEntry(idle);
+  assert.ok(entry, 'supported WeChat clients receive an explicit reminder action');
+  assert.deepEqual([entry.x, entry.y, entry.w, entry.h], [322, 10, CONTROL.compactHeight, CONTROL.compactHeight],
+    'the icon action mirrors the back control at the far right of the title row');
+  assert.equal(entry.x + entry.w, 366, 'the action aligns with the header divider right edge');
+  assert.equal(leaderboardRect(idle.r.H).y, 94, 'removing the extra toolbar gives its height back to the ranking');
+  assert.equal(entry.label, '');
+  assert.equal(entry.style.style, 'quiet');
+  assert.equal(entry.style.icon, 'notification');
+  assert.equal(entry.style.disabled, false);
+  entry.action();
+  assert.deepEqual(idle.events.at(-1), ['subscribe-rank']);
+
+  const development = harness({ development: true, subscriptionState: { status: 'idle' } });
+  assert.equal(development.labels.includes('开发测试榜'), false, 'the removed toolbar does not leave a development badge behind');
+
+  for (const [status, icon] of [['checking', 'hourglass'], ['requesting', 'hourglass'],
+    ['accepted', 'check'], ['banned', 'lock'], ['disabled', 'lock']]) {
+    const state = harness({ subscriptionState: { status } });
+    const button = reminderEntry(state);
+    assert.ok(button, status + ' keeps the reminder status visible');
+    assert.equal(button.style.icon, icon);
+    assert.equal(button.style.disabled, true);
+  }
+
+  for (const status of ['rejected', 'error']) {
+    const state = harness({ subscriptionState: { status } });
+    const button = reminderEntry(state);
+    assert.equal(button.style.icon, 'notification');
+    assert.equal(button.style.disabled, false);
+  }
+
+  const privacy = harness({ subscriptionState: { status: 'idle' }, authorization: { enabled: false, status: 'idle' } });
+  const denied = harness({ subscriptionState: { status: 'idle' }, friendState: { status: 'denied' } });
+  assert.equal(reminderEntry(privacy), undefined, 'privacy consent remains the only initial action');
+  assert.equal(reminderEntry(denied), undefined, 'friend access must work before offering rank alerts');
 });

@@ -33,7 +33,7 @@ function atmosphereChapter(game, height) {
 }
 
 function ambientRect(page, viewport) {
-  const quietTop = { publication: 92, levels: 148, collection: 251, leaderboard: 120 }[page];
+  const quietTop = { publication: 92, levels: 148, collection: 251, leaderboard: 94 }[page];
   if (quietTop == null) return viewport;
   const bottom = viewport.y + viewport.h, y = Math.max(viewport.y, quietTop);
   return { x: viewport.x, y, w: viewport.w, h: Math.max(0, bottom - y) };

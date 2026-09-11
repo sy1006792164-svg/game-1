@@ -2600,6 +2600,32 @@ test('friend-only ranking navigation preserves the active route and has no world
   }
 });
 
+test('rank reminder is checked silently and requested only by the explicit ranking action', async () => {
+  const settings = [], requests = [];
+  const h = harness({ wx: {
+    getSetting(options) {
+      assert.equal(options.withSubscriptions, true);
+      settings.push(options);
+      options.success({ subscriptionsSetting: { mainSwitch: true, itemSettings: {} } });
+    },
+    requestSubscribeSystemMessage(options) { requests.push(options); }
+  } });
+  try {
+    assert.equal(requests.length, 0, 'startup never opens a subscription prompt');
+    h.game.openPage('leaderboard');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settings.length, 1);
+    assert.equal(requests.length, 0, 'entering and rendering rankings only reads the current setting');
+
+    const result = h.game.subscribeRankReminder();
+    assert.equal(requests.length, 1, 'the native prompt starts synchronously in the explicit action');
+    assert.deepEqual(requests[0].msgTypeList, ['SYS_MSG_TYPE_RANK']);
+    requests[0].success({ errMsg: 'requestSubscribeSystemMessage:ok', SYS_MSG_TYPE_RANK: 'accept' });
+    assert.equal((await result).status, 'accepted');
+    assert.equal(h.game.rankMessageSubscription.getState().status, 'accepted');
+  } finally { h.destroy(); }
+});
+
 test('friend ranking uses existing local bests after privacy and friend consent without login or profile access', async () => {
   const events = [], privacy = [], authorizations = [], messages = [];
   const context = { canvas: { width: 1, height: 1 }, postMessage(message) { messages.push(message); } };

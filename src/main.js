@@ -5,6 +5,7 @@ const { createAds } = require('./ads');
 const { createGameCircle } = require('./game-circle');
 const { createFriendLeaderboard } = require('./friend-leaderboard');
 const { createRankingAuthorization } = require('./ranking-authorization');
+const { createSystemMessageSubscription, SYSTEM_MESSAGE_TYPES } = require('./system-message-subscription');
 const { campaignScore } = require('./friend-score');
 const { enableSharing } = require('./sharing');
 const { ACTIONS, STAR_TWO_MARGIN, createState, step, replay, normalizeReviveHistory, stars } = require('./engine');
@@ -40,6 +41,7 @@ class Game {
     this.store = createStore(platform.storage, { development: this.development });
     this.sound = createSound(platform);
     this.gameCircle = createGameCircle(platform, config.GAME_CIRCLE_OPENLINK, message => this.toast(message));
+    this.rankMessageSubscription = createSystemMessageSubscription(platform, [SYSTEM_MESSAGE_TYPES.RANK]);
     this.friendResumeRevision = 0;
     const rankingAllowed = () => !this.hidden && !!this.rankingAuthorization && this.rankingAuthorization.getState().enabled;
     this.friendLeaderboard = createFriendLeaderboard(platform, config,
@@ -105,6 +107,7 @@ class Game {
       this.hidden = false;
       this.rankingAuthorization.show();
       this.refreshFriendSession();
+      if (this.page === 'leaderboard') this.rankMessageSubscription.refresh();
       this.pointer = null; this.setMetrics(platform.resize()); this.lastFrame = -Infinity;
       this.syncMusic(); this.sound.resume('hidden');
       if (this.frameId == null) this.loop();
@@ -547,6 +550,7 @@ class Game {
     if (page === 'levels') this.scrollToProgress();
     if (page === 'collection') this.collectionScroll.reset(this.platform.now());
     if (page === 'leaderboard') {
+      this.rankMessageSubscription.refresh();
       this.friendLeaderboard.suspend();
       this.rankingAuthorization.open().then(() => {
         const state = this.rankingAuthorization.getState();
@@ -555,6 +559,16 @@ class Game {
       this.previewRanking();
     }
     this.cue('tap');
+  }
+  subscribeRankReminder() {
+    if (this.page !== 'leaderboard' || this.hidden || this.busy || this.modal) return Promise.resolve(this.rankMessageSubscription.getState());
+    // request() invokes the native API before returning, preserving WeChat's
+    // requirement that subscription prompts originate directly in onTouchEnd.
+    const request = this.rankMessageSubscription.request();
+    request.then(state => {
+      if (this.page === 'leaderboard' && !this.hidden && state.message) this.toast(state.message);
+    });
+    return request;
   }
   syncFriendScore() {
     if (this.hidden || !this.rankingAuthorization.getState().enabled) return;

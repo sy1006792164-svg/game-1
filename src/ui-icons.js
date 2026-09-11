@@ -58,6 +58,14 @@ function drawUiGlyph(c, type) {
     c.moveTo(-7, -9); c.bezierCurveTo(-7, -2, 7, 2, 7, 9);
     c.moveTo(7, -9); c.bezierCurveTo(7, -2, -7, 2, -7, 9);
     line([[-3, 6], [3, 6]]);
+  } else if (type === 'notification') {
+    c.moveTo(-8, 6);
+    c.quadraticCurveTo(-5, 2, -5, -3);
+    c.quadraticCurveTo(-5, -9, 0, -9);
+    c.quadraticCurveTo(5, -9, 5, -3);
+    c.quadraticCurveTo(5, 2, 8, 6);
+    c.lineTo(8, 7); c.lineTo(-8, 7); c.closePath();
+    c.moveTo(-3, 10); c.quadraticCurveTo(0, 12, 3, 10);
   } else if (type === 'grid') {
     for (const y of [-9, 2]) for (const x of [-9, 2]) box(x, y, 7, 7, 1);
   } else if (type === 'settings') {
