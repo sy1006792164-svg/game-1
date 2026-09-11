@@ -44,9 +44,9 @@ function defaults() {
   };
 }
 
-function score(value) {
+function score(value, minimumTurns = 1) {
   if (!plain(value) || !Number.isInteger(value.stars) || value.stars < 1 || value.stars > 3 ||
-      !Number.isInteger(value.bestTurns) || value.bestTurns < 0 || value.bestTurns > 100000) return null;
+      !Number.isInteger(value.bestTurns) || value.bestTurns < minimumTurns || value.bestTurns > 100000) return null;
   return { stars: value.stars, bestTurns: value.bestTurns };
 }
 
@@ -74,7 +74,7 @@ function profileFrom(value) {
     if (!plain(value[name])) return;
     Object.keys(value[name]).slice(0, 1000).forEach(function (id) {
       if (!valid(id)) return;
-      const record = score(value[name][id]);
+      const record = score(value[name][id], name === 'daily' ? 0 : 1);
       if (record) next[name][id] = record;
     });
   });
@@ -261,7 +261,7 @@ function createStore(adapter, options = {}) {
     recordWin: function (levelId, stars, turns, mode = 'campaign') {
       const id = typeof levelId === 'number' ? String(levelId) : levelId;
       if (mode !== 'campaign' || !safeId(id) || !Number.isInteger(stars) || stars < 1 || stars > 3 ||
-          !Number.isInteger(turns) || turns < 0 || turns > 100000) return snapshot();
+          !Number.isInteger(turns) || turns < 1 || turns > 100000) return snapshot();
       const map = profile.completed;
       const before = own(map, id) ? map[id] : null;
       if (!before && Object.keys(map).length >= 1000) return snapshot();

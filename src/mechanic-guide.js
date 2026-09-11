@@ -2,6 +2,7 @@
 
 const { neighbor } = require('./engine');
 const { CAMPAIGN } = require('./levels');
+const { campaignRecord } = require('./campaign-progress');
 
 const MECHANICS = ['wind', 'bridge', 'light'];
 const NAMES = { wind: '风口', bridge: '纸桥', light: '风灯' };
@@ -21,9 +22,7 @@ function createMechanicGuide(profile, level, mode) {
   MECHANICS.forEach(id => { if (profile.mechanicGuides && profile.mechanicGuides[id] === true) seen.add(id); });
   // Derive old encounters from actual completed maps, never the highest level number.
   CAMPAIGN.forEach(map => {
-    const record = profile.completed && profile.completed[map.id];
-    if (record && Number.isInteger(record.stars) && record.stars >= 1 && record.stars <= 3 &&
-        Number.isInteger(record.bestTurns) && record.bestTurns >= 0 && record.bestTurns <= 100000)
+    if (campaignRecord(profile, map.id))
       availableMechanics(map, mode).forEach(id => seen.add(id));
   });
   const ids = available.filter(id => !seen.has(id));

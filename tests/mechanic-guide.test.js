@@ -18,6 +18,8 @@ test('first appearance follows the actual three mechanic types across all shippe
   assert.equal(createMechanicGuide({ mechanicGuides: { wind: true, bridge: true, light: true } }, CAMPAIGN[19], 'campaign'), null);
   assert.deepEqual(createMechanicGuide({ completed: { 999: {} }, guideDismissed: true }, CAMPAIGN[19], 'campaign').ids, ['wind', 'bridge', 'light'],
     'invalid records and first-route dismissal cannot suppress an unseen mechanic');
+  assert.deepEqual(createMechanicGuide({ completed: { 999: { stars: 3, bestTurns: 0 } } }, CAMPAIGN[19], 'campaign').ids,
+    ['wind', 'bridge', 'light'], 'an impossible zero-turn win cannot suppress a mechanic introduction');
   const oldProgress = { completed: { 13: { stars: 3, bestTurns: CAMPAIGN[12].par } } };
   assert.equal(createMechanicGuide(oldProgress, CAMPAIGN[13], 'campaign'), null, 'a completed wind map proves the player has already encountered wind');
   assert.deepEqual(createMechanicGuide(oldProgress, CAMPAIGN[19], 'campaign'), { ids: ['bridge', 'light'], phase: 0 },

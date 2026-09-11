@@ -8,13 +8,14 @@ const { createRankingAuthorization } = require('./ranking-authorization');
 const { createSystemMessageSubscription, SYSTEM_MESSAGE_TYPES } = require('./system-message-subscription');
 const { campaignScore } = require('./friend-score');
 const { enableSharing } = require('./sharing');
-const { ACTIONS, STAR_TWO_MARGIN, createState, step, replay, normalizeReviveHistory, stars } = require('./engine');
+const { ACTIONS, createState, step, replay, normalizeReviveHistory, stars } = require('./engine');
+const { deliveryResultLines } = require('./delivery-result');
 const reviveFlow = require('./revive-flow');
 const { CAMPAIGN } = require('./levels');
 const { getAlbum } = require('./stamp-album');
 const { handleGameKey } = require('./keyboard-input');
 const { ListScroll } = require('./list-scroll');
-const { levelListLayout, levelProgressOffset } = require('./level-view');
+const { levelListLayout, levelProgressOffset, navigateLevelBrowser } = require('./level-view');
 const { leaderboardRect } = require('./leaderboard-view');
 const { developmentLevelNumber } = require('./developer-view');
 const { Renderer } = require('./renderer');
@@ -250,8 +251,8 @@ class Game {
     const p = this.profile();
     return p.completed[String(level.id)];
   }
-  completion() { return Object.keys(this.profile().completed).length; }
-  starCount() { return Object.values(this.profile().completed).reduce((n, c) => n + c.stars, 0); }
+  completion() { return this.album().progress.completedCount; }
+  starCount() { return this.album().stars; }
   unlocked(index) {
     if (!Number.isInteger(index) || index < 0 || index >= CAMPAIGN.length) return false;
     return this.development || index === 0 || !!this.profile().completed[String(CAMPAIGN[index - 1].id)];
@@ -478,18 +479,10 @@ class Game {
     const candidate = index >= 0 ? CAMPAIGN[index + 1] : null;
     const next = this.mode === 'campaign' ? candidate : null;
     const saved = this.store.getStatus().persisted;
-    const saveLine = saved ? '本次纪录已保存。' : '本次纪录仅在本次运行保留。';
-    const bestLine = !before ? saveLine : this.state.turn < before.bestTurns ? '刷新纪录，比上次少走 ' + (before.bestTurns - this.state.turn) + ' 拍。' : this.state.turn === before.bestTurns ? '追平个人最佳 · ' + before.bestTurns + ' 拍' : '个人最佳 ' + before.bestTurns + ' 拍 · 本次多走 ' + (this.state.turn - before.bestTurns) + ' 拍';
-    const lines = [this.state.turn + ' 拍完成' + (this.state.revived ? ' · 续灯 ' + this.state.reviveCount + ' 次' : ''), bestLine];
-    if (this.state.revived) {
-      const two = this.level.par + STAR_TWO_MARGIN;
-      lines.push(rating === 2 ? '总拍数在 ' + two + ' 拍内，续灯后本次获二星。'
-        : '总拍数超过 ' + two + ' 拍，本次获一星。');
-    }
+    const lines = deliveryResultLines(this.level, this.state, rating, before, saved);
     if (this.guideEnabled && canGuide(this.level, this.mode)) {
       lines.push('你收信；回声晚 3 次行动，替你收蓝票。', '收齐信和票，再走进邮局就能过关。');
     }
-    if (before && !saved) lines.push(saveLine);
     const rewards = this.album().stamps.filter(stamp => stamp.owned && !albumBefore.stamps[stamp.index].owned);
     if (rewards.length) lines.push(rewards.length > 1 ? '收到 ' + rewards.length + ' 枚新邮票' : '收到新邮票「' + rewards[0].name + '」');
     this.modal = {
@@ -570,6 +563,15 @@ class Game {
     }
     this.cue('tap');
   }
+  openLevelBrowser(mode = 'all', levelId) {
+    if (this.hidden || this.busy || this.startupActive() || !['all', 'replay', 'chapters'].includes(mode)) return false;
+    this.openPage('levels');
+    if (this.page !== 'levels') return false;
+    // Browsing a collection target never replaces the saved run; selecting its card remains the start action.
+    if (mode !== 'all' || levelId !== undefined) navigateLevelBrowser(this, mode, levelId);
+    this.lastFrame = -Infinity;
+    return true;
+  }
   subscribeRankReminder() {
     if (this.page !== 'leaderboard' || this.hidden || this.busy || this.modal) return Promise.resolve(this.rankMessageSubscription.getState());
     // request() invokes the native API before returning, preserving WeChat's
@@ -639,9 +641,12 @@ class Game {
   scrollToProgress() {
     if (this.page !== 'levels') return;
     const now = this.platform.now(), scroll = this.levelScroll;
-    this.pointer = null; scroll.reset(now);
+    const saved = this.savedRun();
+    const active = saved && saved.mode === 'campaign' && CAMPAIGN.find(level => level.id === saved.levelId && this.unlocked(level.id - 1));
+    this.levelBrowser = { mode: 'all' };
+    this.pointer = null; this.renderer.hits = []; scroll.reset(now);
     scroll.setBounds(levelListLayout(this.renderer.H).maxScroll);
-    scroll.offset = levelProgressOffset(this.nextLevel(), this.renderer.H);
+    scroll.offset = levelProgressOffset(active || this.nextLevel(), this.renderer.H);
     scroll.activeAt = now;
   }
   scrollList(x, y, delta) {

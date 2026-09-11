@@ -123,6 +123,48 @@ test('later lower local aggregates do not replace a higher queued or dispatched 
   await h.board.submit(score()); assert.equal(h.messages.filter(m => m.action === 'submit').length, 1);
   await h.board.submit(score({ stars: 9, completed: 3, turns: 29 })); assert.equal(h.messages.at(-1).score.turns, 29); h.board.close();
 });
+for (const recovery of ['open', 'revalidate', 'restore']) test('a child-rejected improved score is resent after confirmed ' + recovery, async () => {
+  const h = bridge(), child = drawing();
+  const previous = score({ stars: 2, completed: 1, turns: 10, ownerToken: 'wl1_' + 'a'.repeat(48) });
+  const improved = { ...previous, stars: 3 };
+  const stored = new Map([[KEY, serializeScore(previous, KEY)]]);
+  child.api.getUserCloudStorage = request => {
+    child.requests.mine.push(request);
+    queueMicrotask(() => request.success({ KVDataList: request.keyList.filter(key => stored.has(key)).map(key => ({ key, value: stored.get(key) })) }));
+  };
+  child.api.setUserCloudStorage = request => {
+    child.requests.writes.push(request);
+    queueMicrotask(() => { request.KVDataList.forEach(item => stored.set(item.key, item.value)); request.success(); });
+  };
+  h.context.postMessage = message => { h.messages.push(message); child.api.message(message); };
+  const current = () => parseScore([{ key: KEY, value: stored.get(KEY) }]);
+  const submissions = () => h.messages.filter(message => message.action === 'submit');
+  try {
+    await h.open(); await h.board.submit(previous); await tick();
+    child.requests.friends[0].fail({ errMsg: 'getFriendCloudStorage:fail auth deny' });
+    h.board.close(); await h.board.submit(improved); await tick();
+    assert.deepEqual(submissions().map(message => message.score.stars), [2, 3]);
+    assert.equal(current().stars, 2, 'the child must not save a score while its permission gate is closed');
+    assert.equal(child.requests.writes.length, 0);
+
+    const friendReads = child.requests.friends.length;
+    if (recovery === 'open') await h.open();
+    else {
+      if (recovery === 'restore') h.board.suspend();
+      assert.equal(h.board[recovery]({ [SCOPE]: true }), true);
+      assert.equal(child.requests.friends.length, friendReads, 'silent recovery must not read friend records');
+    }
+    await h.board.submit(improved); h.board.retry(); await tick();
+    assert.deepEqual(submissions().map(message => message.score.stars), [2, 3, 3]);
+    assert.deepEqual([current().stars, current().completed, current().turns], [3, 1, 10]);
+    assert.equal(child.requests.writes.length, 1, 'only the improved aggregate is saved');
+
+    await h.board.submit(improved); await h.board.submit(previous); await tick();
+    assert.equal(submissions().length, 3, 'unchanged and lower scores remain deduplicated within this session');
+    assert.equal(child.requests.writes.length, 1);
+  } finally { h.board.revalidate({ [SCOPE]: false }); }
+});
+
 test('open data accepts legacy v1 records without trusting or requiring their old selfId', () => {
   assert.equal(parseScore(kv(score({ v: 1, selfId: 'old-hash' }))).stars, 6);
   assert.equal('selfId' in parseScore(kv(score({ v: 1, selfId: 'old-hash' }))), false);

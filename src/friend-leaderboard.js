@@ -33,6 +33,11 @@ function createFriendLeaderboard(platform, config, options) {
   function setState(status, message) { state = { status, message }; return getState(); }
   function getState() { return Object.assign({}, state, { syncStatus, syncMessage, syncPending: !!desired && desired !== dispatched }); }
   function syncAllowed() { try { return authorized && canSync() === true; } catch (_) { return false; } }
+  function confirmAuthorization() {
+    // The child can reject a dispatched score after its own permission check.
+    // A newly confirmed session must resend the latest score before deduplicating.
+    authorized = true; dispatched = '';
+  }
   function available() {
     if (!api) { setState('unavailable', '请在微信小游戏中查看好友榜'); return false; }
     if (typeof api.getOpenDataContext !== 'function' || typeof api.authorize !== 'function') {
@@ -68,9 +73,13 @@ function createFriendLeaderboard(platform, config, options) {
       pendingShow = null;
       context = context || api.getOpenDataContext();
       if (!context || !context.canvas || typeof context.postMessage !== 'function') throw new Error('unsupported');
-      authorized = true;
+      confirmAuthorization();
       resize(dimensions);
-      if (post('open', dimensions)) { setState('ready', '好友数据仅在微信开放数据域展示'); flush(); }
+      if (post('open', dimensions)) {
+        setState('ready', '好友数据仅在微信开放数据域展示');
+        // Let the caller refresh its local aggregate before resending cached progress.
+        Promise.resolve().then(() => { if (token === revision) flush(); });
+      }
     } catch (_) { setState('unavailable', '好友榜尚未就绪\n请更新微信或稍后重试'); }
     return getState();
   }
@@ -125,7 +134,7 @@ function createFriendLeaderboard(platform, config, options) {
       if (canSync() !== true || typeof api.getOpenDataContext !== 'function') return false;
       context = context || api.getOpenDataContext();
       if (!context || !context.canvas || typeof context.postMessage !== 'function') return false;
-      authorized = true;
+      confirmAuthorization();
       return post('validated');
     } catch (_) { return false; }
   }
@@ -143,7 +152,7 @@ function createFriendLeaderboard(platform, config, options) {
     if (pendingShow !== null) return show(pendingShow).status === 'ready';
     if (!context) return false;
     const wasAuthorized = authorized;
-    authorized = true;
+    confirmAuthorization();
     post('validated');
     if (visible) {
       if (!wasAuthorized && !post('open', dimensions)) return false;

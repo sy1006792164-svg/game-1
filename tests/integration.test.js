@@ -1781,10 +1781,63 @@ test('a slower replay reports the personal best and does not downgrade stars or 
   CAMPAIGN[0].solution.forEach(action => h.act(action));
   assert.equal(h.game.state.status, 'won');
   assert.equal(h.game.modal.stars, 2);
+  assert.match(h.game.modal.lines[0], /已保留最佳 3 星/);
   assert.match(h.game.modal.lines[1], /个人最佳 4 拍.*多走 1 拍/);
   assert.deepEqual(h.game.profile().completed['1'], before);
   assert.equal(h.game.profile().totalWins, 1, 'a repeat delivery must not inflate distinct wins');
   h.destroy();
+});
+
+test('real replay upgrades refresh settlement, progress, stamps and ranking totals across campaign boundaries', async t => {
+  const { campaignScore } = require('../src/friend-score');
+  const { replayLevels } = require('../src/level-navigation');
+  const h = harness({ development: true }); t.after(() => h.destroy());
+  async function deliver(level, waits) {
+    h.start(level);
+    for (const action of [...Array(waits).fill('wait'), ...level.solution]) {
+      if (h.game.state.status === 'failed') {
+        const pending = h.game.requestRevive();
+        await Promise.resolve(); h.closeAd(true); await pending;
+        assert.equal(h.game.state.status, 'playing');
+      }
+      h.act(action);
+    }
+    assert.equal(h.game.state.status, 'won', `route ${level.id}`);
+  }
+  // Chapter boundaries, new mechanics, the strict late-game light budget and
+  // the final three-route chapter all share the same settlement contract.
+  for (const id of [1, 6, 7, 18, 19, 300, 301, 996, 997, 999]) {
+    const level = CAMPAIGN[id - 1];
+    await deliver(level, 2);
+    assert.equal(h.game.modal.stars, 2);
+    const before = h.game.album(), scoreBefore = campaignScore(h.game.profile());
+    assert.ok(replayLevels(h.game).some(route => route.id === id));
+    await deliver(level, 0);
+    const after = h.game.album(), scoreAfter = campaignScore(h.game.profile());
+    assert.equal(h.game.modal.stars, 3);
+    assert.match(h.game.modal.lines[0], /星光 \+1/);
+    assert.equal(after.stars, before.stars + 1);
+    assert.equal(h.game.completion(), before.progress.completedCount);
+    assert.equal(after.progress.perfectCount, before.progress.perfectCount + 1);
+    assert.equal(after.progress.chapters[level.chapter].stars, before.progress.chapters[level.chapter].stars + 1);
+    assert.equal(replayLevels(h.game).some(route => route.id === id), false);
+    assert.equal(scoreAfter.stars, scoreBefore.stars + 1);
+    assert.equal(scoreAfter.completed, scoreBefore.completed);
+    assert.equal(scoreAfter.turns, scoreBefore.turns - 2);
+    assert.equal(h.game.store.loadRun(), null);
+    const rewards = after.stamps.filter(stamp => stamp.owned && !before.stamps[stamp.index].owned);
+    assert.equal(h.game.modal.lines.some(line => /新邮票/.test(line)), rewards.length > 0);
+    const profile = clone(h.game.profile());
+    h.game.victory();
+    assert.deepEqual(h.game.profile(), profile, 'duplicate settlement preserves every total');
+    assert.equal(h.game.modal.lines.some(line => /星光 \+|新邮票/.test(line)), false);
+    await deliver(level, 2);
+    assert.match(h.game.modal.lines[0], /已保留最佳 3 星/);
+    assert.deepEqual(h.game.profile(), profile);
+    assert.deepEqual(campaignScore(h.game.profile()), scoreAfter);
+    assert.deepEqual(h.game.album().stamps, after.stamps);
+    if (id === 999) assert.equal(h.game.modal.buttons[0].text, '返回邮局');
+  }
 });
 
 

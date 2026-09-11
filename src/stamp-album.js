@@ -1,6 +1,6 @@
 'use strict';
 
-const { CAMPAIGN } = require('./levels');
+const { getCampaignProgress } = require('./campaign-progress');
 
 // Twenty-three keepsakes, earned only through campaign stars.
 const STAMPS = Object.freeze([
@@ -14,24 +14,17 @@ const STAMPS = Object.freeze([
   ['lamp-river', '灯河渡口', 1430, 'bridge'], ['final-letter', '寄往终章', 1600, 'star'],
 ].map(([id, name, target, icon], index) => Object.freeze({ id, name, target, icon, index })));
 
-const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
-function records(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
-function starsOf(table, id) {
-  if (!own(table, id)) return 0;
-  const record = table[id];
-  if (!record || typeof record !== 'object' || Array.isArray(record)) return 0;
-  return Number.isInteger(record.stars) && record.stars >= 1 && record.stars <= 3 &&
-    Number.isInteger(record.bestTurns) && record.bestTurns >= 0 && record.bestTurns <= 100000 ? record.stars : 0;
-}
-
 function getAlbum(profile) {
-  const data = profile || {}, completed = records(data.completed);
-  const stars = CAMPAIGN.reduce((sum, level) => sum + starsOf(completed, String(level.id)), 0);
+  const progress = getCampaignProgress(profile), stars = progress.stars;
   const stamps = STAMPS.map(stamp => {
     const current = stars, goal = stamp.target;
-    return { ...stamp, current, goal, owned: current >= goal, condition: '主线累计 ' + stamp.target + ' 星' };
+    const previousGoal = stamp.index ? STAMPS[stamp.index - 1].target : 0;
+    const stageGoal = goal - previousGoal, stageCurrent = Math.max(0, Math.min(stageGoal, current - previousGoal));
+    return { ...stamp, current, goal, previousGoal, stageGoal, stageCurrent, remaining: Math.max(0, goal - current),
+      owned: current >= goal, condition: '主线累计 ' + stamp.target + ' 星' };
   });
-  return { stars, stamps, ownedCount: stamps.filter(stamp => stamp.owned).length, next: stamps.find(stamp => !stamp.owned) || null, mainCount: STAMPS.length };
+  return { stars, progress, stamps, ownedCount: stamps.filter(stamp => stamp.owned).length,
+    next: stamps.find(stamp => !stamp.owned) || null, mainCount: STAMPS.length };
 }
 
 module.exports = { STAMPS, getAlbum };

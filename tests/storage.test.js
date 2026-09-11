@@ -132,6 +132,27 @@ test('quota failures retain playable memory, with persistence status until all d
   assert.equal(store.getStatus().persisted, true);
 });
 
+test('zero-turn campaign records cannot survive loading or poison a later personal best', () => {
+  const adapter = memory({ [PROFILE_KEY]: {
+    version: 1, completed: { 1: { stars: 3, bestTurns: 0 }, 2: { stars: 2, bestTurns: 6 },
+      old_route: { stars: 1, bestTurns: 8 } },
+    daily: { '2026-09-07': { stars: 3, bestTurns: 0 } }, totalWins: 99,
+  } });
+  const store = createStore(adapter);
+  assert.deepEqual(store.getProfile().completed,
+    { 2: { stars: 2, bestTurns: 6 }, old_route: { stars: 1, bestTurns: 8 } });
+  assert.deepEqual(store.getProfile().daily, { '2026-09-07': { stars: 3, bestTurns: 0 } },
+    'archived daily data retains its legacy compatibility rules');
+  assert.equal(store.getProfile().totalWins, 3);
+  store.recordWin(1, 3, 0); store.recordWin(2, 3, 0);
+  assert.equal(store.getProfile().completed['1'], undefined);
+  assert.deepEqual(store.getProfile().completed['2'], { stars: 2, bestTurns: 6 });
+  store.recordWin(1, 2, 7); store.recordWin(1, 3, 4);
+  const reloaded = createStore(adapter).getProfile();
+  assert.deepEqual(reloaded.completed['1'], { stars: 3, bestTurns: 4 });
+  assert.equal(reloaded.totalWins, 4);
+});
+
 test('a later run save or flush recovers the latest scores after a temporary write failure', () => {
   for (const recovery of ['saveRun', 'flush']) {
     const adapter = memory(), set = adapter.set;

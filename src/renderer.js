@@ -6,7 +6,7 @@ const { drawUiIcon, UI_ICON } = require('./ui-icons');
 const { drawHome } = require('./home-view');
 const { drawStartup, drawPublication } = require('./startup-view');
 const { drawGame } = require('./game-view');
-const { drawLevels, levelChapterAtOffset } = require('./level-view');
+const { drawLevels, levelBrowserChapter } = require('./level-view');
 const { drawCollection } = require('./collection-view');
 const { drawStampDetail } = require('./stamp-detail-view');
 const { drawLeaderboard } = require('./leaderboard-view');
@@ -24,7 +24,7 @@ const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, 
 
 function atmosphereChapter(game, height) {
   if (game.page === 'game' && game.level) return game.level.chapter || 0;
-  if (game.page === 'levels' && game.levelScroll) return levelChapterAtOffset(game.levelScroll.offset, height);
+  if (game.page === 'levels' && game.levelScroll) return levelBrowserChapter(game, height);
   if (['home', 'collection', 'settings'].includes(game.page) && typeof game.nextLevel === 'function') {
     const next = game.nextLevel();
     if (next) return next.chapter || 0;

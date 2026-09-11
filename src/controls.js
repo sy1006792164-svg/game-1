@@ -46,21 +46,30 @@ function drawButton(r, text, x, y, w, h, action, style) {
   const ui = buttonLayout(r, text, w, style), options = ui.options;
   const tone = TONES[options.style] || TONES.secondary;
   const primary = options.style === 'primary', disabled = !!options.disabled;
+  const tab = options.style === 'tab', textOnly = options.style === 'text', flat = tab || textOnly;
   const pointer = r.pointer;
   const pressed = !disabled && pointer && !pointer.dragging &&
     pointer.x >= x && pointer.x <= x + w && pointer.y >= y && pointer.y <= y + h;
   // Color changes priority; geometry, icon size and baseline stay the same.
-  const depth = CONTROL.depth, faceH = h - depth;
-  const top = y + (pressed && !r.reducedMotion ? depth - 1 : 0);
+  const depth = flat ? 0 : CONTROL.depth, faceH = h - depth;
+  const top = y + (pressed && !flat && !r.reducedMotion ? depth - 1 : 0);
   const cut = primary ? 12 : 9, notch = primary && w >= 140;
   if (disabled) c.globalAlpha *= .46;
-  if (!pressed && !disabled && primary) {
-    r.round(x + 4, y + 7, w - 8, faceH, 14, '#476c5b12');
-    r.round(x + 2, y + 4, w - 4, faceH, 14, '#476c5b12');
+  if (tab) {
+    plaque(r, x + 2, y + 4, w - 4, h - 8, 7, false,
+      pressed ? C.soft : options.selected ? C.panel : null, options.selected ? C.line : null);
+    if (options.selected) r.line([[x + w / 2 - 15, y + h - 8], [x + w / 2 + 15, y + h - 8]], C.green, 1.5);
+  } else if (textOnly) {
+    if (pressed) r.round(x + 2, y + 5, w - 4, h - 10, 8, C.soft);
+  } else {
+    if (!pressed && !disabled && primary) {
+      r.round(x + 4, y + 7, w - 8, faceH, 14, '#476c5b12');
+      r.round(x + 2, y + 4, w - 4, faceH, 14, '#476c5b12');
+    }
+    plaque(r, x, y + depth, w, faceH, cut, notch, tone.base);
+    plaque(r, x, top, w, faceH, cut, notch, pressed ? tone.held : tone.face, tone.edge);
+    r.line([[x + cut + 3, top + 2], [x + w - cut - 3, top + 2]], tone.shine, 1);
   }
-  plaque(r, x, y + depth, w, faceH, cut, notch, tone.base);
-  plaque(r, x, top, w, faceH, cut, notch, pressed ? tone.held : tone.face, tone.edge);
-  r.line([[x + cut + 3, top + 2], [x + w - cut - 3, top + 2]], tone.shine, 1);
   const middle = top + faceH / 2;
   const feedbackAge = Number.isFinite(options.feedbackAt) ? r.now - options.feedbackAt : -1;
   const feedback = !disabled && !r.reducedMotion && feedbackAge >= 0 && feedbackAge < 650;
@@ -81,7 +90,8 @@ function drawButton(r, text, x, y, w, h, action, style) {
   }
   const textX = groupX + ui.leading + ui.textSpan / 2;
   const textY = middle - (ui.lines.length - 1) * ui.lineHeight / 2;
-  ui.lines.forEach((line, index) => r.text(line, textX, textY + index * ui.lineHeight, ui.size, tone.ink, 'center', ui.weight));
+  const ink = tab ? options.selected ? C.green : C.muted : textOnly ? C.green : tone.ink;
+  ui.lines.forEach((line, index) => r.text(line, textX, textY + index * ui.lineHeight, ui.size, ink, 'center', ui.weight));
   if (options.trailing) drawUiIcon(r, options.trailing, x + w - ui.inset - CONTROL.icon / 2, middle, tone.icon);
   c.restore();
   if (!disabled) r.hit(x, y, w, h, action);

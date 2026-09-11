@@ -1,9 +1,23 @@
 'use strict';
 
 const { C } = require('./theme');
+const { CONTROL } = require('./controls');
 const { insideRect } = require('./board-projection');
 const { drawStampArt } = require('./stamp-art');
 const { openStampDetail } = require('./stamp-detail-view');
+const { STAMPS } = require('./stamp-album');
+const { FILTERS, collectionFilter, visibleStamps, setCollectionFilter } = require('./stamp-collection');
+
+function locateNextStamp(game) {
+  const album = game.album();
+  if (!album.next || !setCollectionFilter(game, collectionFilter(game) === 'owned' ? 'all' : collectionFilter(game))) return false;
+  const stamps = visibleStamps(game, album), index = stamps.findIndex(stamp => stamp.id === album.next.id);
+  const scroll = game.collectionScroll;
+  scroll.setBounds(collectionLayout(game.renderer.H, stamps.length).maxScroll);
+  scroll.offset = Math.min(scroll.max, Math.floor(index / 3) * 160);
+  scroll.activeAt = game.platform.now();
+  return true;
+}
 
 function drawSummary(r, game, album) {
   const next = album.next, contentX = 151, contentWidth = 195, contentRight = contentX + contentWidth;
@@ -17,14 +31,15 @@ function drawSummary(r, game, album) {
     const held = !game.modal && game.pointer && insideRect({ x: 139, y: 100, w: 220, h: 101 }, game.pointer.x, game.pointer.y);
     r.round(139, 101, 219, 99, 12, held ? '#efe0bd' : '#f5ecd7', held ? '#c59c65' : '#dfcba8');
   }
-  r.text(next ? '下一枚收藏 · 去送信' : '全套珍藏已集齐', contentX, 114, 10, next ? C.goldText : C.green);
+  r.text(next ? '下一枚收藏 · 定位邮票' : '全套珍藏已集齐', contentX, 114, 10, next ? C.goldText : C.green);
   r.label(next ? next.name : '沿途的风，都在这里', contentX, 140, contentWidth - (next ? 32 : 0), 16, C.ink, 'left', '600');
   if (next) {
-    r.text('再得 ' + (next.goal - next.current) + ' 星', contentX, 165, 11, C.muted);
-    r.text(next.current + ' / ' + next.goal + ' 星', contentRight, 165, 10, C.goldText, 'right');
-    r.meter(contentX, 187, contentWidth, next.current, next.goal, C.gold);
+    r.text('还差 ' + next.remaining + ' 星', contentX, 163, 11, C.muted);
+    r.text('本段 ' + next.stageCurrent + ' / ' + next.stageGoal, contentRight, 163, 10, C.goldText, 'right');
+    r.meter(contentX, 179, contentWidth, next.stageCurrent, next.stageGoal, C.gold);
+    r.text('累计 ' + next.current + ' / ' + next.goal + ' 星', contentX, 194, 9, C.muted);
     r.actionIcon('arrow-right', contentRight - 10, 140, C.gold);
-    r.hit(139, 100, 220, 101, () => game.openPage('levels'));
+    r.hit(139, 100, 220, 101, () => locateNextStamp(game));
   } else {
     r.text('每一次抵达，都成为珍藏', contentX, 165, 10, C.muted);
     r.meter(contentX, 187, contentWidth, album.ownedCount, album.stamps.length, C.green);
@@ -59,16 +74,35 @@ function drawStamp(r, game, stamp, rect, viewport, now) {
   }, (px, py) => insideRect(viewport, px, py));
 }
 
-function collectionLayout(height, count) {
-  const viewport = { x: 18, y: 251, w: 354, h: Math.max(160, height - 279) };
+function collectionLayout(height, count = STAMPS.length) {
+  if (!Number.isInteger(count) || count < 0) count = STAMPS.length;
+  const viewport = { x: 18, y: 302, w: 354, h: Math.max(160, height - 330) };
   const rows = Math.ceil(count / 3), contentHeight = rows * 160 + 44;
   return { viewport, contentHeight, maxScroll: Math.max(0, contentHeight - viewport.h) };
 }
 
+function drawFilters(r, game, album) {
+  const current = collectionFilter(game);
+  FILTERS.forEach((filter, index) => {
+    const count = filter.id === 'all' ? album.stamps.length : filter.id === 'owned' ? album.ownedCount : album.stamps.length - album.ownedCount;
+    r.button(filter.label + ' ' + count, 24 + index * 116, 217, 110, CONTROL.compactHeight,
+      () => setCollectionFilter(game, filter.id), { style: 'tab', selected: current === filter.id, size: 12 });
+  });
+}
+
+function drawEmpty(r, game, viewport) {
+  const owned = collectionFilter(game) === 'owned', y = viewport.y;
+  r.icon(owned ? 'stamp' : 'star', 195, y + 28, 30, C.gold);
+  r.text(owned ? '第一枚邮票，正在路上' : '沿途邮票已全部收藏', 195, y + 67, 17, C.ink, 'center', '600');
+  r.text(owned ? '主线累计获得 1 星，就会自动收入邮票册。' : '翻开已收藏，读读每一枚邮票的短笺。', 195, y + 94, 11, C.muted, 'center');
+  r.button(owned ? '去选一封信' : '查看已收藏', 85, y + 116, 220, CONTROL.height,
+    owned ? () => game.openLevelBrowser('all') : () => setCollectionFilter(game, 'owned'), { style: 'primary', icon: owned ? 'route' : 'stamp' });
+}
+
 function drawCollection(r, game) {
-  const album = game.album(), scroll = game.collectionScroll;
+  const album = game.album(), scroll = game.collectionScroll, stamps = visibleStamps(game, album);
   const now = Number.isFinite(r.pageNow) ? r.pageNow : r.now;
-  const { viewport, contentHeight, maxScroll } = collectionLayout(r.H, album.stamps.length);
+  const { viewport, contentHeight, maxScroll } = collectionLayout(r.H, stamps.length);
   r.collectionRect = viewport;
   scroll.setBounds(maxScroll);
   if (r.reducedMotion && !scroll.touching) {
@@ -78,16 +112,18 @@ function drawCollection(r, game) {
   scroll.update(now);
   r.header('沿途邮票册', '把每一次抵达，慢慢收集起来', () => game.home());
   drawSummary(r, game, album);
-  r.text('旅程纪念', 24, 232, 14, C.ink, 'left', '600');
-  r.text('轻触邮票 · 查看详情', 365, 232, 10, C.muted, 'right');
+  drawFilters(r, game, album);
+  r.text('旅程纪念', 24, 282, 14, C.ink, 'left', '600');
+  r.text('轻触邮票 · 读纪念短笺', 365, 282, 10, C.muted, 'right');
   const c = r.ctx;
   c.save(); c.beginPath(); c.rect(viewport.x, viewport.y, viewport.w, viewport.h); c.clip();
-  album.stamps.forEach((stamp, index) => {
-    const row = Math.floor(index / 3), count = Math.min(3, album.stamps.length - row * 3);
+  stamps.forEach((stamp, index) => {
+    const row = Math.floor(index / 3), count = Math.min(3, stamps.length - row * 3);
     const rect = { x: (390 - (count * 106 + (count - 1) * 12)) / 2 + index % 3 * 118, y: viewport.y + 6 + row * 160 - scroll.offset, w: 106, h: 144 };
     if (rect.y + rect.h > viewport.y && rect.y < viewport.y + viewport.h) drawStamp(r, game, stamp, rect, viewport, now);
   });
-  r.text('每一次抵达，都成为珍藏。', 195, viewport.y + contentHeight - 17 - scroll.offset, 11, C.muted, 'center');
+  if (stamps.length) r.text('每一次抵达，都成为珍藏。', 195, viewport.y + contentHeight - 17 - scroll.offset, 11, C.muted, 'center');
+  else drawEmpty(r, game, viewport);
   c.restore();
   const alpha = scroll.touching || Math.abs(scroll.velocity) > 4 ? .65 : clamp(1 - (now - scroll.activeAt - 600) / 450) * .65;
   if (maxScroll > 0 && alpha > 0) {
@@ -98,4 +134,4 @@ function drawCollection(r, game) {
   }
 }
 
-module.exports = { drawCollection, collectionLayout };
+module.exports = { drawCollection, collectionLayout, locateNextStamp };

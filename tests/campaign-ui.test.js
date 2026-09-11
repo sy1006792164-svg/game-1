@@ -8,6 +8,11 @@ const vm = require('node:vm');
 const { CAMPAIGN, chapterNames, PER_CHAPTER } = require('../src/levels');
 const { STAMPS } = require('../src/stamp-album');
 const { levelListLayout, levelProgressOffset } = require('../src/level-view');
+const { collectionLayout } = require('../src/collection-view');
+const { locateNextStamp } = require('../src/collection-view');
+const { navigateLevelBrowser, replayLevels, levelBrowserLayout } = require('../src/level-navigation');
+const { visibleStamps, setCollectionFilter } = require('../src/stamp-collection');
+const { openStampDetail, stampDetailKey } = require('../src/stamp-detail-view');
 
 // Minimal canvas and platform stubs: enough to run the renderer and read back the text it draws.
 function harness(options = {}) {
@@ -60,10 +65,10 @@ test('all 999 levels form one scrollable list with chapter groups and bounded re
   const h = harness();
   h.game.openPage('levels');
   let texts = h.draw();
-  assert.ok(texts.includes('已送达 0 / ' + CAMPAIGN.length));
+  assert.ok(texts.includes('已送达 0 封') && texts.includes('共 ' + CAMPAIGN.length + ' 封来信'));
   assert.ok(texts.includes('001'), 'route numbers carry three digits');
   assert.ok(texts.includes('第 1 章'));
-  assert.ok(texts.includes('回到进度'));
+  assert.equal(texts.includes('回到进度'), false);
   assert.equal(texts.some(text => /上一章|下一章|\d+ \/ \d+ 章/.test(text)), false);
   const layout = levelListLayout(h.game.renderer.H);
   h.game.levelScroll.offset = layout.chapterHeight - 200;
@@ -85,11 +90,12 @@ test('all 999 levels form one scrollable list with chapter groups and bounded re
   assert.equal(CAMPAIGN.slice((chapterNames.length - 1) * PER_CHAPTER).length, 3);
   assert.equal(texts.includes('下一章'), false);
   assert.equal(texts.includes('1000'), false);
-  h.tap(hit => hit.w === 116 && hit.x === 250);
+  h.tap(hit => hit.x === 141 && hit.y === 151); h.draw();
+  h.tap(hit => hit.x === 24 && hit.y === 151);
   assert.equal(h.game.levelScroll.offset, 0);
 });
 
-test('level selection opens at progress and return-to-progress finds it after a long scroll', () => {
+test('level selection opens at progress and returning from a filter finds it after a long scroll', () => {
   const h = harness();
   for (const level of CAMPAIGN.slice(0, 14)) h.game.store.recordWin(level.id, 3, level.par, 'campaign');
   h.game.openPage('levels');
@@ -98,7 +104,8 @@ test('level selection opens at progress and return-to-progress finds it after a 
   assert.equal(h.game.levelScroll.offset, target);
   assert.ok(texts.includes('015'));
   h.callbacks.key('End'); h.draw();
-  h.tap(hit => hit.w === 116 && hit.x === 250);
+  h.tap(hit => hit.x === 141 && hit.y === 151); h.draw();
+  h.tap(hit => hit.x === 24 && hit.y === 151);
   assert.equal(h.game.levelScroll.offset, target);
   texts = h.draw();
   assert.ok(texts.includes('015'));
@@ -107,18 +114,19 @@ test('level selection opens at progress and return-to-progress finds it after a 
 test('level dragging never opens a route, clipped cards do not steal header taps, and taps still start unlocked levels', () => {
   const h = harness();
   h.game.openPage('levels'); h.draw(); h.advance(600); h.draw();
-  h.pointer(95, 320, 'start'); h.advance(30); h.pointer(95, 270, 'move');
-  h.advance(30); h.pointer(95, 230, 'end'); h.draw();
+  const top = levelListLayout(h.game.renderer.H).viewport.y;
+  h.pointer(95, top + 172, 'start'); h.advance(30); h.pointer(95, top + 122, 'move');
+  h.advance(30); h.pointer(95, top + 82, 'end'); h.draw();
   assert.equal(h.game.page, 'levels');
   assert.equal(h.game.toastUntil, 0);
   const before = h.game.levelScroll.offset;
   h.advance(16);
   assert.ok(h.game.levelScroll.offset > before);
   h.game.levelScroll.stop(); h.game.levelScroll.offset = 80; h.draw();
-  h.pointer(95, 128, 'start'); h.pointer(95, 128, 'end');
+  h.pointer(95, top - 20, 'start'); h.pointer(95, top - 20, 'end');
   assert.equal(h.game.page, 'levels', 'clipped card behind the fixed header cannot start a route');
   h.callbacks.key('Home'); h.draw();
-  h.pointer(95, 255, 'start'); h.advance(60); h.pointer(95, 255, 'end');
+  h.pointer(95, top + 107, 'start'); h.advance(60); h.pointer(95, top + 107, 'end');
   assert.equal(h.game.page, 'game');
   assert.equal(h.game.level.id, 1);
   assert.equal(h.game.levelScroll.touching, false);
@@ -130,7 +138,7 @@ test('level dragging never opens a route, clipped cards do not steal header taps
 test('keyboard scrolling cancels a held list gesture and does not move the board camera', () => {
   const h = harness(); h.game.openPage('levels'); h.draw();
   const camera = JSON.stringify(h.game.camera);
-  h.pointer(95, 320, 'start'); h.callbacks.key('PageDown');
+  h.pointer(95, levelListLayout(h.game.renderer.H).viewport.y + 172, 'start'); h.callbacks.key('PageDown');
   assert.equal(h.game.pointer, null);
   assert.equal(h.game.levelScroll.touching, false);
   h.advance(16);
@@ -141,12 +149,13 @@ test('keyboard scrolling cancels a held list gesture and does not move the board
 test('developer selection shows free level 999 and supports keyboard and keypad jumping with validation', () => {
   const h = harness({ development: true }); h.game.openPage('levels');
   let texts = h.draw();
-  assert.ok(texts.includes('输入关卡号'));
-  assert.ok(texts.includes('开发环境 · 全关卡自由试玩'));
+  assert.equal(texts.includes('输入关卡号'), false);
+  assert.ok(texts.includes('开发试玩 · 独立存档'));
   h.callbacks.key('End'); texts = h.draw();
   assert.ok(texts.includes('999'));
   assert.equal(texts.includes('先送达上一封'), false);
-  h.tap(hit => hit.x === 130 && hit.w === 114); h.draw();
+  h.tap(hit => hit.x === 258 && hit.w === 108); h.draw();
+  h.tap(hit => hit.x === 250 && hit.y === 96); h.draw();
   assert.equal(h.game.modal.kind, 'developer-level');
   h.callbacks.key('0'); h.callbacks.key('Enter');
   assert.match(h.game.modal.error, /1–999/);
@@ -209,24 +218,99 @@ test('album touch drags coast without clicking, clipped cards cannot steal heade
   const h = harness();
   h.game.openPage('collection'); h.draw(); h.advance(700); h.draw();
   const beforeToast = h.game.toastUntil;
-  h.pointer(77, 400, 'start'); h.advance(30); h.pointer(77, 350, 'move');
-  h.advance(30); h.pointer(77, 300, 'end');
+  const top = collectionLayout(h.game.renderer.H).viewport.y;
+  h.pointer(77, top + 149, 'start'); h.advance(30); h.pointer(77, top + 99, 'move');
+  h.advance(30); h.pointer(77, top + 49, 'end');
   assert.ok(h.game.collectionScroll.offset >= 100);
   assert.equal(h.game.toastUntil, beforeToast, 'dragging must not tap a stamp');
   const before = h.game.collectionScroll.offset;
   h.advance(16);
   assert.ok(h.game.collectionScroll.offset > before);
-  h.pointer(77, 300, 'cancel');
+  h.pointer(77, top + 49, 'cancel');
   assert.equal(h.game.collectionScroll.velocity, 0);
   h.game.collectionScroll.offset = 100; h.draw();
-  h.pointer(77, 232, 'start'); h.pointer(77, 232, 'end');
+  h.pointer(77, top - 19, 'start'); h.pointer(77, top - 19, 'end');
   assert.equal(h.game.toastUntil, beforeToast, 'a card clipped behind the section heading is not clickable');
   h.game.collectionScroll.offset = 0; h.draw();
-  h.pointer(77, 322, 'start'); h.advance(70); h.pointer(77, 322, 'end');
+  h.pointer(77, top + 71, 'start'); h.advance(70); h.pointer(77, top + 71, 'end');
   assert.equal(h.game.modal.kind, 'stamp-detail');
   assert.equal(h.game.modal.stampId, h.game.album().stamps[0].id);
   assert.equal(h.game.collectionScroll.tapped.index, 0);
   h.game.home(); h.advance(100);
   assert.equal(h.game.collectionScroll.touching, false);
   assert.equal(h.game.pointer, null);
+});
+
+test('chapter navigation covers the final partial chapter and returns to its real route cards', () => {
+  const h = harness();
+  h.game.openLevelBrowser('chapters', 999);
+  assert.equal(h.game.levelBrowser.mode, 'chapters');
+  assert.equal(h.game.levelScroll.max, levelBrowserLayout(h.game, h.game.renderer.H).maxScroll);
+  const texts = h.draw();
+  assert.ok(texts.includes('来信 997–999'));
+  assert.ok(texts.includes('送达 0/3'));
+  const cards = h.game.renderer.hits.filter(hit => hit.w === 342 && hit.h === 84);
+  assert.ok(cards.length <= 8, 'only visible directory rows have hit regions');
+  cards[cards.length - 1].action();
+  assert.equal(h.game.levelBrowser.mode, 'all');
+  assert.equal(h.game.levelScroll.offset, levelProgressOffset(CAMPAIGN[998], h.game.renderer.H));
+  assert.equal(h.game.selectLevel(999), false, 'browsing a late chapter does not unlock it');
+});
+
+test('replay targets respect locks, refresh after higher stars and cancel old scroll gestures', () => {
+  const h = harness();
+  h.game.store.recordWin(1, 2, CAMPAIGN[0].par, 'campaign');
+  h.game.store.recordWin(2, 3, CAMPAIGN[1].par, 'campaign');
+  h.game.store.recordWin(7, 1, CAMPAIGN[6].par, 'campaign');
+  h.game.openLevelBrowser('replay');
+  assert.deepEqual(replayLevels(h.game).map(level => level.id), [1]);
+  h.game.levelScroll.begin(400, 1000);
+  h.game.pointer = { x: 95, y: 400 };
+  navigateLevelBrowser(h.game, 'chapters');
+  assert.equal(h.game.pointer, null);
+  assert.equal(h.game.levelScroll.touching, false);
+  h.game.store.recordWin(1, 3, CAMPAIGN[0].par, 'campaign');
+  assert.equal(replayLevels(h.game).length, 0, 'a cached candidate disappears when its best stars improve');
+  h.game.store.recordWin(6, 3, CAMPAIGN[5].par, 'campaign');
+  assert.deepEqual(replayLevels(h.game).map(level => level.id), [7]);
+});
+
+test('collection targets and return-to-progress preserve and locate a saved replay', () => {
+  const h = harness();
+  for (const level of CAMPAIGN.slice(0, 14)) h.game.store.recordWin(level.id, level.id === 7 ? 2 : 3, level.par, 'campaign');
+  assert.equal(h.game.selectLevel(7), true);
+  const run = h.game.store.loadRun();
+  h.game.openPage('collection');
+  h.game.openLevelBrowser('replay', 7);
+  assert.equal(h.game.page, 'levels');
+  assert.equal(h.game.modal, null);
+  assert.deepEqual(h.game.store.loadRun(), run, 'target browsing must not start or replace a run');
+  h.draw(); h.tap(hit => hit.x === 24 && hit.y === 151);
+  assert.equal(h.game.levelBrowser.mode, 'all');
+  assert.equal(h.game.levelScroll.offset, levelProgressOffset(CAMPAIGN[6], h.game.renderer.H));
+  assert.equal(h.game.nextLevel().id, 15, 'the saved replay and next campaign route remain distinct');
+  assert.equal(h.game.selectLevel(7), true);
+  assert.deepEqual(h.game.store.loadRun(), run, 'selecting the same saved route restores it');
+});
+
+test('album filters, detail paging and next-stamp locating share the same real collection', () => {
+  const h = harness();
+  h.game.store.recordWin(1, 3, CAMPAIGN[0].par, 'campaign');
+  h.game.openPage('collection');
+  assert.equal(setCollectionFilter(h.game, 'owned'), true);
+  assert.deepEqual(visibleStamps(h.game).map(stamp => stamp.id), STAMPS.slice(0, 2).map(stamp => stamp.id));
+  assert.equal(openStampDetail(h.game, STAMPS[2].id), false);
+  assert.equal(openStampDetail(h.game, STAMPS[0].id), true);
+  stampDetailKey(h.game, 'ArrowRight');
+  assert.equal(h.game.modal.stampId, STAMPS[1].id);
+  stampDetailKey(h.game, 'ArrowRight');
+  assert.equal(h.game.modal.stampId, STAMPS[1].id, 'paging stays inside the owned filter');
+  stampDetailKey(h.game, 'Escape');
+  assert.equal(locateNextStamp(h.game), true);
+  assert.equal(h.game.collectionFilter, 'all');
+  assert.equal(h.game.page, 'collection');
+  assert.equal(h.game.store.loadRun(), null);
+  assert.equal(setCollectionFilter(h.game, 'locked'), true);
+  assert.equal(visibleStamps(h.game)[0].id, STAMPS[2].id);
+  assert.equal(h.game.collectionScroll.offset, 0);
 });

@@ -4,29 +4,14 @@ const { CAMPAIGN, chapterNames, PER_CHAPTER } = require('./levels');
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { insideRect } = require('./board-projection');
+const { campaignRecord } = require('./campaign-progress');
+const { drawChapterDirectory } = require('./chapter-view');
+const { drawLevelHeader } = require('./level-header-view');
+const { CARD_HEIGHT, ROW_HEIGHT, CHAPTER_HEADER, CHAPTER_HEIGHT, levelBrowserMode, replayLevels,
+  levelBrowserLayout, levelListLayout, levelProgressOffset, levelChapterAtOffset, levelBrowserChapter,
+  navigateLevelBrowser } = require('./level-navigation');
 
-const CARD_HEIGHT = 126, ROW_HEIGHT = 140, CHAPTER_HEADER = 44;
-const CHAPTER_HEIGHT = CHAPTER_HEADER + Math.ceil(PER_CHAPTER / 2) * ROW_HEIGHT + 20;
 const clamp = value => Math.max(0, Math.min(1, value));
-
-function levelListLayout(height, count = CAMPAIGN.length) {
-  const chapters = Math.ceil(count / PER_CHAPTER);
-  const lastRows = Math.ceil((count - (chapters - 1) * PER_CHAPTER) / 2);
-  const viewport = { x: 18, y: 148, w: 354, h: Math.max(200, height - 176) };
-  const contentHeight = (chapters - 1) * CHAPTER_HEIGHT + CHAPTER_HEADER + lastRows * ROW_HEIGHT + 44;
-  return { viewport, contentHeight, maxScroll: Math.max(0, contentHeight - viewport.h), chapterHeight: CHAPTER_HEIGHT };
-}
-
-function levelProgressOffset(level, height) {
-  return Math.min(level.chapter * CHAPTER_HEIGHT, levelListLayout(height).maxScroll);
-}
-
-function levelChapterAtOffset(offset, height, count = CAMPAIGN.length) {
-  const chapters = Math.max(1, Math.ceil(count / PER_CHAPTER));
-  const { viewport } = levelListLayout(height, count);
-  const focus = Math.max(0, Number(offset) || 0) + viewport.h * .3;
-  return Math.min(chapters - 1, Math.max(0, Math.floor(focus / CHAPTER_HEIGHT)));
-}
 
 function drawLetterCard(r, x, y, w, h, unlocked, next, held) {
   r.panel(x, y, w, h, { fill: held && unlocked ? '#e5ecde' : next ? '#fff7e5' : unlocked ? C.panel : '#dce5dc',
@@ -50,45 +35,30 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   const ease = r.reducedMotion || r.effectsQuality === 'low' ? 1 : 1 - Math.pow(1 - progress, 3);
   const { x, w, h } = rect, y = rect.y + (1 - ease) * 10;
   const unlocked = game.unlocked(index), next = level.id === current.id;
-  const inProgress = saved && saved.levelId === level.id;
+  const inProgress = saved && saved.levelId === level.id, highlighted = next || inProgress;
   const held = game.pointer && !game.pointer.dragging && insideRect(viewport, game.pointer.x, game.pointer.y) && insideRect(rect, game.pointer.x, game.pointer.y);
   c.save(); c.globalAlpha *= ease;
   const scale = held ? .975 : 1;
   c.translate(x + w / 2, y + h / 2); c.scale(scale, scale); c.translate(-x - w / 2, -y - h / 2);
-  drawLetterCard(r, x, y, w, h, unlocked, next, held);
+  drawLetterCard(r, x, y, w, h, unlocked, highlighted, held);
   r.text(String(level.id).padStart(3, '0'), x + 17, y + 26, 22, unlocked ? C.green : '#74897a', 'left', '600');
   if (inProgress) r.text('进行中', x + 77, y + 26, 10, C.goldText);
+  else if (next && !record) r.text('待送达', x + 77, y + 26, 10, C.goldText);
   r.actionIcon(unlocked ? record ? 'check' : 'letter' : 'lock', x + 136, y + 25, unlocked ? C.gold : '#74897a');
-  r.label(level.title, x + 17, y + 60, 132, 14, unlocked ? C.ink : C.muted, 'left', '500');
+  r.label(level.title, x + 17, y + 53, 132, 14, unlocked ? C.ink : C.muted, 'left', '500');
+  r.label('三星 ' + level.par + ' 拍内 · 不续灯', x + 17, y + 72, 132, 10, C.muted);
   if (record) {
     for (let star = 0; star < 3; star++) r.icon('star', x + 23 + star * 21, y + h - 24, 14, star < record.stars ? C.gold : C.line);
     r.text(record.bestTurns + ' 拍', x + 125, y + h - 24, 10, C.muted, 'right');
-  } else r.text(inProgress ? '继续投递' : game.development ? '开发试玩' : unlocked ? '开始投递' : '先送达上一封', x + 17, y + h - 23, 11, next ? C.goldText : unlocked ? C.green : C.muted);
-  if (unlocked) r.actionIcon('arrow-right', x + 145, y + h - 24, next ? C.gold : C.green);
+  } else r.text(inProgress ? '继续投递' : unlocked ? '开始投递' : '先送达上一封', x + 17, y + h - 23, 11, highlighted ? C.goldText : unlocked ? C.green : C.muted);
+  if (unlocked) r.actionIcon('arrow-right', x + 145, y + h - 24, highlighted ? C.gold : C.green);
   c.restore();
   r.hit(x, y, w, h, () => unlocked ? game.selectLevel(level.id) : game.toast('送达上一封信后开启'),
     (px, py) => insideRect(viewport, px, py));
 }
 
-function drawLevels(r, game) {
-  const profile = game.profile(), current = game.nextLevel(), saved = game.savedRun(), scroll = game.levelScroll;
-  const now = Number.isFinite(r.pageNow) ? r.pageNow : r.now;
-  const { viewport, contentHeight, maxScroll } = levelListLayout(r.H);
-  r.levelRect = viewport;
-  scroll.setBounds(maxScroll);
-  if (r.reducedMotion && !scroll.touching) {
-    if (scroll.wheelTarget !== null) scroll.offset = scroll.wheelTarget;
-    scroll.stop();
-  }
-  scroll.update(now);
-  r.header('选一封来信', game.development ? '开发环境 · 全关卡自由试玩' : '上下滑动，沿着回声继续出发', () => game.home());
-  r.text('主线旅程', 25, 106, 14, C.ink, 'left', '600');
-  r.text('已送达 ' + game.completion() + ' / ' + CAMPAIGN.length, 25, 128, 10, C.muted);
-  r.button('回到进度', 250, 91, 116, CONTROL.compactHeight, () => game.scrollToProgress(), { style: 'quiet', icon: 'route' });
-  if (game.development) r.button('输入关卡号', 130, 91, 114, CONTROL.compactHeight, () => game.openDevelopmentPicker(), { style: 'secondary', icon: 'grid' });
-
-  const c = r.ctx;
-  c.save(); c.beginPath(); c.rect(viewport.x, viewport.y, viewport.w, viewport.h); c.clip();
+function drawAllLevels(r, game, profile, current, saved, viewport, contentHeight) {
+  const scroll = game.levelScroll;
   // Render only chapters intersecting the viewport, not all 999 cards.
   const first = Math.max(0, Math.floor(scroll.offset / CHAPTER_HEIGHT));
   const last = Math.min(chapterNames.length - 1, Math.floor((scroll.offset + viewport.h) / CHAPTER_HEIGHT));
@@ -102,11 +72,66 @@ function drawLevels(r, game) {
     for (let index = chapter * PER_CHAPTER; index < end; index++) {
       const slot = index % PER_CHAPTER, level = CAMPAIGN[index];
       const rect = { x: 24 + slot % 2 * 178, y: baseY + CHAPTER_HEADER + Math.floor(slot / 2) * ROW_HEIGHT, w: 164, h: CARD_HEIGHT };
-      if (rect.y + rect.h > viewport.y && rect.y < viewport.y + viewport.h) drawLevelCard(r, game, level, profile.completed[String(level.id)], index, rect, viewport, current, saved);
+      if (rect.y + rect.h > viewport.y && rect.y < viewport.y + viewport.h) drawLevelCard(r, game, level, campaignRecord(profile, String(level.id)), index, rect, viewport, current, saved);
     }
   }
   const endY = viewport.y + contentHeight - 18 - scroll.offset;
   if (endY > viewport.y && endY < viewport.y + viewport.h) r.text('九百九十九封信，寄往远方。', 195, endY, 11, C.muted, 'center');
+}
+
+function drawReplayLevels(r, game, profile, progress, current, saved, viewport) {
+  const levels = replayLevels(game), offset = game.levelScroll.offset;
+  if (!levels.length) {
+    const y = viewport.y + Math.min(92, viewport.h * .22);
+    const untouched = progress.completedCount === 0, inaccessible = progress.replayLevels.length > 0;
+    r.actionIcon(untouched ? 'letter' : inaccessible ? 'route' : 'check', 195, y, C.green);
+    r.text(untouched ? '先送达一封来信' : inaccessible ? '暂无可重投的来信' : '已送达的来信都已三星', 195, y + 37, 17, C.ink, 'center', '600');
+    const description = untouched ? '已送达但不足三星的来信会收在这里。' : inaccessible ? '先送达前一封，即可重访对应来信。' :
+      progress.perfectCount === CAMPAIGN.length ? '所有来信已三星送达，随时可以重温旅程。' : '下一段旅程，还有新的星光等你。';
+    r.text(description, 195, y + 68, 11, C.muted, 'center');
+    r.button('回到主线进度', 98, y + 96, 194, CONTROL.height, () => game.scrollToProgress(), { style: 'primary', icon: 'route' });
+    return;
+  }
+  r.text(levels.length + ' 封待摘星 · 目标拍数内送达，且不续灯', 25, viewport.y + 18 - offset, 11, C.muted);
+  const firstRow = Math.max(0, Math.floor((offset - CHAPTER_HEADER) / ROW_HEIGHT));
+  const lastRow = Math.min(Math.ceil(levels.length / 2) - 1, Math.floor((offset + viewport.h - CHAPTER_HEADER) / ROW_HEIGHT));
+  for (let row = firstRow; row <= lastRow; row++) {
+    for (let column = 0; column < 2; column++) {
+      const level = levels[row * 2 + column];
+      if (!level) continue;
+      const rect = { x: 24 + column * 178, y: viewport.y + CHAPTER_HEADER + row * ROW_HEIGHT - offset, w: 164, h: CARD_HEIGHT };
+      if (rect.y + rect.h > viewport.y && rect.y < viewport.y + viewport.h) drawLevelCard(r, game, level, campaignRecord(profile, String(level.id)), level.id - 1, rect, viewport, current, saved);
+    }
+  }
+}
+
+function drawLevels(r, game) {
+  const profile = game.profile(), progress = game.album().progress;
+  const current = game.nextLevel(), run = game.savedRun(), scroll = game.levelScroll;
+  const saved = run && run.mode === 'campaign' && CAMPAIGN[run.levelId - 1] && game.unlocked(run.levelId - 1) ? run : null;
+  const mode = levelBrowserMode(game), now = Number.isFinite(r.pageNow) ? r.pageNow : r.now;
+  const { viewport, contentHeight, maxScroll } = levelBrowserLayout(game, r.H);
+  r.levelRect = viewport;
+  scroll.setBounds(maxScroll);
+  if (r.reducedMotion && !scroll.touching) {
+    if (scroll.wheelTarget !== null) scroll.offset = scroll.wheelTarget;
+    scroll.stop();
+  }
+  scroll.update(now);
+  drawLevelHeader(r, game, progress, mode);
+  [['all', '全部来信'], ['replay', '待摘星'], ['chapters', '章节目录']].forEach(([key, title], index) => {
+    r.button(title, 24 + index * 117, 151, 108, CONTROL.compactHeight, () => {
+      if (key === mode) return;
+      if (key === 'all') game.scrollToProgress();
+      else navigateLevelBrowser(game, key, key === 'chapters' ? (saved ? saved.levelId : current.id) : undefined);
+    }, { style: 'tab', selected: key === mode, size: 13 });
+  });
+
+  const c = r.ctx;
+  c.save(); c.beginPath(); c.rect(viewport.x, viewport.y, viewport.w, viewport.h); c.clip();
+  if (mode === 'chapters') drawChapterDirectory(r, game, progress.chapters, viewport, current, saved);
+  else if (mode === 'replay') drawReplayLevels(r, game, profile, progress, current, saved, viewport);
+  else drawAllLevels(r, game, profile, current, saved, viewport, contentHeight);
   c.restore();
   const alpha = scroll.touching || Math.abs(scroll.velocity) > 4 ? .65 : clamp(1 - (now - scroll.activeAt - 600) / 450) * .65;
   if (maxScroll > 0 && alpha > 0) {
@@ -117,4 +142,5 @@ function drawLevels(r, game) {
   }
 }
 
-module.exports = { drawLevels, levelListLayout, levelProgressOffset, levelChapterAtOffset };
+module.exports = { drawLevels, levelListLayout, levelProgressOffset, levelChapterAtOffset,
+  levelBrowserLayout, levelBrowserChapter, navigateLevelBrowser };
