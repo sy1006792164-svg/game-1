@@ -3,8 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Renderer } = require('../src/renderer');
-const { drawGame } = require('../src/game-view');
-const { guideCardLayout, drawGuideCard } = require('../src/guide-view');
+const { PLAY_HINT_HEIGHT, drawGame } = require('../src/game-view');
+const { GUIDE_HEIGHT, guideCardLayout, drawGuideCard } = require('../src/guide-view');
+const { CONTROL } = require('../src/controls');
 const { guideStep } = require('../src/play-guide');
 const { mechanicStep, availableMechanics } = require('../src/mechanic-guide');
 const { createProjection } = require('../src/board-projection');
@@ -68,20 +69,43 @@ function allLessonCards() {
   return [...cards.values()];
 }
 
-test('guide, normal play and multiline feedback retain the original normal-board tile size on every shipped level', () => {
+test('gameplay reclaims unused guide space without changing tile size on any shipped level', () => {
   const lessonGame = gameFor(CAMPAIGN[0]); lessonGame.guideEnabled = true;
   const lesson = guideStep(lessonGame, 1000);
   for (const [width, height] of [[390, 700], [452, 700], [500, 700], [390, 844]]) {
     const { r } = renderer(width, height), game = gameFor(CAMPAIGN[0]);
     drawGame(r, game, 1000);
     const normalRect = { ...r.boardRect }, normalPoint = r.boardProjection.point(game.level.start);
-    game.guideStep = () => lesson; drawGame(r, game, 1000);
-    assert.deepEqual(r.boardRect, normalRect, 'opening a lesson cannot move or shrink the board band');
+    const normalHalfW = r.boardProjection.halfW, normalHalfH = r.boardProjection.halfH;
+    const normalHintHeight = Math.max(PLAY_HINT_HEIGHT, r.wrapLines(game.playHint(), 310, 12).length * 18 + 14);
+    const normalHintY = height - CONTROL.height - 8 - normalHintHeight - 8;
+    assert.equal(normalRect.y + normalRect.h + 4, normalHintY,
+      'ordinary play must not retain the hidden lesson card gap');
+    const normalHint = game.playHint();
+    game.playHint = () => '只剩 3 拍。蓝票已在回声路上，不用折返，继续向邮局走。';
+    assert.equal(r.wrapLines(game.playHint(), 310, 12).length, 2);
+    drawGame(r, game, 1000);
+    assert.deepEqual(r.boardRect, normalRect, 'one- and two-line play hints must share a stable board slot');
     assert.deepEqual(r.boardProjection.point(game.level.start), normalPoint);
+    game.playHint = () => normalHint;
+    game.guideStep = () => lesson; drawGame(r, game, 1000);
+    const lessonRect = { ...r.boardRect }, lessonPoint = r.boardProjection.point(game.level.start);
+    const lessonHeight = guideCardLayout(r, lesson).height;
+    const lessonY = height - CONTROL.height - 8 - lessonHeight - 8;
+    assert.equal(lessonRect.y + lessonRect.h + 4, lessonY, 'the lesson must remain clear of the board');
+    assert.equal(normalRect.h - lessonRect.h, GUIDE_HEIGHT - normalHintHeight);
+    assert.equal(r.boardProjection.halfW, normalHalfW);
+    assert.equal(r.boardProjection.halfH, normalHalfH);
+    assert.ok(lessonPoint[1] < normalPoint[1], 'the board only moves up while the full lesson is visible');
     game.guideStep = () => null;
     game.playHint = () => '只剩一拍，请留好回邮局的路。'.repeat(4);
     drawGame(r, game, 1000);
-    assert.deepEqual(r.boardRect, normalRect, 'wrapping feedback cannot resize the board');
+    const wrappedHeight = Math.max(PLAY_HINT_HEIGHT, r.wrapLines(game.playHint(), 310, 12).length * 18 + 14);
+    const wrappedY = height - CONTROL.height - 8 - wrappedHeight - 8;
+    assert.equal(r.boardRect.y + r.boardRect.h + 4, wrappedY,
+      'wrapped feedback must remain clear of the board');
+    assert.equal(r.boardProjection.halfW, normalHalfW);
+    assert.equal(r.boardProjection.halfH, normalHalfH);
     for (const level of CAMPAIGN) {
       const view = { scale: 1, panX: 0, panY: 0 };
       const original = createProjection(level, { x: normalRect.x, y: 158, w: width, h: height - 322 }, view);
@@ -90,6 +114,17 @@ test('guide, normal play and multiline feedback retain the original normal-board
       assert.ok(Math.abs(current.halfH - original.halfH) < 1e-9);
     }
   }
+});
+
+test('the wind-eye bridge hint uses the full space above the controls', () => {
+  const level = CAMPAIGN.find(item => item.title === '风眼的来信');
+  const hint = '纸桥离开后就会碎，先想好哪一段只走一次。';
+  const { r } = renderer(390, 722);
+  drawGame(r, gameFor(level, null, hint), 1000);
+  const hintHeight = Math.max(PLAY_HINT_HEIGHT, r.wrapLines(hint, 310, 12).length * 18 + 14);
+  const hintY = r.H - CONTROL.height - 8 - hintHeight - 8;
+  assert.equal(r.boardRect.y + r.boardRect.h + 4, hintY);
+  assert.equal(r.boardProjection.centerY, 376, 'the screenshot board moves down by 47 logical pixels');
 });
 
 test('every reachable tutorial and mechanic card fits the compact band without obscuring the board or its controls', () => {

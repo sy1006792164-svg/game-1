@@ -3,7 +3,7 @@
 const { drawBoard } = require('./scene');
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
-const { guideCardLayout, drawGuideCard } = require('./guide-view');
+const { GUIDE_HEIGHT, guideCardLayout, drawGuideCard } = require('./guide-view');
 const { drawGuideOverlay, drawGuideWait } = require('./guide-effects');
 const { chapterNames } = require('./levels');
 const { gameFeedback, drawContextFeedback } = require('./game-feedback');
@@ -11,13 +11,17 @@ const { drawObjectives } = require('./game-objectives');
 const { drawCollectionFlights } = require('./collection-flight');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
 
+// One- and two-line play hints share one slot, avoiding small board jumps as
+// the contextual copy changes between turns.
+const PLAY_HINT_HEIGHT = 50;
+
 function controlLayout(r, game) {
   const ready = !game.state.letters.length && !game.state.seals.length;
   const guide = game.guideStep();
   // Renderer.H already excludes the device safe area. Reclaim the old 40px
   // bottom spacer for readable guidance while retaining an 8px touch inset.
   const hintLines = r.wrapLines(game.playHint(), ready ? 278 : 310, 12), buttonY = r.H - CONTROL.height - 8;
-  const hintHeight = guide ? guideCardLayout(r, guide).height : Math.max(44, hintLines.length * 18 + 14);
+  const hintHeight = guide ? guideCardLayout(r, guide).height : Math.max(PLAY_HINT_HEIGHT, hintLines.length * 18 + 14);
   return { buttonY, hintY: buttonY - hintHeight - 8, hintHeight, hintLines, ready, guide };
 }
 
@@ -59,15 +63,18 @@ function drawControls(r, game, layout, now, feedback) {
   drawGuideWait(r, game, guide, { x: 201, y: buttonY, w: 165, h: CONTROL.height }, now);
 }
 
-function gameBoardRect(r) {
-  // Keep the original island framing independent of card typography. Increasing
-  // a lesson must not move a tile or clip the rear trees and stone base.
-  return { x: r.viewport.x, y: 148, w: r.viewport.w,
-    h: r.H - 364, paddingY: 62, centerOffsetY: 2 };
+function gameBoardRect(r, layout) {
+  const top = 148, gap = 4;
+  // The old fixed band always reserved a full lesson card, even when the much
+  // shorter play hint was visible. Reclaim that space for centering, while
+  // adding the same amount to the projection padding so tile size stays fixed.
+  const reclaimed = Math.max(0, GUIDE_HEIGHT - layout.hintHeight);
+  return { x: r.viewport.x, y: top, w: r.viewport.w,
+    h: layout.hintY - top - gap, paddingY: 62 + reclaimed, centerOffsetY: 2 };
 }
 
 function drawGame(r, game, now) {
-  const layout = controlLayout(r, game), boardRect = gameBoardRect(r);
+  const layout = controlLayout(r, game), boardRect = gameBoardRect(r, layout);
   const feedback = gameFeedback(r, game, now);
   const atmosphereNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   const feedbackNow = game.modal && Number.isFinite(r.ambientFreezeAt) ? r.ambientFreezeAt : now;
@@ -99,4 +106,4 @@ function drawGame(r, game, now) {
   drawControls(r, game, layout, now, feedback);
 }
 
-module.exports = { drawGame, gameBoardRect };
+module.exports = { PLAY_HINT_HEIGHT, drawGame, gameBoardRect };

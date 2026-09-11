@@ -9,7 +9,8 @@ const { Renderer } = require('../src/renderer');
 const { drawBackdrop, drawVignette } = require('../src/scene');
 const { drawAmbientOverlay, atmosphereTreatment } = require('../src/ambient-effects');
 const { CHAPTER_MOODS } = require('../src/chapter-atmosphere');
-const { gameBoardRect } = require('../src/game-view');
+const { PLAY_HINT_HEIGHT, gameBoardRect } = require('../src/game-view');
+const { CONTROL } = require('../src/controls');
 
 const PAGES = ['startup', 'publication', 'home', 'levels', 'game', 'collection', 'leaderboard'];
 const SCREENS = [
@@ -89,7 +90,10 @@ function geometry(screen, page) {
     const h = Math.min(380, adviceY - y - 20);
     rect = { x: viewport.x, y, w: viewport.w, h }; vignette = { x: 13, y, w: 364, h };
   } else if (page === 'game') {
-    rect = gameBoardRect({ H: height, viewport });
+    const hintHeight = PLAY_HINT_HEIGHT;
+    rect = gameBoardRect({ H: height, viewport }, {
+      hintHeight, hintY: height - CONTROL.height - 8 - hintHeight - 8
+    });
   } else {
     const quietTop = { publication: 92, levels: 148, collection: 251, leaderboard: 120 }[page];
     const y = Math.max(viewport.y, quietTop);
