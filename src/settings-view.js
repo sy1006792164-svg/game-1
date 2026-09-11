@@ -24,8 +24,13 @@ function drawToggle(r, game, row, y) {
   r.text(settingStatus(game, row, enabled, supported), 42, y + 43, 11, C.muted);
   r.ctx.save();
   if (!supported) r.ctx.globalAlpha *= .45;
-  r.round(296, y + 16, 50, 30, 15, supported && enabled ? C.green : C.soft, C.line);
-  r.circle(supported && enabled ? 330 : 312, y + 31, 11, C.white, C.line);
+  const active = supported && enabled, knobX = active ? 330 : 312;
+  r.round(296, y + 16, 50, 30, 15, active ? '#285b52' : '#b4c6b8', C.line);
+  r.round(297, y + 17, 48, 27, 13.5, active ? C.green : C.soft);
+  if (r.effectsQuality !== 'low') r.round(309, y + 18, 22, 1, .5, active ? '#a6c9ad88' : '#ffffffb3');
+  r.circle(knobX, y + 31, 11, '#aabfaf', C.line);
+  r.circle(knobX - .3, y + 30, 10, C.white);
+  if (r.effectsQuality !== 'low') r.round(knobX - 5, y + 23, 7, 1.2, .6, '#ffffff');
   r.ctx.restore();
   if (supported) r.hit(24, y, 342, 62, () => game.toggle(row.key));
 }

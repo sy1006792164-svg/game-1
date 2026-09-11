@@ -46,6 +46,8 @@ function drawFooter(r, note, warning) {
 
 function drawRankPlaceholder(r, game, box) {
   r.round(box.x, box.y, box.w, 126, 19, C.green);
+  r.round(box.x + 19, box.y + 1.5, box.w - 38, 1, .5, '#c6dec18a');
+  r.round(box.x + 19, box.y + 123.5, box.w - 38, 1, .5, '#183e3966');
   r.circle(55, box.y + 37, 19, '#dce9d8');
   r.text('我的邮路', 88, box.y + 31, 15, C.white, 'left', '600');
   ['总星数', '已通关', '最佳总步数'].forEach((label, i) => {

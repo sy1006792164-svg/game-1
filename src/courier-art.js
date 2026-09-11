@@ -33,6 +33,12 @@ function drawCourier(r, x, y, size, ghost, pose = {}) {
     c.beginPath(); c.moveTo(3, -4); c.quadraticCurveTo(8, 3, 9, 13);
     c.quadraticCurveTo(13, 12, 14, 10); c.quadraticCurveTo(12, 0, 7, -5); c.closePath();
     c.fillStyle = '#ba7958'; c.fill();
+    c.beginPath(); c.moveTo(-7, -4); c.quadraticCurveTo(-11, 0, -13, 8);
+    c.strokeStyle = '#f9cd98b3'; c.lineWidth = .85; c.stroke();
+    c.beginPath(); c.moveTo(4, -2); c.quadraticCurveTo(8, 5, 9, 12);
+    c.strokeStyle = '#985f4880'; c.lineWidth = .7; c.stroke();
+    c.beginPath(); c.moveTo(-14, 10.5); c.quadraticCurveTo(-1, 18, 13, 10.5);
+    c.strokeStyle = '#995f4966'; c.lineWidth = .8; c.stroke();
     r.line([[-11, 10], [-2, 13], [6, 12]], '#f7ce91', 1);
     r.round(-8, -22, 18, 21, 9, '#d99f75');
     r.round(-8, -22, 16, 18, 8, '#ffdeaf');
@@ -43,13 +49,24 @@ function drawCourier(r, x, y, size, ghost, pose = {}) {
     oval(0, -22, 16, 4.4, '#2b6157');
     r.round(-10, -33, 21, 12, 6, '#548775');
     r.round(-10, -33, 14, 10, 5, '#76a08a');
+    c.beginPath(); c.moveTo(-8, -29); c.quadraticCurveTo(-7, -32, -4, -32); c.lineTo(3, -32);
+    c.strokeStyle = '#c5d6ae99'; c.lineWidth = .75; c.stroke();
     r.line([[-8, -24], [9, -24]], '#b8c99c', 2);
     oval(1, -22, 14, 2.4, '#478370');
+    c.beginPath(); c.ellipse(0, -22, 15, 3.5, 0, .15, Math.PI - .15);
+    c.strokeStyle = '#244f467a'; c.lineWidth = .75; c.stroke();
+    c.beginPath(); c.moveTo(-12, -22.4); c.quadraticCurveTo(-5, -24.1, 2, -23.6);
+    c.strokeStyle = '#a6c5a880'; c.lineWidth = .65; c.stroke();
     r.circle(6, -27, 1.8, '#f6d99c');
     r.line([[-8, -2], [-16, -4 + stride * 2], [-23, -1 + stride * 3]], '#bd715b', 4);
     r.line([[-6, -1], [8, 10]], '#806443', 2.2);
     r.round(5, 3, 12, 11, 3, '#8d694b');
-    r.round(5, 3, 12, 5, 2.5, '#bc9064'); r.circle(11, 8, 1.1, '#efd6a3');
+    r.round(5, 3, 12, 5, 2.5, '#bc9064');
+    c.beginPath(); c.moveTo(6, 6.5); c.quadraticCurveTo(11, 9, 16, 6.5);
+    c.strokeStyle = '#6f503b99'; c.lineWidth = .7; c.stroke();
+    r.line([[7, 4.2], [13.5, 4.2]], '#e8be898f', .65);
+    r.line([[15.2, 8.5], [15.2, 11.3], [13.7, 12.5], [8, 12.5]], '#60483566', .7);
+    r.circle(11, 8, 1.1, '#efd6a3');
     r.line([[10, 0], [15, -3 - stride * 2]], '#e0a777', 4);
     r.icon('letter', 18, -6 - stride * 2, 12, '#fff6dc');
   }

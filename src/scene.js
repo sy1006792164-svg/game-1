@@ -12,6 +12,7 @@ const { drawHomeDelivery } = require('./page-atmosphere');
 const { drawGuideTargets } = require('./guide-view');
 const { drawHomeArchitecture } = require('./world-art');
 const { drawRoutePreview } = require('./route-preview');
+const { drawWindRune, drawBridgeFlutter, lampFrame, drawLampFlame } = require('./prop-motion');
 
 const COLOR = {
   sky: '#e9efe7', forest: '#b8cebf', fog: '#d6e2d7', teal: '#60b4ba',
@@ -53,22 +54,38 @@ function hitProp(r, x, y, width, height, radius, angle, action) {
   });
 }
 
-function tree(r, x, y, size, now, distant, mood = chapterMood(0), wind = windState(now)) {
+function tree(r, x, y, size, now, distant, mood = chapterMood(0), wind = windState(now), trunkWidth = size * .16) {
   const slowSway = distant ? .01 : .012;
-  const impulse = distant ? 0 : Math.max(0, Number(r.ambientImpulse) || 0);
-  const gustSway = distant ? .008 + wind.gust * .025 : .015 + wind.strength * .012 + wind.gust * .045 + impulse * .035;
+  // Wind is continuous scenery; taking another turn must not restart its sway.
+  const gustSway = distant ? .008 + wind.gust * .025 : .015 + wind.strength * .012 + wind.gust * .045;
   const sway = (Math.sin(now / 2600 + x) * slowSway + Math.sin(now / 680 + x * .13) * gustSway) * size;
   polygon(r, [[x - size * .15, y], [x + size * .08, y - 2], [x + size * .74, y + size * .13], [x + size * .39, y + size * .22]], distant ? '#70938209' : '#577c6724');
-  r.line([[x, y], [x, y - size * .72]], distant ? mood.treeFar : mood.treeNear, Math.max(1, size * .045));
+  if (distant) r.line([[x, y], [x, y - size * .72]], mood.treeFar, Math.max(1, size * .045));
+  else {
+    // Every near tree has a solid trunk, even where no rock covers its roots.
+    // Width follows the shared tile scale rather than the varied crown height.
+    const half = trunkWidth / 2, top = y - size * .42, shoulder = y - size * .06;
+    polygon(r, [[x - half * 1.45, y], [x - half, shoulder], [x - half * .55, top],
+      [x + half * .55, top], [x + half, shoulder], [x + half * 1.45, y]], '#d5d7bb');
+    polygon(r, [[x, top], [x + half * .55, top], [x + half, shoulder],
+      [x + half * 1.45, y], [x, y]], '#a3b29a');
+    r.line([[x - half * 1.1, y - .6], [x - half * .7, shoulder], [x - half * .4, top]], '#f6efd6', .75);
+  }
   ellipse(r, x + sway, y - size * .62, size * .27, size * .48, distant ? mood.treeFar : mood.leaves[1]);
   ellipse(r, x - size * .08 + sway, y - size * .71, size * .19, size * .35, distant ? mood.fogNear : mood.leaves[2]);
   ellipse(r, x + size * .1 + sway, y - size * .61, size * .12, size * .32, distant ? mood.treeFar : mood.leaves[0]);
-  if (!distant) r.line([[x - size * .09 + sway, y - size * .94], [x - size * .16 + sway, y - size * .83]], mood.celestialGlow, .85);
+  if (!distant) {
+    const c = r.ctx;
+    c.save(); c.globalAlpha *= .48;
+    c.beginPath(); c.ellipse(x + sway, y - size * .62, size * .27, size * .48, 0, -1.05, 1.25);
+    c.strokeStyle = mood.leaves[0]; c.lineWidth = .8; c.stroke();
+    c.restore();
+    r.line([[x - size * .09 + sway, y - size * .94], [x - size * .16 + sway, y - size * .83]], mood.celestialGlow, .85);
+  }
 }
 
 function grass(r, x, y, size, now, color, wind = windState(now)) {
-  const impulse = Math.max(0, Number(r.ambientImpulse) || 0);
-  const sway = Math.sin(now / 1100 + x) * (1.4 + wind.strength * .6 + wind.gust * 2 + impulse * 1.5);
+  const sway = Math.sin(now / 1100 + x) * (1.4 + wind.strength * .6 + wind.gust * 2);
   r.line([[x - size * .6, y - size * .45], [x, y + 1], [x - size * .12 + sway, y - size]], color || '#91b68a', 1.4);
   r.line([[x, y + 1], [x + size * .6 + sway, y - size * .6]], color || '#91b68a', 1.2);
 }
@@ -80,21 +97,31 @@ function postOffice(r, x, y, size, now, ready) {
   if (ready) glow(r, 0, -11, 20, COLOR.gold, .065 + Math.sin(now / 550) * .012);
   polygon(r, OFFICE.front, '#fff5de');
   polygon(r, OFFICE.side, '#c2cbb2');
+  // Narrow eave shadows sit on the existing wall planes, under the roof trim.
+  polygon(r, [[-18, -24], [8, -18], [8, -13], [-18, -19]], '#8b987d30');
+  polygon(r, [[8, -18], [22, -27], [22, -22], [8, -13]], '#59755f30');
+  r.line([[8, -14], [8, 1]], '#73896c9c', .85);
+  r.line([[-17.5, -18], [-17.5, -4.5], [7, 1]], '#fffbedb3', .8);
   polygon(r, OFFICE.roof, '#cf8b74');
   polygon(r, [[-23, -27], [-4, -43], [8, -35], [8, -19]], '#e9a087');
   polygon(r, OFFICE.frontTrim, '#edb296');
   polygon(r, OFFICE.sideTrim, '#ad705c');
+  r.line([[-22, -23], [8, -15], [26, -31.5]], '#8f654f88', .85);
+  r.line([[8, -19], [27, -36]], '#a368538c', .85);
   r.line([[-4, -42], [24, -35]], '#f6c4a5', 1.4);
   [[-11, -37, 1, -21], [-17, -32, -9, -24], [5, -41, 17, -28]].forEach(([ax, ay, bx, by]) => r.line([[ax, ay], [bx, by]], '#f8bea063', .65));
   r.line([[-18, -5], [7, 1]], '#e0d9be', 1.1);
   r.round(-12, -18, 10, 16, 4.8, '#678c7c');
+  r.line([[-11, -13], [-11, -3.5]], '#3f685c88', .8);
   r.round(-10, -16, 6, 8, 2.8, ready ? '#ffe3a7' : '#bad5bb');
   r.circle(-4, -7, 1, '#e6bd77');
   polygon(r, [[12, -18], [18, -21], [18, -13], [12, -10]], ready ? '#f9d497' : '#789b87');
+  r.line([[12, -10], [18, -13], [18, -21]], '#f6edceaa', .75);
   r.line([[15, -19], [15, -12]], '#779779', .75);
   r.round(-14, -30, 20, 8, 2, COLOR.cream);
   r.icon('letter', -4, -26, 8, '#bf7f47');
   polygon(r, OFFICE.step, '#dce0c5');
+  r.line([[-20, -1], [6, 5.5], [12, 2]], '#879c7d88', .8);
   r.line([[8, 2], [-18, -4]], '#fff9e5', 1.3);
   r.line([[22, -6], [22, -45], [34, -44]], '#385e51', 1.7);
   const flap = Math.sin(now / 370) * 2;
@@ -106,12 +133,20 @@ function postOffice(r, x, y, size, now, ready) {
 function lantern(r, x, y, size, now, action) {
   const c = r.ctx; c.save(); c.translate(x, y); c.scale(size / 24, size / 24);
   const sway = Math.sin(now / 870 + x) * .06;
+  const flame = lampFrame(r, now, x * .13);
   ellipse(r, 0, 2, 10, 3, '#2d4b3b29');
+  if (r.effectsQuality !== 'low') {
+    c.save(); c.globalAlpha *= .1 + flame.warmth * .08;
+    ellipse(r, 3, 1, 12 + flame.warmth * 2, 3.6, '#eac27b'); c.restore();
+  }
   r.line([[-6, 0], [-6, -27], [5, -27]], '#517064', 2);
   c.save(); c.translate(5, -25); c.rotate(sway);
-  glow(r, 0, 7, 10, COLOR.gold, .08);
+  glow(r, 0, 7, 10 + flame.warmth * 2, COLOR.gold, .055 + flame.warmth * .045);
   r.line([[0, -2], [0, 1]], '#b58e54', 1);
   r.round(-4, 1, 8, 12, 2, '#bd934f'); r.round(-2.5, 3, 5, 7, 1, '#ffe6a2');
+  drawLampFlame(r, flame);
+  r.line([[-3, 3], [-3, 11]], '#fff0c2b3', .75);
+  r.line([[3, 3], [3, 11]], '#8d743d99', .75);
   r.line([[-5, 1], [5, 1]], '#57705a', 1.7); r.line([[-5, 13], [5, 13]], '#57705a', 1.7);
   c.restore(); c.restore();
   const scale = size / 24, cos = Math.cos(sway), sin = Math.sin(sway);
@@ -123,13 +158,23 @@ function lantern(r, x, y, size, now, action) {
   pick(0, 1, 11.7, 1.7, .85); pick(0, 13, 11.7, 1.7, .85);
 }
 
-function diamond(r, x, y, hw, hh, fill, stroke, height) {
+function diamond(r, x, y, hw, hh, fill, stroke, height, edged = false) {
   const z = height || 0;
   if (z) {
     polygon(r, [[x - hw, y], [x, y + hh], [x, y + hh - z], [x - hw, y - z]], '#b7c3a2');
     polygon(r, [[x, y + hh], [x + hw, y], [x + hw, y - z], [x, y + hh - z]], '#8da98e');
   }
   polygon(r, [[x, y - hh - z], [x + hw, y - z], [x, y + hh - z], [x - hw, y - z]], fill, stroke);
+  if (edged) {
+    // Draw a shallow chamfer inside the original top face. Its corners and the
+    // tappable floor plane stay exact, including on the smallest route tiles.
+    const bevel = Math.min(1.25, hw * .055), topY = y - z;
+    polygon(r, [[x - hw, topY], [x, topY + hh], [x, topY + hh - bevel], [x - hw + bevel, topY]], '#b7c2a575');
+    polygon(r, [[x, topY + hh], [x + hw, topY], [x + hw - bevel, topY], [x, topY + hh - bevel]], '#78957b70');
+    r.line([[x - hw + .5, topY], [x, topY - hh + .5], [x + hw - .5, topY]], '#fffae6b3', .8);
+    r.line([[x - hw + .5, topY + .3], [x, topY + hh - .3], [x + hw - .5, topY + .3]], '#718c715c', .75);
+    if (z) r.line([[x, topY + hh + .5], [x, y + hh]], '#67836788', .75);
+  }
 }
 
 function groundDetail(r, game, now, cell, p) {
@@ -139,6 +184,7 @@ function groundDetail(r, game, now, cell, p) {
     if (intact) {
       diamond(r, x, y - .7, hw - 2, hh - 1.5, '#eac798', '#f4dbaf');
       for (let i = -1; i <= 1; i++) floorLine(r, p, x, y, [[i * hw * .38 - hw * .31, i * hh * .38], [i * hw * .38 + hw * .31, i * hh * .38 - hh * .65]], '#b99769', 1.2);
+      drawBridgeFlutter(r, x, y - .7, hw, hh, now, cell);
     } else {
       diamond(r, x, y, hw - 1.5, hh - 1, '#244947', '#537869');
       floorLine(r, p, x, y, [[-hw * .7, -1], [-hw * .36, 3], [-hw * .2, -3]], '#b6a27b', 2);
@@ -147,10 +193,7 @@ function groundDetail(r, game, now, cell, p) {
   }
   if (l.winds && l.winds[cell]) {
     diamond(r, x, y, hw - 2, hh - 1.5, '#c6dab6', '#e0e8c4');
-    const [vx, vy] = p.vector(l.winds[cell]);
-    const ax = vx * .4, ay = vy * .4;
-    r.line([[x - ax, y - ay], [x + ax, y + ay]], '#668973', 2);
-    r.line([[x + ax - vx * .33 + vy * .22, y + ay - vy * .33 - vx * .22], [x + ax, y + ay], [x + ax - vx * .33 - vy * .22, y + ay - vy * .33 + vx * .22]], '#668973', 1.5);
+    drawWindRune(r, x, y, p.vector(l.winds[cell]), now, cell);
   }
 }
 
@@ -166,11 +209,13 @@ function floatingMail(r, x, y, size, now, cell, seal, action) {
   c.save(); c.translate(x, floatY); c.rotate(angle);
   if (seal) {
     r.round(-size * .36, -size * .43, size * .72, size * .86, 2, '#79c6c9', '#d0f0e5');
+    r.line([[-size * .28, size * .35], [size * .28, size * .35], [size * .28, -size * .32]], '#397d8077', .75);
     r.round(-size * .23, -size * .29, size * .46, size * .57, 1, '#b3e0d9');
     r.icon('star', 0, 0, size * .44, '#39797c');
     [-1, 0, 1].forEach(i => { r.circle(-size * .37, i * size * .24, 1.1, COLOR.stone); r.circle(size * .37, i * size * .24, 1.1, COLOR.stone); });
   } else {
     r.icon('letter', 0, 0, size, COLOR.gold);
+    r.line([[-size * .31, size * .23], [size * .32, size * .23], [size * .36, size * .16]], '#916e438c', .8);
     r.circle(0, 1, size * .095, '#bd7146');
   }
   c.restore();
@@ -227,21 +272,20 @@ function drawBoard(r, game, now, rect, guide) {
   const actors = [];
   for (const cell of ordered) {
     const [x, y] = point(cell), wall = walls.has(cell);
-    diamond(r, x, y, hw - .8, hh - .7, wall ? (cell % 3 ? '#9db792' : '#acc09a') : cell % 3 ? COLOR.stone : COLOR.stoneLight, wall ? '#c3d1ac' : '#fff9e8', wall ? 4 : 0);
+    diamond(r, x, y, hw - .8, hh - .7, wall ? (cell % 3 ? '#9db792' : '#acc09a') : cell % 3 ? COLOR.stone : COLOR.stoneLight, null, wall ? 4 : 0, true);
     if (wall) {
       if (cell % 3 === 0) actors.push({ y: y + 2, draw: () => {
         polygon(r, [[x - 8, y - 3], [x - 5, y - 10], [x + 2, y - 12], [x + 8, y - 5], [x + 4, y]], '#d5d7bb');
         polygon(r, [[x + 2, y - 12], [x + 8, y - 5], [x + 4, y], [x, y - 4]], '#a3b29a');
+        r.line([[x + 2, y - 11.5], [x, y - 4], [x + 4, y - .5]], '#7f967a99', .7);
         r.line([[x - 5, y - 10], [x + 2, y - 12], [x + 6, y - 7]], '#f6efd6', 1);
         grass(r, x - 8, y - 1, 5, time, undefined, wind);
       } });
       // Trees only line the rear rim, so they never hide a floor tile.
       const onRim = Math.floor(cell / l.width) === p.bounds.minRow || cell % l.width === p.bounds.minCol;
-      if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false, r.atmosphereMood, wind) });
+      if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false, r.atmosphereMood, wind, hw * .18) });
       else if (cell % 2) actors.push({ y, draw: () => grass(r, x + 5, y - 4, 6, time, '#b1c293', wind) });
     } else {
-      // Shallow bevels keep the original tappable floor plane exact.
-      r.line([[x - hw + 2, y + 1], [x, y + hh - 1.4], [x + hw - 2, y + 1]], '#c4ccb178', .8);
       groundDetail(r, game, time, cell, p);
       if (cell === l.exit) {
         diamond(r, x, y, hw - 2, hh - 1.5, '#cbd9b6', '#eff1ce');
@@ -306,16 +350,18 @@ function drawBackdrop(r, now, chapter, options = {}) {
   if (mood.id === 'moon-path') r.circle(mapX(302), H * .216, 20, mood.skyMid);
   else r.circle(mapX(303), H * .216, 18, mood.celestialGlow);
   // Broad, soft ridge lines recede into the mist; they stay quieter than the board.
-  c.beginPath(); c.moveTo(mapX(0), H * .46); c.lineTo(mapX(0), H * .34);
+  c.beginPath(); c.moveTo(mapX(0), H * .34);
   c.bezierCurveTo(mapX(45 + drift), H * .25, mapX(57), H * .28, mapX(112), H * .37);
   c.bezierCurveTo(mapX(173), H * .4, mapX(207), H * .23, mapX(266), H * .31);
   c.bezierCurveTo(mapX(320), H * .39, mapX(346), H * .27, mapX(390), H * .31);
-  c.lineTo(mapX(390), H * .56); c.closePath(); c.fillStyle = mood.ridgeFar; c.fill();
-  c.beginPath(); c.moveTo(mapX(0), H * .59); c.lineTo(mapX(0), H * .42);
+  c.save(); c.globalAlpha *= .22; c.strokeStyle = mood.treeFar; c.lineWidth = 1.4; c.stroke(); c.restore();
+  c.lineTo(mapX(390), H * .56); c.lineTo(mapX(0), H * .46); c.closePath(); c.fillStyle = mood.ridgeFar; c.fill();
+  c.beginPath(); c.moveTo(mapX(0), H * .42);
   c.bezierCurveTo(mapX(59), H * .33, mapX(88), H * .47, mapX(157), H * .45);
   c.bezierCurveTo(mapX(205), H * .42, mapX(260), H * .34, mapX(310), H * .43);
   c.bezierCurveTo(mapX(343), H * .48, mapX(359), H * .4, mapX(390), H * .39);
-  c.lineTo(mapX(390), H * .64); c.closePath(); c.fillStyle = mood.ridgeNear; c.fill();
+  c.save(); c.globalAlpha *= .34; c.strokeStyle = mood.treeNear; c.lineWidth = 1.6; c.stroke(); c.restore();
+  c.lineTo(mapX(390), H * .64); c.lineTo(mapX(0), H * .59); c.closePath(); c.fillStyle = mood.ridgeNear; c.fill();
   ellipse(r, mapX(167 + drift), H * .49, 247 * spread, 31, mood.fogFar);
   ellipse(r, mapX(272 - drift), H * .58, 216 * spread, 35, mood.fogNear);
   [-20, 403].forEach((x, i) => tree(r, mapX(x), H * .69, 96 + i * 19, now, true, mood, wind));

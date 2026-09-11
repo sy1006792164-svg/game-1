@@ -35,12 +35,26 @@ function drawStampArt(r, stamp, rect, { next = false, held = false } = {}) {
   c.save(); c.translate(rect.x, rect.y); c.scale(rect.w / w, rect.h / h);
   stampOutline(c, 0, 4, w, h); c.fillStyle = '#496c5120'; c.fill();
   stampOutline(c, 0, 0, w, h); c.fillStyle = paper; c.fill(); c.strokeStyle = border; c.lineWidth = held ? 1.8 : next ? 1.3 : .8; c.stroke();
+  // Offset strokes are clipped to the paper, so the perforations stay open.
+  c.save(); c.clip();
+  stampOutline(c, .8, .8, w, h); c.strokeStyle = '#fffef2dc'; c.lineWidth = .85; c.stroke();
+  stampOutline(c, -.85, -.85, w, h); c.strokeStyle = owned ? '#859b797d' : next ? '#ac874c7d' : '#87a0857d'; c.lineWidth = 1; c.stroke();
+  c.restore();
   r.round(6, 6, w - 12, h - 12, 2, null, owned ? '#d9dfc6' : next ? '#e2c796' : '#c9d7c6');
   r.text(String(stamp.index + 1).padStart(2, '0'), 13, 17, 9, C.muted);
-  if (next) r.round(w - 56, 9, 45, 17, 5, '#f5dfb5');
-  r.text(owned ? '已收藏' : next ? '下一枚' : '待收藏', w - 14, 17, 9, next ? C.goldText : C.muted, 'right');
+  if (next) {
+    const label = '下一枚', padding = 5;
+    r.font(9);
+    const badgeWidth = c.measureText(label).width + padding * 2, badgeX = w - 11 - badgeWidth;
+    r.round(badgeX, 9, badgeWidth, 17, 5, '#f5dfb5');
+    r.text(label, badgeX + badgeWidth / 2, 17.5, 9, C.goldText, 'center');
+  } else r.text(owned ? '已收藏' : '待收藏', w - 14, 17, 9, C.muted, 'right');
   r.circle(middle, 65, 28, owned ? '#7f967521' : next ? '#b8874220' : '#8da18d15');
   r.circle(middle, 62, 28, owned ? '#eff1df' : next ? '#f9e6bd' : '#d9e5d5', owned ? '#c3d0b1' : next ? '#d7b777' : '#b6cbb6');
+  c.beginPath(); c.arc(middle, 62, 27, Math.PI * .88, Math.PI * 1.78);
+  c.strokeStyle = '#fffdf1e0'; c.lineWidth = .95; c.stroke();
+  c.beginPath(); c.arc(middle, 62, 27, -Math.PI * .08, Math.PI * .7);
+  c.strokeStyle = owned ? '#9bad898c' : next ? '#b38d488c' : '#8da88b8c'; c.lineWidth = .8; c.stroke();
   r.circle(middle, 62, 23, null, owned ? '#fffdf4' : next ? '#fff2d8' : '#ecf1e7');
   r.icon(stamp.icon, middle, 63, 39, ink);
   if (next && !r.reducedMotion && r.effectsQuality !== 'low') {

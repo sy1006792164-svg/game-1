@@ -1,6 +1,7 @@
 'use strict';
 const { C } = require('./theme');
 const { drawCourier } = require('./courier-art');
+const { drawSurfaceEdges } = require('./surface-edges');
 const { CONTROL, drawButton } = require('./controls');
 const { drawUiIcon, UI_ICON } = require('./ui-icons');
 const { drawHome } = require('./home-view');
@@ -86,9 +87,10 @@ class Renderer {
   }
   panel(x, y, w, h, options) {
     const style = options || {}, radius = style.radius == null ? 16 : style.radius;
-    this.round(x + 1, y + 5, w - 2, h, radius, '#55745c0a');
-    this.round(x, y + 2, w, h, radius, '#55745c10');
+    this.round(x + 1, y + 5, w - 2, h, radius, '#55745c13');
+    this.round(x, y + 2, w, h, radius, '#9cac967a');
     this.round(x, y, w, h, radius, style.fill || C.panel, style.stroke || C.line);
+    drawSurfaceEdges(this, x, y, w, h, radius);
     if (style.accent) this.line([[x + 18, y + 1], [x + Math.min(w - 18, 66), y + 1]], style.accent, 1.5);
   }
   line(points, color, width, dash) {
@@ -214,7 +216,6 @@ class Renderer {
     this.reducedMotion = typeof game.reducedMotion === 'function' ? game.reducedMotion() :
       !!(game.platform && game.platform.reducedMotion);
     this.effectsQuality = game.platform && game.platform.effectsQuality === 'low' ? 'low' : 'high';
-    this.ambientImpulse = 0;
     if (!game.modal) this.ambientFreezeAt = null;
     else if (!Number.isFinite(this.ambientFreezeAt)) this.ambientFreezeAt = now;
     const backgroundNow = this.ambientClock.sample(now,

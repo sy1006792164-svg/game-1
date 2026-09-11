@@ -45,12 +45,13 @@ function recorder(options = {}) {
 }
 
 function boardFrame(now, options = {}, ready = false, moving = false) {
-  const record = recorder(options), level = moving ? CAMPAIGN[0] : CAMPAIGN[18];
+  // Route 20 includes a wind rune, an intact bridge and lamps in one scene.
+  const record = recorder(options), level = moving ? CAMPAIGN[0] : CAMPAIGN[19];
   const previous = createState(level), state = moving ? step(level, previous, 'right').state : previous;
   if (ready) { state.letters = []; state.seals = []; }
   const game = { level, state, camera: new SceneCamera(), transitionAt: moving ? 1000 : -Infinity,
     platform: { now: () => now }, previousState: moving ? previous : null };
-  record.r.ambientNow = now;
+  record.r.ambientNow = Number.isFinite(options.ambientNow) ? options.ambientNow : now;
   drawBoard(record.r, game, now, { x: 0, y: 158, w: 390, h: 420 }, null);
   return record;
 }
@@ -90,6 +91,25 @@ test('low quality keeps player movement and its arrival coordinates', () => {
   assert.notEqual(player(early)[0], player(late)[0]);
   assert.equal(player(arrived)[4].moving, false);
   assert.equal(player(arrived)[0], arrived.r.boardProjection.point(CAMPAIGN[0].start + 1)[0]);
+});
+
+test('all board props keep their decorative phase while gameplay time advances behind a pause', () => {
+  const first = boardFrame(1000, { ambientNow: 1000 });
+  const paused = boardFrame(61000, { ambientNow: 1000 });
+  assert.deepEqual(paused.commands, first.commands);
+  assert.notDeepEqual(boardFrame(61000).commands, first.commands, 'props remain animated in normal play');
+});
+
+test('a torn bridge stops drawing the loose corners of an intact paper deck', () => {
+  const frame = intact => {
+    const record = recorder(), level = CAMPAIGN[19], state = createState(level);
+    if (!intact) state.bridges = [];
+    drawBoard(record.r, { level, state, camera: new SceneCamera(), transitionAt: -Infinity,
+      platform: { now: () => 1000 } }, 1000, { x: 0, y: 158, w: 390, h: 420 });
+    return record.commands.filter(command => command[0] === 'fill' && ['#fae3b6', '#d9b180'].includes(command[3]));
+  };
+  assert.ok(frame(true).length > 0, 'an intact bridge has visible loose paper corners');
+  assert.equal(frame(false).length, 0, 'torn paper cannot resemble a passable animated deck');
 });
 
 test('home architecture and vignettes respect both renderer and explicit quiet settings', () => {

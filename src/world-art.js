@@ -22,12 +22,28 @@ function ellipse(r, x, y, rx, ry, fill) {
 
 function point(u, v, z = 0) { return [u - v, (u + v) / 2 + 8 - z]; }
 
-function slab(r, u, v, width, length, z, height, colors = {}) {
+function slab(r, u, v, width, length, z, height, colors = {}, detail = true) {
   const top = [point(u, v, z + height), point(u + width, v, z + height), point(u + width, v + length, z + height), point(u, v + length, z + height)];
   polygon(r, [top[3], top[2], point(u + width, v + length, z), point(u, v + length, z)], colors.front || PALETTE.ivory);
   polygon(r, [top[2], top[1], point(u + width, v, z), point(u + width, v + length, z)], colors.side || PALETTE.shade);
   polygon(r, top, colors.top || PALETTE.top);
   r.line([top[3], top[2], top[1]], '#fffdf077', .75);
+  if (detail && height > 2) {
+    // A narrow lit arris meets the cooler return, keeping the stone edges soft.
+    r.line([point(u + width - .6, v + length, z + height - .35), point(u + width - .6, v + length, z + .35)], '#fffde282', .65);
+    r.line([top[2], point(u + width, v + length, z)], '#738b744d', .65);
+    r.line([point(u, v + length, z + .2), point(u + width, v + length, z + .2), point(u + width, v, z + .2)], '#6c80652b', .65);
+  }
+}
+
+function stoneCourses(r, u, v, width, length, z, height) {
+  // Shallow mortar joints stay on their wall planes and disappear into the ivory.
+  for (let up = 12, row = 0; up < height - 5; up += 14, row++) {
+    r.line([point(u, v + length, z + up), point(u + width, v + length, z + up), point(u + width, v, z + up)], '#8b9b7c30', .55);
+    for (let along = row % 2 ? 9 : 21; along < width - 4; along += 25) {
+      r.line([point(u + along, v + length, z + up), point(u + along, v + length, z + Math.min(up + 14, height - 1))], '#8b9b7c24', .5);
+    }
+  }
 }
 
 function arch(r, u, v, z, width, height, face = 'front', lit = false) {
@@ -55,6 +71,10 @@ function roof(r, u, v, width, length, z, height, detail = true) {
   polygon(r, [b, e, ridgeB], '#dca18b');
   r.line([ridgeA, ridgeB], PALETTE.coralLight, 2);
   r.line([d, e], '#edb396', 2.1);
+  if (detail) {
+    r.line([[d[0], d[1] + 1.2], [e[0], e[1] + 1.2], [b[0], b[1] + 1.2]], '#805e4b66', .8);
+    r.line([e, ridgeB], '#916d5952', .65);
+  }
   for (let i = 1; detail && i < 6; i++) {
     const t = i / 6;
     r.line([[ridgeA[0] + (ridgeB[0] - ridgeA[0]) * t, ridgeA[1] + (ridgeB[1] - ridgeA[1]) * t],
@@ -73,11 +93,14 @@ function gardenTree(r, u, v, size, now, color = '#7ea88a', sharedWind) {
   ellipse(r, x + sway, y - size * .66, size * .31, size * .4, color);
   ellipse(r, x - size * .1 + sway, y - size * .73, size * .22, size * .31, '#aac69c');
   ellipse(r, x + size * .11 + sway, y - size * .62, size * .14, size * .27, '#6f997f');
+  const c = r.ctx;
+  c.save(); c.beginPath(); c.ellipse(x + sway, y - size * .66, size * .31, size * .4, 0, -1.05, 1.25);
+  c.strokeStyle = '#537c676e'; c.lineWidth = .8; c.stroke(); c.restore();
   r.line([[x - size * .12 + sway, y - size * .94], [x - size * .19 + sway, y - size * .82]], '#d2dfb177', 1.2);
 }
 
-function planter(r, u, v, width, length) {
-  slab(r, u, v, width, length, 0, 4, { front: '#e2d7bb', side: '#b1bda5', top: '#a7bc90' });
+function planter(r, u, v, width, length, detail = true) {
+  slab(r, u, v, width, length, 0, 4, { front: '#e2d7bb', side: '#b1bda5', top: '#a7bc90' }, detail);
   [0, 1, 2].forEach(i => {
     const [x, y] = point(u + 3 + i * (width - 6) / 2, v + length / 2, 5);
     ellipse(r, x, y, 4, 2.5, i % 2 ? '#89ac86' : '#719979');
@@ -90,15 +113,16 @@ function drawHomeArchitecture(r, now, options = {}) {
   const quiet = options.reducedMotion || r.reducedMotion || low;
   if (quiet) now = 0;
   const wind = windState(now, quiet);
+  const stone = (u, v, width, length, z, height, colors) => slab(r, u, v, width, length, z, height, colors, !low);
   // A stone garden plinth, with continuous masonry courses and a thin grass cap.
   ellipse(r, 20, 119, 123, 13, '#5b817012');
   ellipse(r, 19, 118, 94, 8, '#5575610c');
-  slab(r, -72, -72, 144, 144, -29, 25, { front: '#c9cbb5', side: '#9dad9b', top: '#dde0c6' });
-  slab(r, -75, -75, 150, 150, -4, 4, { front: '#ede8ce', side: '#bec9ae', top: '#afc6a0' });
+  stone(-72, -72, 144, 144, -29, 25, { front: '#c9cbb5', side: '#9dad9b', top: '#dde0c6' });
+  stone(-75, -75, 150, 150, -4, 4, { front: '#ede8ce', side: '#bec9ae', top: '#afc6a0' });
   [-20, -12].forEach(z => r.line([point(-72, 72, z), point(72, 72, z), point(72, -72, z)], '#eef0d640', 1));
   [-40, 0, 40].forEach(u => r.line([point(u, 72, -11), point(u, 72, -19)], '#a7b29c77', .8));
   [-40, 0, 40].forEach(v => r.line([point(72, v, -19), point(72, v, -27)], '#899f8e66', .8));
-  slab(r, -59, -54, 114, 110, 0, 2, { front: '#d3d8bb', side: '#acbfa4', top: '#dbe1c4' });
+  stone(-59, -54, 114, 110, 0, 2, { front: '#d3d8bb', side: '#acbfa4', top: '#dbe1c4' });
 
   // Inlaid courtyard paving follows the isometric axes all the way to the arcade.
   for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) {
@@ -107,10 +131,10 @@ function drawHomeArchitecture(r, now, options = {}) {
     // Keep every paving color and top outline; subpixel bevels can disappear on
     // small screens and cost two extra faces plus a stroke per tile.
     if (low) polygon(r, [point(u, v, 3), point(u + 16.3, v, 3), point(u + 16.3, v + 16.3, 3), point(u, v + 16.3, 3)], top);
-    else slab(r, u, v, 16.3, 16.3, 2, 1, { front: '#dfdfc6', side: '#c9d0b7', top });
+    else stone(u, v, 16.3, 16.3, 2, 1, { front: '#dfdfc6', side: '#c9d0b7', top });
   }
   // A shallow reflecting pool provides one quiet, cool counterpoint to the roofs.
-  slab(r, -52, 11, 23, 42, 2, 3, { front: '#f2ebd2', side: '#c2ccb3', top: '#fbf4db' });
+  stone(-52, 11, 23, 42, 2, 3, { front: '#f2ebd2', side: '#c2ccb3', top: '#fbf4db' });
   polygon(r, [point(-49, 14, 5), point(-32, 14, 5), point(-32, 50, 5), point(-49, 50, 5)], '#86b9ad');
   polygon(r, [point(-48, 15, 5), point(-35, 15, 5), point(-35, 45, 5), point(-48, 39, 5)], '#aad3c6');
   for (let i = 0; i < 3; i++) {
@@ -125,27 +149,33 @@ function drawHomeArchitecture(r, now, options = {}) {
   gardenTree(r, -58, -63, 29, now, undefined, wind);
 
   // Raised gallery with three genuine inset arches and a roof terrace.
-  slab(r, -53, -48, 64, 30, 2, 6);
-  slab(r, -51, -46, 60, 26, 8, 34);
+  stone(-53, -48, 64, 30, 2, 6);
+  stone(-51, -46, 60, 26, 8, 34);
+  if (!low) stoneCourses(r, -51, -46, 60, 26, 8, 34);
   [-47, -28, -9].forEach(u => arch(r, u, -20, 8, 12, 25));
-  slab(r, -54, -49, 66, 32, 42, 4, { front: '#e4dfc8', side: '#aabda9', top: '#fff8e5' });
-  slab(r, -51, -46, 60, 3, 46, 8);
-  slab(r, -51, -20, 60, 3, 46, 8);
-  slab(r, -51, -43, 3, 23, 46, 8);
-  [-48, -29, -10, 6].forEach(u => slab(r, u, -21, 4, 4, 46, 11));
-  planter(r, -60, -11, 11, 16);
+  stone(-54, -49, 66, 32, 42, 4, { front: '#e4dfc8', side: '#aabda9', top: '#fff8e5' });
+  stone(-51, -46, 60, 3, 46, 8);
+  stone(-51, -20, 60, 3, 46, 8);
+  stone(-51, -43, 3, 23, 46, 8);
+  [-48, -29, -10, 6].forEach(u => stone(u, -21, 4, 4, 46, 11));
+  planter(r, -60, -11, 11, 16, !low);
 
   // A slender postal tower is the focal point, with a copper hipped roof and bell.
-  slab(r, 5, -49, 36, 36, 2, 7);
-  slab(r, 8, -46, 30, 30, 9, 87);
-  slab(r, 6, -48, 34, 34, 47, 3, { front: '#ede7d0', side: '#bdc9b1', top: '#fff4df' });
+  stone(5, -49, 36, 36, 2, 7);
+  stone(8, -46, 30, 30, 9, 87);
+  if (!low) stoneCourses(r, 8, -46, 30, 30, 9, 87);
+  stone(6, -48, 34, 34, 47, 3, { front: '#ede7d0', side: '#bdc9b1', top: '#fff4df' });
   arch(r, 15, -16, 10, 15, 27, 'front', true);
   arch(r, 17, -16, 62, 12, 22);
   arch(r, 38, -24, 60, 12, 22, 'side');
   const [bellX, bellY] = point(23, -16, 68);
+  r.ctx.save(); r.ctx.translate(bellX, bellY - 8);
+  r.ctx.rotate(quiet ? 0 : Math.sin(now / 780) * (.025 + wind.gust * .045));
+  r.ctx.translate(-bellX, 8 - bellY);
   r.line([[bellX, bellY - 8], [bellX, bellY - 2]], '#b5a373', 1.1);
   polygon(r, [[bellX - 3.5, bellY + 2], [bellX - 2.5, bellY - 3], [bellX + 1, bellY - 4], [bellX + 3.5, bellY + 5]], '#d9b374');
-  slab(r, 5, -49, 36, 36, 96, 4);
+  r.ctx.restore();
+  stone(5, -49, 36, 36, 96, 4);
   roof(r, 5, -49, 36, 36, 100, 17, !low);
   const [flagX, flagY] = point(23, -31, 121);
   r.line([[flagX, flagY + 8], [flagX, flagY - 14]], '#657e6b', 1.1);
@@ -155,8 +185,8 @@ function drawHomeArchitecture(r, now, options = {}) {
   r.circle(signX, signY, 5, '#e1ba83'); r.icon('letter', signX, signY, 6, '#fff9df');
 
   // Six individual steps connect the porch to the courtyard.
-  for (let i = 5; i >= 0; i--) slab(r, 11, -13 + i * 3, 23, 3.2, 2, 1 + (6 - i) * 1.05, { front: '#e9e4ce', side: '#bfcab0', top: '#fff5df' });
-  planter(r, 46, -22, 11, 23);
+  for (let i = 5; i >= 0; i--) stone(11, -13 + i * 3, 23, 3.2, 2, 1 + (6 - i) * 1.05, { front: '#e9e4ce', side: '#bfcab0', top: '#fff5df' });
+  planter(r, 46, -22, 11, 23, !low);
   gardenTree(r, 58, -39, 36, now, undefined, wind);
   gardenTree(r, 61, -17, 27, now, undefined, wind);
 
@@ -166,10 +196,10 @@ function drawHomeArchitecture(r, now, options = {}) {
   r.line([[lampX, lampY], [lampX, lampY - 26], [lampX - 5, lampY - 26]], '#667f67', 1.6);
   r.round(lampX - 8, lampY - 26, 6, 9, 2, '#c5a574');
   r.round(lampX - 6.5, lampY - 24.5, 3, 5, 1, '#fff1b8');
-  slab(r, 43, 42, 17, 7, 4, 3, { front: '#b5906c', side: '#8e8162', top: '#d8b58a' });
+  stone(43, 42, 17, 7, 4, 3, { front: '#b5906c', side: '#8e8162', top: '#d8b58a' });
   [[44, 43], [56, 46]].forEach(([u, v]) => { const a = point(u, v, 0), b = point(u, v, 5); r.line([a, b], '#7b8466', 1.5); });
-  planter(r, -18, 62, 23, 8);
-  planter(r, 49, 61, 13, 8);
+  planter(r, -18, 62, 23, 8, !low);
+  planter(r, 49, 61, 13, 8, !low);
   // Tiny grasses and vines break the stone silhouette without obscuring architecture.
   [-46, 4, 45].forEach((u, i) => {
     const [x, y] = point(u, 75, -2), drop = 12 + i * 2;

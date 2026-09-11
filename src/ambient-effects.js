@@ -274,8 +274,21 @@ function drawLeaf(r, x, y, size, angle, color) {
   c.quadraticCurveTo(-size * .38, -size * .9, size, -size * .18);
   c.quadraticCurveTo(size * .28, size * .82, -size, size * .18);
   c.closePath(); c.fillStyle = color; c.fill();
-  c.beginPath(); c.moveTo(-size * .72, size * .2); c.lineTo(size * .68, -size * .13);
-  c.strokeStyle = '#fff8df99'; c.lineWidth = .7; c.stroke(); c.restore();
+  c.strokeStyle = '#435b4b50'; c.lineWidth = .65; c.stroke();
+  // A light face and shaded underside make the central vein read as a fold.
+  c.beginPath(); c.moveTo(-size, size * .18);
+  c.quadraticCurveTo(-size * .38, -size * .9, size, -size * .18);
+  c.closePath(); c.fillStyle = '#fff8df30'; c.fill();
+  c.beginPath(); c.moveTo(-size, size * .18);
+  c.lineTo(size, -size * .18);
+  c.quadraticCurveTo(size * .28, size * .82, -size, size * .18);
+  c.closePath(); c.fillStyle = '#314a411c'; c.fill();
+  c.beginPath(); c.moveTo(-size * .82, size * .15); c.lineTo(size * .8, -size * .14);
+  if (size >= 6) {
+    c.moveTo(-size * .28, size * .05); c.lineTo(-size * .36, -size * .32);
+    c.moveTo(size * .19, -size * .03); c.lineTo(size * .44, size * .21);
+  }
+  c.strokeStyle = '#fff8df99'; c.lineWidth = .6; c.lineCap = 'round'; c.stroke(); c.restore();
 }
 
 function drawPaper(r, x, y, size, angle, color) {
@@ -283,6 +296,8 @@ function drawPaper(r, x, y, size, angle, color) {
   c.beginPath(); c.moveTo(-size, -size * .58); c.lineTo(size, -size * .4);
   c.lineTo(size * .84, size * .58); c.lineTo(-size * .94, size * .42); c.closePath();
   c.fillStyle = color; c.fill(); c.strokeStyle = '#9d765563'; c.lineWidth = .65; c.stroke();
+  c.beginPath(); c.moveTo(-size * .94, size * .42); c.lineTo(0, size * .08);
+  c.lineTo(size * .84, size * .58); c.closePath(); c.fillStyle = '#9d76552b'; c.fill();
   c.beginPath(); c.moveTo(-size * .84, -size * .43); c.lineTo(0, size * .08); c.lineTo(size * .84, -size * .29);
   c.strokeStyle = '#fffdf0b8'; c.stroke(); c.restore();
 }
@@ -316,8 +331,7 @@ function drawAmbientOverlay(r, now, page, rect, options = {}) {
   const c = r.ctx, time = options.reducedMotion || quality === 'low' ? 2400 : now;
   c.save(); c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip();
   if (page === 'game') {
-    const impulse = Math.max(0, Math.min(1, Number(options.impulse) || 0));
-    drawGameplayAir(r, time, rect, treatment.near * (1 + impulse * .2), mood, quality);
+    drawGameplayAir(r, time, rect, treatment.near, mood, quality);
     c.restore();
     return;
   }

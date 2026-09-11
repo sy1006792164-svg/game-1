@@ -76,6 +76,10 @@ function drawResultHeader(r, kind, ui, age) {
   c.beginPath(); c.rect(ui.x + 8, ui.y + 8, ui.w - 16, 82); c.clip();
   r.circle(x, y, 31, won ? '#f5e9ca' : '#edeade', won ? '#c1ac72' : '#c1c6b4');
   r.circle(x, y, 25, won ? '#fff8e4' : '#f9f8ee', won ? '#ddc994' : '#d9dccc');
+  c.beginPath(); c.arc(x, y, 29.5, Math.PI * 1.04, Math.PI * 1.88);
+  c.strokeStyle = '#fffbea'; c.lineWidth = 1; c.stroke();
+  c.beginPath(); c.arc(x, y, 29.5, .05, Math.PI * .87);
+  c.strokeStyle = won ? '#98784380' : '#81917877'; c.lineWidth = .9; c.stroke();
   for (let index = 0; index < 16; index++) {
     const angle = index * Math.PI / 8;
     r.circle(x + Math.cos(angle) * 28, y + Math.sin(angle) * 28, .75, won ? '#ba9a5f' : '#a7b39d');

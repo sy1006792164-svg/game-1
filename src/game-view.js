@@ -32,8 +32,8 @@ function drawControls(r, game, layout, now, feedback) {
   const warning = game.state.status === 'failed' || game.state.energy <= 3;
   if (guide) drawGuideCard(r, game, guide, hintY);
   else if (!drawContextFeedback(r, feedback, layout, now)) {
-    r.round(24, hintY + 2, 342, hintHeight, 13, '#53715b12');
-    r.round(24, hintY, 342, hintHeight, 13, warning ? '#fbebdf' : ready ? '#e6f0e2' : '#f8faf1', warning ? '#d6af95' : ready ? '#9cbd9c' : C.line);
+    r.panel(24, hintY, 342, hintHeight, { radius: 13, fill: warning ? '#fbebdf' : ready ? '#e6f0e2' : '#f8faf1',
+      stroke: warning ? '#d6af95' : ready ? '#9cbd9c' : C.line });
     if (ready) r.icon('check', 44, hintY + hintHeight / 2, 16, C.green);
     const textY = hintY + hintHeight / 2 - (hintLines.length - 1) * 9;
     hintLines.forEach((line, index) => r.text(line, ready ? 209 : 195, textY + index * 18, 12, warning ? '#955d42' : ready ? '#316c5f' : C.muted, 'center'));
@@ -77,11 +77,6 @@ function drawGame(r, game, now) {
   const layout = controlLayout(r, game), boardRect = gameBoardRect(r, layout);
   const feedback = gameFeedback(r, game, now);
   const atmosphereNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
-  const feedbackNow = game.modal && Number.isFinite(r.ambientFreezeAt) ? r.ambientFreezeAt : now;
-  const actionAge = feedbackNow - game.transitionAt;
-  const ambientImpulse = !r.reducedMotion && r.effectsQuality !== 'low' && game.previousState && actionAge >= 0 && actionAge < 720
-    ? Math.sin(actionAge / 720 * Math.PI) : 0;
-  r.ambientImpulse = ambientImpulse;
   const showGuideEntry = !layout.guide && game.canShowGuide() && game.state.status === 'playing' && !game.reviewing;
   r.label(game.level.title, 24, 32, showGuideEntry ? 138 : 254, 24, C.ink, 'left', '600');
   if (game.reviewing) r.text('路线回顾', 24, 60, 11, C.muted);
@@ -98,7 +93,7 @@ function drawGame(r, game, now) {
   // the island, keeping the HUD and controls still while the scenery breathes.
   drawAmbientOverlay(r, atmosphereNow, 'game', boardRect, {
     reducedMotion: r.reducedMotion, quality: r.effectsQuality, mood: r.atmosphereMood,
-    treatment: atmosphereTreatment('game'), impulse: ambientImpulse
+    treatment: atmosphereTreatment('game')
   });
   drawBoard(r, game, now, boardRect, game.modal ? null : layout.guide);
   drawCollectionFlights(r, game, now);

@@ -36,6 +36,10 @@ function drawIslandSurface(r, corners, depth, now, limitBottom = Infinity) {
       // courtyard weight without changing any of the playable top-surface points.
       polygon(r, [a, b, edgePoint(a, b, 1, depth * .2), edgePoint(a, b, 0, depth * .2)], shaded ? '#bbc8ac' : '#e4e3c7');
       polygon(r, [edgePoint(a, b, 0, depth * .82), edgePoint(a, b, 1, depth * .82), baseB, baseA], shaded ? '#8da28e' : '#b6c0a5');
+      // Fine rim and foot lines make the two stone faces read as one volume.
+      r.line([edgePoint(a, b, .005, depth * .2), edgePoint(a, b, .995, depth * .2)], shaded ? '#667f686e' : '#84977a66', .85);
+      r.line([baseA, baseB], shaded ? '#647f6973' : '#84977b66', .8);
+      r.line([edgePoint(a, b, 0, depth * .22), baseA], shaded ? '#657f6880' : '#eef0d385', .8);
       [.21, .5, .8].forEach(fraction => r.line([edgePoint(a, b, .005, depth * fraction), edgePoint(a, b, .995, depth * fraction)], shaded ? '#dce4c738' : '#f5f0d666', .85));
       const blocks = Math.max(1, Math.floor(Math.hypot(b[0] - a[0], b[1] - a[1]) / 28));
       for (let block = 1; block < blocks; block++) {
@@ -54,6 +58,8 @@ function drawIslandSurface(r, corners, depth, now, limitBottom = Infinity) {
     });
   }
   polygon(r, corners, '#a7be98');
+  r.line([corners[3], corners[0], corners[1]], '#eaf0cf99', .8);
+  r.line([corners[1], corners[2], corners[3]], '#718b716e', .85);
 }
 
 module.exports = { drawIslandSurface };

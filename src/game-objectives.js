@@ -14,9 +14,10 @@ function drawObjectives(r, game, now, feedback) {
   const low = s.status === 'playing' && s.energy <= 3;
   const { x, y, w, h, column } = OBJECTIVES;
   // One sheet of paper, with open columns and the same cut corners as the controls.
-  drawPaperPlaque(r, x, y + 2, w, h, 6, false, '#536a5010');
+  drawPaperPlaque(r, x, y + 2, w, h, 6, false, '#91a48985');
   drawPaperPlaque(r, x, y, w, h, 6, false, C.panel, '#ccd5c5');
   r.line([[x + 8, y + 2], [x + w - 8, y + 2]], '#ffffffb0', .8);
+  r.line([[x + w - 1.5, y + 7], [x + w - 1.5, y + h - 6], [x + w - 6, y + h - 1.5], [x + 7, y + h - 1.5]], '#718a7163', .8);
   const objectives = [
     { label: '剩余拍数', icon: 'lamp', value: s.energy, suffix: ' 拍', changed: previous && previous.energy !== s.energy,
       color: low || s.status === 'failed' ? '#ad5845' : '#98683f' },

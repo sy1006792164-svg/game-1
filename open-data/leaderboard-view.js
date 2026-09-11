@@ -45,6 +45,18 @@ function paintLeaderboard(ctx, model, avatar) {
     ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
     ctx.lineWidth = width; ctx.strokeStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
   };
+  // Match the main canvas's upper-left light without crossing domain boundaries.
+  const edges = (x, y, width, height, radius, dark = false) => {
+    const inset = 1.5, r = Math.max(0, Math.min(radius, width / 2, height / 2) - inset);
+    const left = x + inset, right = x + width - inset, top = y + inset, bottom = y + height - inset;
+    ctx.save(); ctx.lineWidth = .9; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(left, bottom - r); ctx.lineTo(left, top + r);
+    ctx.arcTo(left, top, left + r, top, r); ctx.lineTo(right - r, top);
+    ctx.strokeStyle = dark ? '#c6dec18a' : '#fffef1dc'; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(right, top + r); ctx.lineTo(right, bottom - r);
+    ctx.arcTo(right, bottom, right - r, bottom, r); ctx.lineTo(left + r, bottom);
+    ctx.strokeStyle = dark ? '#183e3966' : '#718a7163'; ctx.stroke(); ctx.restore();
+  };
   const circle = (x, y, radius, fill) => { ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); };
   const star = (x, y, size, color) => {
     ctx.beginPath(); for (let i = 0; i < 10; i++) {
@@ -62,6 +74,7 @@ function paintLeaderboard(ctx, model, avatar) {
   // A personal scorecard anchors the page even when only one friend is present.
   round(1, 3, w - 2, ui.heroH, 19, '#476d5920');
   round(0, 0, w, ui.heroH, 19, C.green);
+  edges(0, 0, w, ui.heroH, 19, true);
   round(8, 8, w - 16, ui.heroH - 16, 13, null, '#83aa934d');
   circle(w - 14, 15, 33, '#ffffff08'); star(w - 23, 19, 15, '#c0d8b222');
   const portrait = ui.compact ? 30 : 38;
@@ -116,6 +129,7 @@ function paintLeaderboard(ctx, model, avatar) {
       round(1, y + 2, listWidth - 2, rh, 13, '#5c805714');
       round(0, y, listWidth, rh, 13, row.isMe ? moving ? '#eaf1d9' : '#f2f4e2' : C.paper,
         row.isMe ? moving ? '#77965d' : '#9fba9b' : '#d6dfcf', row.isMe && moving ? 2 : 1);
+      edges(0, y, listWidth, rh, 13);
       if (row.isMe) round(0, y + 13, 3, rh - 26, 1.5, C.green);
       if (row.rank <= 3) {
         const cy = y + rh / 2, colors = [

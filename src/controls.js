@@ -40,6 +40,12 @@ function plaque(r, x, y, w, h, cut, notch, fill, stroke) {
   if (stroke) { c.strokeStyle = stroke; c.lineWidth = 1; c.stroke(); }
 }
 
+function bevel(r, x, y, w, h, cut, tone) {
+  r.line([[x + 2, y + cut], [x + cut, y + 2], [x + w - cut - 2, y + 2]], tone.shine, 1);
+  if (r.effectsQuality !== 'low') r.line([[x + cut + 1, y + h - 1.5],
+    [x + w - cut, y + h - 1.5], [x + w - 1.5, y + h - cut]], tone.base, .9);
+}
+
 function drawButton(r, text, x, y, w, h, action, style) {
   const c = r.ctx;
   c.save();
@@ -56,19 +62,23 @@ function drawButton(r, text, x, y, w, h, action, style) {
   const cut = primary ? 12 : 9, notch = primary && w >= 140;
   if (disabled) c.globalAlpha *= .46;
   if (tab) {
-    plaque(r, x + 2, y + 4, w - 4, h - 8, 7, false,
+    if (options.selected) plaque(r, x + 2, y + 5, w - 4, h - 9, 7, false, tone.base);
+    plaque(r, x + 2, y + 4, w - 4, h - (options.selected ? 9 : 8), 7, false,
       pressed ? C.soft : options.selected ? C.panel : null, options.selected ? C.line : null);
-    if (options.selected) r.line([[x + w / 2 - 15, y + h - 8], [x + w / 2 + 15, y + h - 8]], C.green, 1.5);
+    if (options.selected) {
+      bevel(r, x + 2, y + 4, w - 4, h - 9, 7, tone);
+      r.line([[x + w / 2 - 15, y + h - 8], [x + w / 2 + 15, y + h - 8]], C.green, 1.5);
+    }
   } else if (textOnly) {
-    if (pressed) r.round(x + 2, y + 5, w - 4, h - 10, 8, C.soft);
+    if (pressed) r.round(x + 2, y + 5, w - 4, h - 10, 8, C.soft, C.line);
   } else {
-    if (!pressed && !disabled && primary) {
+    if (!pressed && !disabled && primary && r.effectsQuality !== 'low') {
       r.round(x + 4, y + 7, w - 8, faceH, 14, '#476c5b12');
       r.round(x + 2, y + 4, w - 4, faceH, 14, '#476c5b12');
     }
     plaque(r, x, y + depth, w, faceH, cut, notch, tone.base);
     plaque(r, x, top, w, faceH, cut, notch, pressed ? tone.held : tone.face, tone.edge);
-    r.line([[x + cut + 3, top + 2], [x + w - cut - 3, top + 2]], tone.shine, 1);
+    bevel(r, x, top, w, faceH, cut, tone);
   }
   const middle = top + faceH / 2;
   const feedbackAge = Number.isFinite(options.feedbackAt) ? r.now - options.feedbackAt : -1;

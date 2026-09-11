@@ -4,6 +4,7 @@ const { C } = require('./theme');
 const { CONTROL, buttonLayout } = require('./controls');
 const { drawResultHeader, drawResultStars } = require('./result-effects');
 const { layoutHelp, drawHelp } = require('./help-view');
+const { drawSurfaceEdges } = require('./surface-edges');
 
 // Measure each block before drawing so titles, paragraphs and actions keep
 // their own space, including when a longer label wraps onto another line.
@@ -87,6 +88,7 @@ function drawModal(r, modal, now, resultAge = null) {
   r.round(ui.x + 3, ui.y + 8, ui.w - 6, ui.h, 23, '#24473526');
   r.round(ui.x - 2, ui.y + 3, ui.w + 4, ui.h, 23, '#e6e8d7', '#c1cbb6');
   r.round(ui.x, ui.y, ui.w, ui.h, 23, '#fffdf4', '#c6d0bd');
+  drawSurfaceEdges(r, ui.x, ui.y, ui.w, ui.h, 23);
   r.round(ui.x + 8, ui.y + 8, ui.w - 16, ui.h - 16, 18, null, '#e4e8d9');
   r.line([[ui.x + 42, ui.y + 2], [ui.x + ui.w - 42, ui.y + 2]], accent, 2);
   // Small cancellation marks turn the result into a paper receipt without
