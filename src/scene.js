@@ -13,6 +13,7 @@ const { drawGuideTargets } = require('./guide-view');
 const { drawHomeArchitecture } = require('./world-art');
 const { drawRoutePreview } = require('./route-preview');
 const { drawPaving, drawFloorLighting, drawGroundGlow, drawTileFocus, drawActorShadow } = require('./scene-lighting');
+const { drawWindRune, drawBridgeFlutter, lampFrame, drawLampFlame } = require('./prop-motion');
 
 const COLOR = {
   sky: '#e9efe7', forest: '#b8cebf', fog: '#d6e2d7', teal: '#60b4ba',
@@ -40,7 +41,7 @@ function glow(r, x, y, radius, color, alpha) {
   c.restore();
 }
 
-// Pick the painted rounded shape after its local rotation, leaving empty corners clickable.
+// Pick rotated paint bounds, leaving empty corners clickable.
 function hitProp(r, x, y, width, height, radius, angle, action) {
   if (!action) return;
   const cos = Math.cos(angle), sin = Math.sin(angle), hw = width / 2, hh = height / 2;
@@ -54,22 +55,37 @@ function hitProp(r, x, y, width, height, radius, angle, action) {
   });
 }
 
-function tree(r, x, y, size, now, distant, mood = chapterMood(0), wind = windState(now)) {
+function tree(r, x, y, size, now, distant, mood = chapterMood(0), wind = windState(now), trunkWidth = size * .16) {
   const slowSway = distant ? .01 : .012;
-  const impulse = distant ? 0 : Math.max(0, Number(r.ambientImpulse) || 0);
-  const gustSway = distant ? .008 + wind.gust * .025 : .015 + wind.strength * .012 + wind.gust * .045 + impulse * .035;
+  // Idle wind never depends on turns.
+  const gustSway = distant ? .008 + wind.gust * .025 : .015 + wind.strength * .012 + wind.gust * .045;
   const sway = (Math.sin(now / 2600 + x) * slowSway + Math.sin(now / 680 + x * .13) * gustSway) * size;
   polygon(r, [[x - size * .15, y], [x + size * .08, y - 2], [x + size * .74, y + size * .13], [x + size * .39, y + size * .22]], distant ? '#70938209' : '#577c6724');
-  r.line([[x, y], [x, y - size * .72]], distant ? mood.treeFar : mood.treeNear, Math.max(1, size * .045));
+  if (distant) r.line([[x, y], [x, y - size * .72]], mood.treeFar, Math.max(1, size * .045));
+  else {
+    // Near trunks share a tile-based width.
+    const half = trunkWidth / 2, top = y - size * .42, shoulder = y - size * .06;
+    polygon(r, [[x - half * 1.45, y], [x - half, shoulder], [x - half * .55, top],
+      [x + half * .55, top], [x + half, shoulder], [x + half * 1.45, y]], '#d5d7bb');
+    polygon(r, [[x, top], [x + half * .55, top], [x + half, shoulder],
+      [x + half * 1.45, y], [x, y]], '#a3b29a');
+    r.line([[x - half * 1.1, y - .6], [x - half * .7, shoulder], [x - half * .4, top]], '#f6efd6', .75);
+  }
   ellipse(r, x + sway, y - size * .62, size * .27, size * .48, distant ? mood.treeFar : mood.leaves[1]);
   ellipse(r, x - size * .08 + sway, y - size * .71, size * .19, size * .35, distant ? mood.fogNear : mood.leaves[2]);
   ellipse(r, x + size * .1 + sway, y - size * .61, size * .12, size * .32, distant ? mood.treeFar : mood.leaves[0]);
-  if (!distant) r.line([[x - size * .09 + sway, y - size * .94], [x - size * .16 + sway, y - size * .83]], mood.celestialGlow, .85);
+  if (!distant) {
+    const c = r.ctx;
+    c.save(); c.globalAlpha *= .48;
+    c.beginPath(); c.ellipse(x + sway, y - size * .62, size * .27, size * .48, 0, -1.05, 1.25);
+    c.strokeStyle = mood.leaves[0]; c.lineWidth = .8; c.stroke();
+    c.restore();
+    r.line([[x - size * .09 + sway, y - size * .94], [x - size * .16 + sway, y - size * .83]], mood.celestialGlow, .85);
+  }
 }
 
 function grass(r, x, y, size, now, color, wind = windState(now)) {
-  const impulse = Math.max(0, Number(r.ambientImpulse) || 0);
-  const sway = Math.sin(now / 1100 + x) * (1.4 + wind.strength * .6 + wind.gust * 2 + impulse * 1.5);
+  const sway = Math.sin(now / 1100 + x) * (1.4 + wind.strength * .6 + wind.gust * 2);
   r.line([[x - size * .6, y - size * .45], [x, y + 1], [x - size * .12 + sway, y - size]], color || '#91b68a', 1.4);
   r.line([[x, y + 1], [x + size * .6 + sway, y - size * .6]], color || '#91b68a', 1.2);
 }
@@ -85,19 +101,23 @@ function postOffice(r, x, y, size, now, ready) {
   polygon(r, [[-23, -27], [-4, -43], [8, -35], [8, -19]], '#e8ae7e');
   polygon(r, OFFICE.frontTrim, '#d99a72');
   polygon(r, OFFICE.sideTrim, '#805b49');
+  r.line([[-22, -23], [8, -15], [26, -31.5]], '#8f654f88', .85);
   r.line([[-18, -23], [8, -16], [24, -24]], '#536d565e', 2.2);
   r.line([[8, -15], [8, 1]], '#fff9dfb0', 1.2);
   r.line([[-4, -42], [24, -35]], '#f6c4a5', 1.4);
   [[-11, -37, 1, -21], [-17, -32, -9, -24], [5, -41, 17, -28]].forEach(([ax, ay, bx, by]) => r.line([[ax, ay], [bx, by]], '#f8bea063', .65));
   r.line([[-18, -5], [7, 1]], '#e0d9be', 1.1);
   r.round(-12, -18, 10, 16, 4.8, '#678c7c');
+  r.line([[-11, -13], [-11, -3.5]], '#3f685c88', .8);
   r.round(-10, -16, 6, 8, 2.8, ready ? '#ffe3a7' : '#bad5bb');
   r.circle(-4, -7, 1, '#e6bd77');
   polygon(r, [[12, -18], [18, -21], [18, -13], [12, -10]], ready ? '#f9d497' : '#789b87');
+  r.line([[12, -10], [18, -13], [18, -21]], '#f6edceaa', .75);
   r.line([[15, -19], [15, -12]], '#779779', .75);
   r.round(-14, -30, 20, 8, 2, COLOR.cream);
   r.icon('letter', -4, -26, 8, '#bf7f47');
   polygon(r, OFFICE.step, '#dce0c5');
+  r.line([[-20, -1], [6, 5.5], [12, 2]], '#879c7d88', .8);
   r.line([[8, 2], [-18, -4]], '#fff9e5', 1.3);
   r.line([[22, -6], [22, -45], [34, -44]], '#385e51', 1.7);
   const flap = Math.sin(now / 370) * 2;
@@ -109,12 +129,20 @@ function postOffice(r, x, y, size, now, ready) {
 function lantern(r, x, y, size, now, action) {
   const c = r.ctx; c.save(); c.translate(x, y); c.scale(size / 24, size / 24);
   const sway = Math.sin(now / 870 + x) * .06;
+  const flame = lampFrame(r, now, x * .13);
   ellipse(r, 0, 2, 10, 3, '#2d4b3b29');
+  if (r.effectsQuality !== 'low') {
+    c.save(); c.globalAlpha *= .1 + flame.warmth * .08;
+    ellipse(r, 3, 1, 12 + flame.warmth * 2, 3.6, '#eac27b'); c.restore();
+  }
   r.line([[-6, 0], [-6, -27], [5, -27]], '#517064', 2);
   c.save(); c.translate(5, -25); c.rotate(sway);
-  glow(r, 0, 7, 10, COLOR.gold, .08);
+  glow(r, 0, 7, 10 + flame.warmth * 2, COLOR.gold, .055 + flame.warmth * .045);
   r.line([[0, -2], [0, 1]], '#b58e54', 1);
   r.round(-4, 1, 8, 12, 2, '#bd934f'); r.round(-2.5, 3, 5, 7, 1, '#ffe6a2');
+  drawLampFlame(r, flame);
+  r.line([[-3, 3], [-3, 11]], '#fff0c2b3', .75);
+  r.line([[3, 3], [3, 11]], '#8d743d99', .75);
   r.line([[-5, 1], [5, 1]], '#57705a', 1.7); r.line([[-5, 13], [5, 13]], '#57705a', 1.7);
   c.restore(); c.restore();
   const scale = size / 24, cos = Math.cos(sway), sin = Math.sin(sway);
@@ -142,6 +170,7 @@ function groundDetail(r, game, now, cell, p) {
     if (intact) {
       diamond(r, x, y - .7, hw - 2, hh - 1.5, '#eac798', '#f4dbaf');
       for (let i = -1; i <= 1; i++) floorLine(r, p, x, y, [[i * hw * .38 - hw * .31, i * hh * .38], [i * hw * .38 + hw * .31, i * hh * .38 - hh * .65]], '#b99769', 1.2);
+      drawBridgeFlutter(r, x, y - .7, hw, hh, now, cell);
     } else {
       diamond(r, x, y, hw - 1.5, hh - 1, '#244947', '#537869');
       floorLine(r, p, x, y, [[-hw * .7, -1], [-hw * .36, 3], [-hw * .2, -3]], '#b6a27b', 2);
@@ -150,10 +179,7 @@ function groundDetail(r, game, now, cell, p) {
   }
   if (l.winds && l.winds[cell]) {
     diamond(r, x, y, hw - 2, hh - 1.5, '#c6dab6', '#e0e8c4');
-    const [vx, vy] = p.vector(l.winds[cell]);
-    const ax = vx * .4, ay = vy * .4;
-    r.line([[x - ax, y - ay], [x + ax, y + ay]], '#668973', 2);
-    r.line([[x + ax - vx * .33 + vy * .22, y + ay - vy * .33 - vx * .22], [x + ax, y + ay], [x + ax - vx * .33 - vy * .22, y + ay - vy * .33 + vx * .22]], '#668973', 1.5);
+    drawWindRune(r, x, y, p.vector(l.winds[cell]), now, cell);
   }
 }
 
@@ -170,6 +196,7 @@ function floatingMail(r, x, y, size, now, cell, seal, action) {
   if (seal) {
     r.round(-size * .36, -size * .43 + 1.4, size * .72, size * .86, 2, '#3d8587');
     r.round(-size * .36, -size * .43, size * .72, size * .86 - 1.4, 2, '#75c1bc', '#d0f0e5');
+    r.line([[-size * .28, size * .35], [size * .28, size * .35], [size * .28, -size * .32]], '#397d8077', .75);
     r.round(-size * .23, -size * .29, size * .46, size * .57, 1, '#d0edcf');
     r.icon('star', 0, 0, size * .44, '#39797c');
     [-1, 0, 1].forEach(i => { r.circle(-size * .37, i * size * .24, 1.1, COLOR.stone); r.circle(size * .37, i * size * .24, 1.1, COLOR.stone); });
@@ -190,7 +217,7 @@ function floatingMail(r, x, y, size, now, cell, seal, action) {
 
 function drawBoard(r, game, now, rect, guide) {
   const options = { reducedMotion: !!r.reducedMotion };
-  // Performance mode still animates a deliberate move, but idle scenery stays still.
+  // Low quality still animates deliberate movement.
   const quietScenery = options.reducedMotion || r.effectsQuality === 'low';
   const time = quietScenery ? 0 : Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   options.idleTime = time;
@@ -222,7 +249,7 @@ function drawBoard(r, game, now, rect, guide) {
   const selectCell = cell => {
     if (game.inspectGuideCell(cell)) return;
     const player = game.state.player, dx = cell % l.width - player % l.width, dy = Math.floor(cell / l.width) - Math.floor(player / l.width);
-    // A second tap on the destination during arrival is still a move intention.
+    // Arrival taps still express movement intent.
     if (cell === player && game.previousState && game.previousState.player !== player &&
       game.platform.now() - game.transitionAt < MOVE_MS) return;
     if (!dx && !dy) game.act('wait');
@@ -245,12 +272,13 @@ function drawBoard(r, game, now, rect, guide) {
       if (cell % 3 === 0) actors.push({ y: y + 2, draw: () => {
         polygon(r, [[x - 8, y - 3], [x - 5, y - 10], [x + 2, y - 12], [x + 8, y - 5], [x + 4, y]], '#d5d7bb');
         polygon(r, [[x + 2, y - 12], [x + 8, y - 5], [x + 4, y], [x, y - 4]], '#a3b29a');
+        r.line([[x + 2, y - 11.5], [x, y - 4], [x + 4, y - .5]], '#7f967a99', .7);
         r.line([[x - 5, y - 10], [x + 2, y - 12], [x + 6, y - 7]], '#f6efd6', 1);
         grass(r, x - 8, y - 1, 5, time, undefined, wind);
       } });
-      // Trees only line the rear rim, so they never hide a floor tile.
+      // Rear-rim trees never hide floor tiles.
       const onRim = Math.floor(cell / l.width) === p.bounds.minRow || cell % l.width === p.bounds.minCol;
-      if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false, r.atmosphereMood, wind) });
+      if (onRim && cell % 2 === 0) actors.push({ y, draw: () => tree(r, x, y - 3, hw * (1.05 + cell % 3 * .11), time, false, r.atmosphereMood, wind, hw * .18) });
       else if (cell % 2) actors.push({ y, draw: () => grass(r, x + 5, y - 4, 6, time, '#b1c293', wind) });
     } else {
       groundDetail(r, game, time, cell, p);
@@ -276,7 +304,7 @@ function drawBoard(r, game, now, rect, guide) {
       if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false, selectProp) });
       if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, time, cell, true, selectProp) });
     }
-    // The courier remains visual only; uncovered floor tiles keep their normal actions.
+    // Actors never intercept floor taps.
     r.hit(x - hw, y - hh, hw * 2, hh * 2, cellAction(cell), (hx, hy) => p.contains(cell, hx, hy));
   }
   drawFloorLighting(r, corners);
@@ -310,8 +338,7 @@ function drawBackdrop(r, now, chapter, options = {}) {
   const bounds = r.viewport || { x: 0, y: 0, w: 390, h: H };
   const mapX = x => bounds.x + x * bounds.w / 390, spread = bounds.w / 390;
   c.fillStyle = mood.skyMid; c.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
-  // Canvas gradients extend their end colors beyond these stops, so the safe areas
-  // continue the same sky without changing the artwork's position inside the page.
+  // Sky colors extend through safe areas.
   const sky = c.createLinearGradient(0, 0, 0, H);
   if (sky && typeof sky.addColorStop === 'function') {
     sky.addColorStop(0, mood.skyTop); sky.addColorStop(.5, mood.skyMid); sky.addColorStop(1, mood.skyBottom);
@@ -322,17 +349,18 @@ function drawBackdrop(r, now, chapter, options = {}) {
   r.circle(mapX(310), H * .225, 24, mood.celestial);
   if (mood.id === 'moon-path') r.circle(mapX(302), H * .216, 20, mood.skyMid);
   else r.circle(mapX(303), H * .216, 18, mood.celestialGlow);
-  // Broad, soft ridge lines recede into the mist; they stay quieter than the board.
-  c.beginPath(); c.moveTo(mapX(0), H * .46); c.lineTo(mapX(0), H * .34);
+  c.beginPath(); c.moveTo(mapX(0), H * .34);
   c.bezierCurveTo(mapX(45 + drift), H * .25, mapX(57), H * .28, mapX(112), H * .37);
   c.bezierCurveTo(mapX(173), H * .4, mapX(207), H * .23, mapX(266), H * .31);
   c.bezierCurveTo(mapX(320), H * .39, mapX(346), H * .27, mapX(390), H * .31);
-  c.lineTo(mapX(390), H * .56); c.closePath(); c.fillStyle = mood.ridgeFar; c.fill();
-  c.beginPath(); c.moveTo(mapX(0), H * .59); c.lineTo(mapX(0), H * .42);
+  c.save(); c.globalAlpha *= .22; c.strokeStyle = mood.treeFar; c.lineWidth = 1.4; c.stroke(); c.restore();
+  c.lineTo(mapX(390), H * .56); c.lineTo(mapX(0), H * .46); c.closePath(); c.fillStyle = mood.ridgeFar; c.fill();
+  c.beginPath(); c.moveTo(mapX(0), H * .42);
   c.bezierCurveTo(mapX(59), H * .33, mapX(88), H * .47, mapX(157), H * .45);
   c.bezierCurveTo(mapX(205), H * .42, mapX(260), H * .34, mapX(310), H * .43);
   c.bezierCurveTo(mapX(343), H * .48, mapX(359), H * .4, mapX(390), H * .39);
-  c.lineTo(mapX(390), H * .64); c.closePath(); c.fillStyle = mood.ridgeNear; c.fill();
+  c.save(); c.globalAlpha *= .34; c.strokeStyle = mood.treeNear; c.lineWidth = 1.6; c.stroke(); c.restore();
+  c.lineTo(mapX(390), H * .64); c.lineTo(mapX(0), H * .59); c.closePath(); c.fillStyle = mood.ridgeNear; c.fill();
   ellipse(r, mapX(167 + drift), H * .49, 247 * spread, 31, mood.fogFar);
   ellipse(r, mapX(272 - drift), H * .58, 216 * spread, 35, mood.fogNear);
   [-20, 403].forEach((x, i) => tree(r, mapX(x), H * .69, 96 + i * 19, now, true, mood, wind));
@@ -355,7 +383,6 @@ function drawVignette(r, now, rect, options = {}) {
   floatingMail(r, -100 + Math.sin(now / 1800) * 3.5, -53 + Math.sin(now / 1200) * 3, 19, now, 5, false);
   floatingMail(r, -69 + Math.sin(now / 1700 + 1) * 2.5, -83 + Math.sin(now / 1300) * 4, 13, now, 2, true);
   if (options.deliveryStory) drawHomeDelivery(r, now, options.mood || chapterMood(0), .9, quietScenery);
-  // Two distant swifts add life without competing with the architectural silhouette.
   [-1, 1].forEach((side, i) => {
     const sx = side * 120 + Math.sin(now / 2300 + i) * 4, sy = -105 + i * 16 + Math.sin(now / 1500 + i) * 2, flap = Math.sin(now / 500 + i) * 2.1;
     r.line([[sx - 5, sy - 2 - flap], [sx, sy], [sx + 5, sy - 3 + flap]], '#7d9f945b', 1.15);

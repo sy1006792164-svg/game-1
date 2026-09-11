@@ -19,7 +19,7 @@ function drawDelivery(r, x, y, age) {
   const paper = (age - 140) / 1050;
   if (paper > 0 && paper < 1) {
     c.save(); c.globalAlpha *= Math.sin(paper * Math.PI) * .85;
-    // Reuse the board's bounded, deterministic paper burst on both sides.
+    // Reuse the bounded, deterministic board burst.
     drawBurst(r, x - 58, y, 76, paper, C.gold, 17, true);
     drawBurst(r, x + 58, y, 76, paper, C.green, 61, true);
     c.restore();
@@ -56,7 +56,7 @@ function drawFadingLamp(r, x, y, age) {
     c.restore();
   }
   c.restore();
-  // Four fading embers keep failure readable and calm; all motion ends quickly.
+  // Failure motion ends quickly.
   const ember = (age - 100) / 850;
   if (ember > 0 && ember < 1) {
     c.save(); c.globalAlpha *= Math.sin(ember * Math.PI) * .6;
@@ -72,10 +72,14 @@ function drawResultHeader(r, kind, ui, age) {
   const c = r.ctx, won = kind === 'win', x = ui.x + ui.w / 2, y = ui.y + 52;
   const elapsed = age === null || r.reducedMotion ? RESULT_ANIMATION_MS : Math.max(0, age);
   c.save();
-  // Decoration stays in the existing emblem area, above every title and button.
+  // Keep effects inside the existing emblem area.
   c.beginPath(); c.rect(ui.x + 8, ui.y + 8, ui.w - 16, 82); c.clip();
   r.circle(x, y, 31, won ? '#f5e9ca' : '#edeade', won ? '#c1ac72' : '#c1c6b4');
   r.circle(x, y, 25, won ? '#fff8e4' : '#f9f8ee', won ? '#ddc994' : '#d9dccc');
+  c.beginPath(); c.arc(x, y, 29.5, Math.PI * 1.04, Math.PI * 1.88);
+  c.strokeStyle = '#fffbea'; c.lineWidth = 1; c.stroke();
+  c.beginPath(); c.arc(x, y, 29.5, .05, Math.PI * .87);
+  c.strokeStyle = won ? '#98784380' : '#81917877'; c.lineWidth = .9; c.stroke();
   for (let index = 0; index < 16; index++) {
     const angle = index * Math.PI / 8;
     r.circle(x + Math.cos(angle) * 28, y + Math.sin(angle) * 28, .75, won ? '#ba9a5f' : '#a7b39d');

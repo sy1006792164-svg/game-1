@@ -116,6 +116,34 @@ function harness(options = {}) {
   };
 }
 
+test('trees keep the same continuous wind motion through moves, waits and undo', t => {
+  const idle = harness(), active = harness();
+  t.after(() => { idle.destroy(); active.destroy(); });
+  for (const h of [idle, active]) { h.start(CAMPAIGN[1]); h.draw(1200); }
+  // Capture full tree crowns in world coordinates, before the camera transform.
+  // Actor poses, collection feedback and the rest of the UI can change freely.
+  const crowns = h => h.calls.filter(({ method, args }) => method === 'ellipse' &&
+    Math.abs(args[2] / args[3] - .27 / .48) < 1e-9 && args[5] === 0 && args[6] === Math.PI * 2)
+    .map(({ args }) => args);
+  const initial = crowns(idle);
+  assert.ok(initial.length > 2, 'the real board must draw trees, not just the distant backdrop');
+  const sample = ms => {
+    idle.draw(ms); active.draw(ms);
+    assert.equal(active.game.renderer.ambientNow, idle.game.renderer.ambientNow);
+    assert.deepEqual(crowns(active), crowns(idle), 'player actions cannot restart or amplify tree sway');
+  };
+  active.game.act('right');
+  assert.equal(active.game.state.turn, 1);
+  for (const ms of [0, 40, 80, 120]) sample(ms);
+  active.game.act('wait');
+  assert.equal(active.game.state.turn, 2);
+  for (const ms of [0, 60, 180]) sample(ms);
+  active.game.undo();
+  assert.equal(active.game.state.turn, 1);
+  for (const ms of [0, 60, 200, 1000]) sample(ms);
+  assert.notDeepEqual(crowns(active), initial, 'natural wind must keep animating while idle or walking');
+});
+
 test('zooming at a floor tile preserves its screen anchor with the shared guide framing', t => {
   for (const metrics of [
     { width: 320, height: 568, pixelRatio: 2, safeTop: 72, safeBottom: 0 },
@@ -702,9 +730,14 @@ test('backgrounding resumes decorative phases without changing action feedback d
   h.callbacks.hide(); h.advance(60000, false); h.callbacks.show();
   assert.equal(h.game.renderer.ambientNow, homeTime, 'home scenery resumes exactly where it stopped');
   h.start(); h.draw(1200);
+  const poses = [];
+  h.game.renderer.courier = (...pose) => poses.push(pose);
   h.act('right'); h.draw(50);
-  assert.ok(h.game.renderer.ambientImpulse > 0, 'new action feedback still uses its real deadline after a long suspension');
+  assert.equal(poses.find(pose => !pose[3])[4].moving, true,
+    'new player movement still uses its real deadline after a long suspension');
   assert.equal(h.game.state.turn, 1);
+  poses.length = 0; h.draw(MOVE_MS);
+  assert.equal(poses.find(pose => !pose[3])[4].moving, false, 'arrival is not delayed by the paused scenery clock');
 });
 
 test('native music stays enabled across navigation and full animations remain enabled', () => {

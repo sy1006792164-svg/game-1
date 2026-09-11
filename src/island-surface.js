@@ -13,17 +13,16 @@ function edgePoint(a, b, fraction, drop = 0) {
 function drawStoneFace(r, a, b, depth, now, index, low) {
   const shaded = b[1] > a[1], topBand = depth * .19, foot = depth * .83;
   const baseA = [a[0], a[1] + depth], baseB = [b[0], b[1] + depth];
-  // The top stays on the projection's exact plane. Light and carved courses,
-  // rather than a raised floor, give the playing surface its thickness.
+  // Keep the playable top on its projection plane.
   polygon(r, [a, b, baseB, baseA], shaded ? '#69877f' : '#b5b79d');
   polygon(r, [a, b, edgePoint(a, b, 1, topBand), edgePoint(a, b, 0, topBand)], shaded ? '#9cae96' : '#e8dfbf');
   polygon(r, [edgePoint(a, b, 0, foot), edgePoint(a, b, 1, foot), baseB, baseA], shaded ? '#45685f' : '#8b9b82');
   r.line([edgePoint(a, b, 0, topBand), edgePoint(a, b, 1, topBand)], shaded ? '#3c605d77' : '#7d846270', 1.25);
   r.line([a, b], shaded ? '#c2d1b6' : '#fff6d8', 1.5);
+  r.line([baseA, baseB], shaded ? '#31594e66' : '#6d866966', .8);
+  r.line([edgePoint(a, b, 0, topBand + 1), baseA], shaded ? '#416c5c80' : '#eef0d385', .8);
   if (low) return;
 
-  // A narrow brass seam sits below the limestone cap; the lower courses catch
-  // reflected ground light while the joints remain recessed.
   r.line([edgePoint(a, b, .015, topBand - 1), edgePoint(a, b, .985, topBand - 1)], shaded ? '#b39c69' : '#e3c28a', .9);
   [.5, .81].forEach(fraction => {
     r.line([edgePoint(a, b, .005, depth * fraction), edgePoint(a, b, .995, depth * fraction)], shaded ? '#355c544f' : '#7c8d6f70', .9);
@@ -51,8 +50,7 @@ function drawIslandSurface(r, corners, depth, now, limitBottom = Infinity) {
   if (depth > 0) {
     const xs = corners.map(point => point[0]), ys = corners.map(point => point[1]);
     const left = Math.min(...xs), right = Math.max(...xs), front = Math.max(...ys);
-    // A short viewport may leave only a few pixels below the stone base. Fit
-    // just its soft shadow there instead of cutting a wide ellipse in half.
+    // Fit shadows beneath the base in short viewports.
     const shadowRoom = limitBottom - front - depth;
     const shadowGap = Math.min(7, Math.max(0, shadowRoom / 2));
     const shadowRadius = Math.min(10, Math.max(0, shadowRoom - shadowGap));
@@ -68,7 +66,7 @@ function drawIslandSurface(r, corners, depth, now, limitBottom = Infinity) {
     }
     corners.forEach((a, index) => {
       const b = corners[(index + 1) % corners.length];
-      // Clockwise screen-space edges face the viewer when they run right to left.
+      // Only right-to-left edges face the viewer.
       if (b[0] >= a[0]) return;
       drawStoneFace(r, a, b, depth, now, index, low);
     });

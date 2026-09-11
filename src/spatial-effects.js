@@ -9,8 +9,7 @@ function floorRing(r, x, y, radius, color, width = 1.3) {
   c.strokeStyle = color; c.lineWidth = width; c.stroke();
 }
 
-// A ground footprint and a tapering column make the height readable. These
-// are short-lived event effects, never an extra idle animation or hit target.
+// Short-lived event light; no idle motion or hit target.
 function risingLight(r, x, y, unit, progress, color) {
   if (r.effectsQuality === 'low') return;
   const c = r.ctx, height = unit * (.2 + Math.sin(progress * Math.PI) * .9);

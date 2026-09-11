@@ -2,8 +2,7 @@
 
 const { windState } = require('./ambient-effects');
 
-// The miniature uses the same two-to-one perspective as the playable courtyard.
-// These buildings are home-screen scenery, never part of a puzzle's hit geometry.
+// Home scenery uses the board's 2:1 projection.
 const PALETTE = {
   ivory: '#eee5cb', top: '#fff7df', shade: '#8fa69a', edge: '#d4cdb0',
   arch: '#54766d', archDark: '#2b514d', coral: '#c28a54', coralDark: '#775b44',
@@ -22,12 +21,12 @@ function ellipse(r, x, y, rx, ry, fill) {
 
 function point(u, v, z = 0) { return [u - v, (u + v) / 2 + 8 - z]; }
 
-function slab(r, u, v, width, length, z, height, colors = {}) {
+function slab(r, u, v, width, length, z, height, colors = {}, detail = true) {
   const top = [point(u, v, z + height), point(u + width, v, z + height), point(u + width, v + length, z + height), point(u, v + length, z + height)];
   polygon(r, [top[3], top[2], point(u + width, v + length, z), point(u, v + length, z)], colors.front || PALETTE.ivory);
   polygon(r, [top[2], top[1], point(u + width, v, z), point(u + width, v + length, z)], colors.side || PALETTE.shade);
   polygon(r, top, colors.top || PALETTE.top);
-  if (r.effectsQuality === 'low') return;
+  if (!detail || r.effectsQuality === 'low') return;
   const bevel = Math.min(1.15, height * .22, width * .15, length * .15);
   if (height > 3) {
     polygon(r, [top[3], top[2], point(u + width, v + length, z + height - bevel), point(u, v + length, z + height - bevel)], '#fff5d380');
@@ -36,13 +35,27 @@ function slab(r, u, v, width, length, z, height, colors = {}) {
   }
   r.line([top[3], top[2]], '#fffbe8b3', .85);
   r.line([top[2], top[1]], '#dce4c880', .75);
+  if (height > 2) {
+    r.line([point(u + width - .6, v + length, z + height - .35), point(u + width - .6, v + length, z + .35)], '#fffde282', .65);
+    r.line([top[2], point(u + width, v + length, z)], '#738b744d', .65);
+  }
+}
+
+function stoneCourses(r, u, v, width, length, z, height) {
+  // Keep joints on wall planes; omit at low quality.
+  for (let up = 12, row = 0; up < height - 5; up += 14, row++) {
+    r.line([point(u, v + length, z + up), point(u + width, v + length, z + up), point(u + width, v, z + up)], '#8b9b7c30', .55);
+    for (let along = row % 2 ? 9 : 21; along < width - 4; along += 25) {
+      r.line([point(u + along, v + length, z + up), point(u + along, v + length, z + Math.min(up + 14, height - 1))], '#8b9b7c24', .5);
+    }
+  }
 }
 
 function arch(r, u, v, z, width, height, face = 'front', lit = false) {
   const c = r.ctx, map = (along, up) => face === 'front' ? point(u + along, v, z + up) : point(u, v - along, z + up);
   const [x, y] = map(0, 0), radius = width / 2;
   c.save(); c.translate(x, y);
-  // Affine projection keeps the opening upright, with the lintel on its wall plane.
+  // Project the arch onto its wall plane.
   c.transform(1, face === 'front' ? .5 : -.5, 0, -1, 0, 0);
   c.beginPath(); c.moveTo(0, 0); c.lineTo(width, 0); c.lineTo(width, height - radius);
   c.arc(radius, height - radius, radius, 0, Math.PI); c.closePath();
@@ -72,6 +85,10 @@ function roof(r, u, v, width, length, z, height, detail = true) {
     [ridgeA[0] + (d[0] - ridgeA[0]) * .32, ridgeA[1] + (d[1] - ridgeA[1]) * .32]], '#d9aa6d');
   r.line([ridgeA, ridgeB], PALETTE.coralLight, 2);
   r.line([d, e], '#edc08a', 1.3);
+  if (detail) {
+    r.line([[d[0], d[1] + 1.2], [e[0], e[1] + 1.2], [b[0], b[1] + 1.2]], '#805e4b66', .8);
+    r.line([e, ridgeB], '#916d5952', .65);
+  }
   for (let i = 1; detail && i < 6; i++) {
     const t = i / 6;
     r.line([[ridgeA[0] + (ridgeB[0] - ridgeA[0]) * t, ridgeA[1] + (ridgeB[1] - ridgeA[1]) * t],
@@ -93,12 +110,15 @@ function gardenTree(r, u, v, size, now, color = '#789e7c', sharedWind) {
   ellipse(r, x + size * .13 + sway, y - size * .6, size * .12, size * .27, '#4e7864');
   if (r.effectsQuality !== 'low') {
     ellipse(r, x - size * .12 + sway, y - size * .84, size * .12, size * .15, '#d5dbaa70');
+    const c = r.ctx;
+    c.save(); c.beginPath(); c.ellipse(x + sway, y - size * .66, size * .31, size * .4, 0, -1.05, 1.25);
+    c.strokeStyle = '#537c676e'; c.lineWidth = .8; c.stroke(); c.restore();
     r.line([[x - size * .12 + sway, y - size * .94], [x - size * .19 + sway, y - size * .82]], '#eff0c280', 1.2);
   }
 }
 
-function planter(r, u, v, width, length) {
-  slab(r, u, v, width, length, 0, 4, { front: '#e2d7bb', side: '#b1bda5', top: '#a7bc90' });
+function planter(r, u, v, width, length, detail = true) {
+  slab(r, u, v, width, length, 0, 4, { front: '#e2d7bb', side: '#b1bda5', top: '#a7bc90' }, detail);
   [0, 1, 2].forEach(i => {
     const [x, y] = point(u + 3 + i * (width - 6) / 2, v + length / 2, 5);
     ellipse(r, x, y, 4, 2.5, i % 2 ? '#89ac86' : '#719979');
@@ -112,7 +132,7 @@ function drawHomeArchitecture(r, now, options = {}) {
   const quiet = options.reducedMotion || r.reducedMotion || low;
   if (quiet) now = 0;
   const wind = windState(now, quiet);
-  // A stone garden plinth, with continuous masonry courses and a thin grass cap.
+  const stone = (u, v, width, length, z, height, colors) => slab(r, u, v, width, length, z, height, colors, !low);
   ellipse(r, 20, 119, 123, 13, '#365e5229');
   if (!low) ellipse(r, 19, 118, 94, 8, '#3357461b');
   slab(r, -72, -72, 144, 144, -29, 5, { front: '#8d9a7b', side: '#45695d', top: '#adb697' });
@@ -124,16 +144,13 @@ function drawHomeArchitecture(r, now, options = {}) {
   [-40, 0, 40].forEach(v => r.line([point(72, v, -19), point(72, v, -27)], '#899f8e66', .8));
   slab(r, -59, -54, 114, 110, 0, 2, { front: '#d3d1b2', side: '#91a58b', top: '#c9ceb0' });
 
-  // Inlaid courtyard paving follows the isometric axes all the way to the arcade.
   for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) {
     const u = -24 + col * 17, v = -6 + row * 17;
     const top = (row + col) % 2 ? '#f4efd9' : '#edead3';
-    // Keep every paving color and top outline; subpixel bevels can disappear on
-    // small screens and cost two extra faces plus a stroke per tile.
+    // Low quality preserves tile colors without bevel geometry.
     if (low) polygon(r, [point(u, v, 3), point(u + 16.3, v, 3), point(u + 16.3, v + 16.3, 3), point(u, v + 16.3, 3)], top);
-    else slab(r, u, v, 16.3, 16.3, 2, 1, { front: '#dfdfc6', side: '#c9d0b7', top });
+    else stone(u, v, 16.3, 16.3, 2, 1, { front: '#dfdfc6', side: '#c9d0b7', top });
   }
-  // A shallow reflecting pool provides one quiet, cool counterpoint to the roofs.
   slab(r, -52, 11, 23, 42, 2, 3, { front: '#f2ebd2', side: '#c2ccb3', top: '#fbf4db' });
   polygon(r, [point(-49, 14, 5), point(-32, 14, 5), point(-32, 50, 5), point(-49, 50, 5)], '#4d958b');
   polygon(r, [point(-48, 15, 5), point(-35, 15, 5), point(-35, 45, 5), point(-48, 39, 5)], '#aad3c6');
@@ -143,16 +160,15 @@ function drawHomeArchitecture(r, now, options = {}) {
   }
   r.line([point(-49, 50, 5), point(-49, 14, 5), point(-32, 14, 5)], '#345f5966', 1.8);
 
-  // The light comes from the upper left; every built volume casts the same direction.
   polygon(r, [point(-53, -18), point(9, -18), point(31, -5), point(-31, -5)], '#315d4e34');
   polygon(r, [point(8, -46), point(38, -46), point(72, -27), point(72, 3), point(42, 3), point(8, -16)], '#315a4e30');
   polygon(r, [point(-53, -18), point(11, -18), point(14, -14), point(-51, -14)], '#2c52484d');
   gardenTree(r, -63, -41, 41, now, undefined, wind);
   gardenTree(r, -58, -63, 29, now, undefined, wind);
 
-  // Raised gallery with three genuine inset arches and a roof terrace.
-  slab(r, -53, -48, 64, 30, 2, 6);
-  slab(r, -51, -46, 60, 26, 8, 34);
+  stone(-53, -48, 64, 30, 2, 6);
+  stone(-51, -46, 60, 26, 8, 34);
+  if (!low) stoneCourses(r, -51, -46, 60, 26, 8, 34);
   [-47, -28, -9].forEach(u => arch(r, u, -20, 8, 12, 25));
   slab(r, -51, -46, 60, 26, 39, 3, { front: '#b1aa8b', side: '#597c6f', top: '#d7ceb0' });
   slab(r, -54, -49, 66, 32, 42, 4, { front: '#eee1be', side: '#8ba18c', top: '#fff8e5' });
@@ -162,12 +178,13 @@ function drawHomeArchitecture(r, now, options = {}) {
   [-48, -29, -10, 6].forEach(u => slab(r, u, -21, 4, 4, 46, 11));
   planter(r, -60, -11, 11, 16);
 
-  // A slender postal tower is the focal point, with a copper hipped roof and bell.
   slab(r, 5, -49, 36, 36, 2, 7);
   slab(r, 8, -46, 30, 30, 9, 38);
   slab(r, 6, -48, 34, 34, 47, 3, { front: '#eee1bf', side: '#8ca28d', top: '#fff4df' });
   slab(r, 8, -46, 30, 30, 50, 46);
   if (!low) {
+    stoneCourses(r, 8, -46, 30, 30, 9, 38);
+    stoneCourses(r, 8, -46, 30, 30, 50, 43);
     r.line([point(8, -16, 46), point(38, -16, 46), point(38, -46, 46)], '#355e4c55', 1.2);
     r.line([point(9, -16, 52), point(9, -16, 93)], '#fff6daa6', 1.6);
     r.line([point(38, -17, 52), point(38, -17, 93)], '#c3ceb3', .8);
@@ -176,8 +193,12 @@ function drawHomeArchitecture(r, now, options = {}) {
   arch(r, 17, -16, 62, 12, 22);
   arch(r, 38, -24, 60, 12, 22, 'side');
   const [bellX, bellY] = point(23, -16, 68);
+  r.ctx.save(); r.ctx.translate(bellX, bellY - 8);
+  r.ctx.rotate(quiet ? 0 : Math.sin(now / 780) * (.025 + wind.gust * .045));
+  r.ctx.translate(-bellX, 8 - bellY);
   r.line([[bellX, bellY - 8], [bellX, bellY - 2]], '#b5a373', 1.1);
   polygon(r, [[bellX - 3.5, bellY + 2], [bellX - 2.5, bellY - 3], [bellX + 1, bellY - 4], [bellX + 3.5, bellY + 5]], '#d9b374');
+  r.ctx.restore();
   slab(r, 8, -46, 30, 30, 93, 3, { front: '#b9b092', side: '#587b6d', top: '#d5d1b3' });
   slab(r, 5, -49, 36, 36, 96, 4);
   roof(r, 5, -49, 36, 36, 100, 17, !low);
@@ -188,23 +209,20 @@ function drawHomeArchitecture(r, now, options = {}) {
   const [signX, signY] = point(23, -16, 45);
   r.circle(signX, signY, 5, '#e1ba83'); r.icon('letter', signX, signY, 6, '#fff9df');
 
-  // Six individual steps connect the porch to the courtyard.
-  for (let i = 5; i >= 0; i--) slab(r, 11, -13 + i * 3, 23, 3.2, 2, 1 + (6 - i) * 1.05, { front: '#e9e4ce', side: '#bfcab0', top: '#fff5df' });
-  planter(r, 46, -22, 11, 23);
+  for (let i = 5; i >= 0; i--) stone(11, -13 + i * 3, 23, 3.2, 2, 1 + (6 - i) * 1.05, { front: '#e9e4ce', side: '#bfcab0', top: '#fff5df' });
+  planter(r, 46, -22, 11, 23, !low);
   gardenTree(r, 58, -39, 36, now, undefined, wind);
   gardenTree(r, 61, -17, 27, now, undefined, wind);
 
-  // Warm brass lamp and a low bench make the courtyard feel inhabited.
   const [lampX, lampY] = point(48, 23, 3);
   ellipse(r, lampX + 3, lampY + 1, 4.5, 1.7, '#5c7c682d');
   r.line([[lampX, lampY], [lampX, lampY - 26], [lampX - 5, lampY - 26]], '#667f67', 1.6);
   r.round(lampX - 8, lampY - 26, 6, 9, 2, '#c5a574');
   r.round(lampX - 6.5, lampY - 24.5, 3, 5, 1, '#fff1b8');
-  slab(r, 43, 42, 17, 7, 4, 3, { front: '#b5906c', side: '#8e8162', top: '#d8b58a' });
+  stone(43, 42, 17, 7, 4, 3, { front: '#b5906c', side: '#8e8162', top: '#d8b58a' });
   [[44, 43], [56, 46]].forEach(([u, v]) => { const a = point(u, v, 0), b = point(u, v, 5); r.line([a, b], '#7b8466', 1.5); });
-  planter(r, -18, 62, 23, 8);
-  planter(r, 49, 61, 13, 8);
-  // Tiny grasses and vines break the stone silhouette without obscuring architecture.
+  planter(r, -18, 62, 23, 8, !low);
+  planter(r, 49, 61, 13, 8, !low);
   [-46, 4, 45].forEach((u, i) => {
     const [x, y] = point(u, 75, -2), drop = 12 + i * 2;
     r.line([[x, y], [x - 2, y + drop], [x + 1, y + drop + 5]], '#82a281', 1.5);

@@ -13,7 +13,7 @@ const TONES = Object.freeze({
 
 function optionsFor(style) { return style && typeof style === 'object' ? style : { style }; }
 
-// Shared by the painter and modal measurement, including space for the emblems.
+// Shared painter/modal measurement includes emblems.
 function buttonLayout(r, text, width, style) {
   const options = optionsFor(style), compact = width < 120;
   const size = options.size == null ? compact ? 13 : 15 : options.size;
@@ -27,7 +27,7 @@ function buttonLayout(r, text, width, style) {
   return { options, size, weight, inset, leading, trailing, textWidth, textSpan, lines, lineHeight: CONTROL.lineHeight };
 }
 
-// A cut paper silhouette; the ticket notches remain transparent on any backdrop.
+// Ticket notches stay transparent.
 function plaque(r, x, y, w, h, cut, notch, fill, stroke) {
   const c = r.ctx, middle = y + h / 2;
   c.beginPath(); c.moveTo(x + cut, y); c.lineTo(x + w - cut, y);
@@ -51,7 +51,7 @@ function drawButton(r, text, x, y, w, h, action, style) {
   const pointer = r.pointer;
   const pressed = !disabled && pointer && !pointer.dragging &&
     pointer.x >= x && pointer.x <= x + w && pointer.y >= y && pointer.y <= y + h;
-  // The face travels inside the original target; low-motion mode keeps color feedback.
+  // Press stays inside the hit target; reduced motion uses color.
   const depth = flat ? 0 : primary ? CONTROL.depth : 3, faceH = h - depth;
   const top = y + (pressed && !flat && !r.reducedMotion ? depth - 1 : 0);
   const cut = primary ? 12 : 9, notch = primary && w >= 140;
@@ -64,7 +64,7 @@ function drawButton(r, text, x, y, w, h, action, style) {
       r.line([[x + w / 2 - 15, y + h - 8], [x + w / 2 + 15, y + h - 8]], C.gold, 2);
     }
   } else if (textOnly) {
-    if (pressed) r.round(x + 2, y + 5, w - 4, h - 10, 8, C.soft);
+    if (pressed) r.round(x + 2, y + 5, w - 4, h - 10, 8, C.soft, C.line);
   } else {
     if (!pressed && !disabled && r.effectsQuality !== 'low')
       plaque(r, x + 3, y + depth + 3, w - 6, faceH, cut, false, '#143d341a');

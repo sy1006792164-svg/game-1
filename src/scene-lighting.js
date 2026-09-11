@@ -1,7 +1,6 @@
 'use strict';
 
-// Light stays in board space: camera drawing and the existing inverse picker
-// share the same floor, even while a tile is pressed or an actor is airborne.
+// Lighting and picking share the board plane.
 function polygon(r, points, fill) {
   const c = r.ctx;
   c.beginPath();

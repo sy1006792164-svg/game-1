@@ -61,7 +61,7 @@ class Renderer {
   text(text, x, y, size, color, align, weight) {
     const c = this.ctx, value = String(text);
     this.font(size, weight); c.fillStyle = color || C.ink; c.textAlign = align || 'left'; c.textBaseline = 'middle';
-    // Vector arrows avoid iOS emoji rendering while retaining text alignment.
+    // Vector arrows avoid iOS emoji substitution.
     if (!/[→←↑↓↗↘↙↖✓]/.test(value)) { c.fillText(value, x, y); return; }
     const parts = value.split(/([→←↑↓↗↘↙↖✓])/).filter(Boolean);
     const widths = parts.map(part => SYMBOLS[part] ? size : c.measureText(part).width);
@@ -107,7 +107,7 @@ class Renderer {
     return lines.length;
   }
   wrapLines(text, width, size, weight) {
-    // Set the font even on cache hits.
+    // Set the font on cache hits too.
     this.font(size, weight);
     const key = this.ctx.font + '|' + width + '|' + text;
     const cache = this.wrapCache || (this.wrapCache = new Map());
@@ -199,7 +199,7 @@ class Renderer {
     const available = metrics.height - safeTop - safeBottom;
     this.scale = Math.min(metrics.width / 390, available / 700);
     this.H = available / this.scale; this.ox = (metrics.width - 390 * this.scale) / 2; this.oy = safeTop;
-    // Content respects safe areas; scenery spans the canvas.
+    // Safe-area UI; full-canvas scenery.
     this.viewport = { x: -this.ox / this.scale, y: -safeTop / this.scale,
       w: metrics.width / this.scale, h: metrics.height / this.scale };
     c.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -209,7 +209,6 @@ class Renderer {
     this.reducedMotion = typeof game.reducedMotion === 'function' ? game.reducedMotion() :
       !!(game.platform && game.platform.reducedMotion);
     this.effectsQuality = game.platform && game.platform.effectsQuality === 'low' ? 'low' : 'high';
-    this.ambientImpulse = 0;
     if (!game.modal) this.ambientFreezeAt = null;
     else if (!Number.isFinite(this.ambientFreezeAt)) this.ambientFreezeAt = now;
     const backgroundNow = this.ambientClock.sample(now,
@@ -231,8 +230,7 @@ class Renderer {
         scrollOffset: game.page === 'levels' && game.levelScroll ? game.levelScroll.offset : 0
       });
     }
-    // Gameplay keeps real time for short-lived movement and camera feedback;
-    // its decorative layers read ambientNow and remain frozen behind a modal.
+    // Real-time movement; ambientNow freezes scenery behind modals.
     const pageNow = game.modal && game.page !== 'game' ? this.ambientFreezeAt : now;
     this.pageNow = pageNow;
     if (game.page === 'startup') drawStartup(this, game, pageNow);
@@ -252,7 +250,7 @@ class Renderer {
       const result = game.page === 'game' && game.state &&
         ((kind === 'win' && game.state.status === 'won') || (kind === 'fail' && game.state.status === 'failed')) &&
         Number.isFinite(game.transitionAt) && (game.moveEvents || []).some(event => event && event.type === kind);
-      // Reviewing a result must not restart its effects.
+      // Reviews never restart effects.
       const resultAge = result && !this.reducedMotion ? now - game.transitionAt - RESULT_DELAY_MS : null;
       if (game.modal.kind === 'developer-level') {
         if (game.development) modalBounds = drawDeveloperPicker(this, game);

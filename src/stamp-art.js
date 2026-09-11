@@ -5,7 +5,7 @@ const { materialGradient } = require('./ui-surface');
 
 const INKS = ['#376f5d', '#a87440', '#3b7b88', '#65754a'];
 
-// The notches belong to the paper silhouette, leaving the background visible.
+// Transparent notches shape the paper.
 function stampOutline(c, x, y, w, h) {
   const notch = 1.65, inset = 10, spacing = 11;
   c.beginPath(); c.moveTo(x + 3, y);
@@ -27,7 +27,7 @@ function stampOutline(c, x, y, w, h) {
   c.lineTo(x, y + 3); c.quadraticCurveTo(x, y, x + 3, y); c.closePath();
 }
 
-// One paper face for both the album grid and its enlarged detail.
+// Shared album/detail painter.
 function drawStampArt(r, stamp, rect, { next = false, held = false } = {}) {
   const c = r.ctx, w = 106, h = 144, middle = w / 2, owned = stamp.owned;
   const ink = owned ? INKS[stamp.index % INKS.length] : next ? C.gold : '#7e9681';
@@ -45,10 +45,19 @@ function drawStampArt(r, stamp, rect, { next = false, held = false } = {}) {
   }
   r.round(6, 6, w - 12, h - 12, 2, null, owned ? '#d9dfc6' : next ? '#e2c796' : '#c9d7c6');
   r.text(String(stamp.index + 1).padStart(2, '0'), 13, 17, 9, C.muted);
-  if (next) r.round(w - 56, 9, 45, 17, 5, '#f5dfb5');
-  r.text(owned ? '已收藏' : next ? '下一枚' : '待收藏', w - 14, 17, 9, next ? C.goldText : C.muted, 'right');
+  if (next) {
+    const label = '下一枚', padding = 5;
+    r.font(9);
+    const badgeWidth = c.measureText(label).width + padding * 2, badgeX = w - 11 - badgeWidth;
+    r.round(badgeX, 9, badgeWidth, 17, 5, '#f5dfb5');
+    r.text(label, badgeX + badgeWidth / 2, 17.5, 9, C.goldText, 'center');
+  } else r.text(owned ? '已收藏' : '待收藏', w - 14, 17, 9, C.muted, 'right');
   r.circle(middle, 65, 28, owned ? '#839373' : next ? '#c3a16a' : '#b0bfa8');
   r.circle(middle, 62, 28, owned ? '#eff1df' : next ? '#f9e6bd' : '#d9e5d5', owned ? '#c3d0b1' : next ? '#d7b777' : '#b6cbb6');
+  c.beginPath(); c.arc(middle, 62, 27, Math.PI * .88, Math.PI * 1.78);
+  c.strokeStyle = '#fffdf1e0'; c.lineWidth = .95; c.stroke();
+  c.beginPath(); c.arc(middle, 62, 27, -Math.PI * .08, Math.PI * .7);
+  c.strokeStyle = owned ? '#9bad898c' : next ? '#b38d488c' : '#8da88b8c'; c.lineWidth = .8; c.stroke();
   r.circle(middle, 62, 23, null, owned ? '#fffdf4' : next ? '#fff2d8' : '#ecf1e7');
   if (owned || next) r.icon(stamp.icon, middle + .5, 64.2, 39, owned ? '#a8b68d' : '#cfb174');
   r.icon(stamp.icon, middle, 63, 39, ink);

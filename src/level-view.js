@@ -44,7 +44,16 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   r.text(String(level.id).padStart(3, '0'), x + 17, y + 26, 22, unlocked ? C.green : '#74897a', 'left', '600');
   if (inProgress) r.text('进行中', x + 77, y + 26, 10, C.goldText);
   else if (next && !record) r.text('待送达', x + 77, y + 26, 10, C.goldText);
-  r.actionIcon(unlocked ? record ? 'check' : 'letter' : 'lock', x + 136, y + 25, unlocked ? C.gold : '#74897a');
+  const idle = unlocked && !record && highlighted && !held && !scroll.touching &&
+    Math.abs(scroll.velocity) < 4 && scroll.wheelTarget === null && progress === 1 &&
+    now - scroll.enteredAt > 800 && now - scroll.activeAt > 800 && !r.reducedMotion && r.effectsQuality !== 'low';
+  const time = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
+  const phase = (time + index * 719) % 6200 / 820;
+  const lift = idle && phase < 1 ? Math.sin(phase * Math.PI) ** 2 : 0;
+  c.save(); c.translate(x + 136, y + 25 - lift * 2);
+  c.rotate(lift * Math.sin(phase * Math.PI * 2) * .12);
+  r.actionIcon(unlocked ? record ? 'check' : 'letter' : 'lock', 0, 0, unlocked ? C.gold : '#74897a');
+  c.restore();
   r.label(level.title, x + 17, y + 53, 132, 14, unlocked ? C.ink : C.muted, 'left', '500');
   r.label('三星 ' + level.par + ' 拍内 · 不续灯', x + 17, y + 72, 132, 10, C.muted);
   if (record) {

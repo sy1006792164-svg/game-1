@@ -2,7 +2,7 @@
 
 const { C } = require('./theme');
 
-// Tiny static gradients provide material lighting without blur or offscreen layers.
+// Static material lighting.
 function materialGradient(r, x, y, w, h, stops) {
   const gradient = r.ctx.createLinearGradient(x, y, x + w * .2, y + h);
   if (!gradient || typeof gradient.addColorStop !== 'function') return stops[0][1];

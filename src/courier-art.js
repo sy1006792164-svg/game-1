@@ -30,7 +30,7 @@ function drawCape(r, shadeSide, low) {
   c.quadraticCurveTo(-1, 19, 14, 10); c.quadraticCurveTo(12, 0, 7, -5); c.closePath();
   c.fillStyle = '#dca567'; c.fill();
   c.save(); c.clip();
-  // Mirror only the shading with the pose so the light stays at screen-left.
+  // Mirror shading so light stays screen-left.
   c.save(); c.scale(shadeSide, 1);
   c.beginPath(); c.moveTo(1, -6); c.quadraticCurveTo(7, 3, 6, 17);
   c.lineTo(17, 17); c.lineTo(17, -6); c.closePath(); c.fillStyle = '#996347'; c.fill();
@@ -38,19 +38,27 @@ function drawCape(r, shadeSide, low) {
     c.beginPath(); c.moveTo(-8, -3); c.quadraticCurveTo(-12, 3, -11, 9);
     c.quadraticCurveTo(-6, 12, -3, 12); c.quadraticCurveTo(-6, 3, -4, -4); c.closePath();
     c.fillStyle = '#f5cc88'; c.fill();
+    c.beginPath(); c.moveTo(-7, -4); c.quadraticCurveTo(-11, 0, -13, 8);
+    c.strokeStyle = '#f9cd98b3'; c.lineWidth = .85; c.stroke();
+    c.beginPath(); c.moveTo(4, -2); c.quadraticCurveTo(8, 5, 9, 12);
+    c.strokeStyle = '#985f4880'; c.lineWidth = .7; c.stroke();
   }
   c.restore(); c.restore();
+  if (!low) {
+    c.beginPath(); c.moveTo(-14, 10.5); c.quadraticCurveTo(-1, 18, 13, 10.5);
+    c.strokeStyle = '#995f4966'; c.lineWidth = .8; c.stroke();
+  }
   r.line([[-11, 10], [-2, 13], [6, 12]], '#f5d194', 1);
   r.round(-5, -3, 12, 4, 2, '#677a53');
 }
 
 function drawHead(r, shadeSide, low) {
+  const c = r.ctx;
   r.round(-8, -22, 18, 21, 9, '#c58e63');
   r.round(-8 + (shadeSide === 1 ? 0 : 3), -22, 15, 18, 7.5, '#ffdda7');
   oval(r, -5, -11, 2.5, 1.1, '#eaae84');
   r.circle(-2, -12, 1.1, '#344b42'); r.circle(5, -12, 1.1, '#344b42');
   r.line([[0, -6], [3, -6]], '#a87552', .7);
-  // A dark underside, curved front and exposed top make the cap a small solid.
   oval(r, 0, -20.7, 16, 4.4, '#244d43');
   oval(r, 0, -22.5, 16, 4.4, '#6e9371');
   r.round(-10, -32, 21, 10, 5, '#3b6c59');
@@ -62,6 +70,8 @@ function drawHead(r, shadeSide, low) {
     oval(r, -shadeSide * 4, -33, 4, 1, '#e3e6b85c');
     r.circle(5.5, -28, .8, '#fff0bd');
     r.line([[-13, -23], [-6, -24]], '#c8d3a7', .8);
+    c.beginPath(); c.ellipse(0, -21.5, 15, 3.5, 0, .15, Math.PI - .15);
+    c.strokeStyle = '#244f467a'; c.lineWidth = .75; c.stroke();
   }
 }
 
@@ -72,7 +82,13 @@ function drawSatchel(r, stride, low) {
   r.round(5, 3, 10.5, 11, 2.5, '#a6784d');
   r.round(5, 3, 12, 4, 2, '#d0a46b');
   r.circle(10.5, 8, 1.2, '#f1d49a');
-  if (!low) r.line([[6.5, 9], [6.5, 12], [13.5, 12]], '#d6ae7666', .7);
+  if (!low) {
+    const c = r.ctx;
+    r.line([[6.5, 9], [6.5, 12], [13.5, 12]], '#d6ae7666', .7);
+    c.beginPath(); c.moveTo(6, 6.5); c.quadraticCurveTo(11, 8, 16, 6.5);
+    c.strokeStyle = '#6f503b99'; c.lineWidth = .7; c.stroke();
+    r.line([[7, 4.2], [13.5, 4.2]], '#e8be898f', .65);
+  }
   r.line([[10, 0], [15, -3 - stride * 2]], '#e3ad78', 4);
   const mailY = -9.5 - stride * 2;
   r.round(13, mailY + 1.3, 10, 7, 1.2, '#9c7950');
@@ -80,7 +96,7 @@ function drawSatchel(r, stride, low) {
   r.line([[13.4, mailY + 1], [17.5, mailY + 3.7], [21.6, mailY + 1]], '#bfa775', .8);
 }
 
-// Grounded actors use scene.js's floor shadow, which never rises with their pose.
+// Grounded actors use the fixed floor shadow in scene.js.
 function drawCourier(r, x, y, size, ghost, pose = {}) {
   const c = r.ctx, stride = r.reducedMotion ? 0 : pose.stride || 0;
   const facing = pose.facing === -1 ? -1 : 1, low = r.effectsQuality === 'low';

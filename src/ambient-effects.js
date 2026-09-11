@@ -6,9 +6,6 @@ const { drawPageAtmosphere } = require('./page-atmosphere');
 const TAU = Math.PI * 2;
 const TARGET_PAGES = new Set(['startup', 'publication', 'home', 'levels', 'game', 'collection', 'leaderboard']);
 
-// One treatment table keeps scene contrast and motion density intentional per page.
-// Near effects are drawn after the paper wash, so they remain legible without
-// increasing the opacity of every distant layer.
 const TREATMENTS = Object.freeze({
   startup: Object.freeze({ wash: .1, depth: 1, near: .92, mist: 1, ribbons: 1, pieces: 6, motes: 5 }),
   home: Object.freeze({ wash: .02, depth: 1, near: 1, mist: .9, ribbons: 1.08, pieces: 8, motes: 6 }),
@@ -28,9 +25,7 @@ function fract(value) { return value - Math.floor(value); }
 function seed(index, salt) { return fract(Math.sin((index + 1) * 91.73 + salt * 47.11) * 43758.5453); }
 function smoothstep(value) { const t = Math.max(0, Math.min(1, value)); return t * t * (3 - 2 * t); }
 
-// Every carrier reads the same quiet-rise-peak-fall envelope. The offset puts a
-// complete gust inside the short startup window instead of making it wait for a
-// long ambient loop.
+// Shared gust envelope; offset includes a gust during startup.
 function windState(now, reducedMotion = false) {
   if (reducedMotion) return { strength: .16, gust: 0 };
   const phase = fract((now + 560) / 7600);
@@ -48,8 +43,7 @@ function drawMist(r, time, rect, amount, mood, low = false) {
     const direction = i === 1 ? 1 - phase : phase;
     const x = rect.x - rect.w * .38 + direction * rect.w * 1.76;
     const y = rect.y + rect.h * (.28 + i * .23) + Math.sin(time / 3600 + i * 2.1) * 4;
-    // These wide ellipses still touch the viewport when their carrier wraps.
-    // Fade both ends of the loop to keep the fog from jumping between edges.
+    // Fade wraps while fog still touches the viewport.
     const fade = smoothstep(Math.min(phase, 1 - phase) / .12);
     c.globalAlpha = alpha * amount * fade * (.075 + i * .018);
     c.fillStyle = i === 1 ? mood.fogNear : mood.fogFar;
@@ -77,7 +71,7 @@ function drawMotes(r, time, rect, count, amount, mood) {
   }
 }
 
-// Distant atmosphere stays behind the page wash and establishes depth.
+// Draw distant effects before the page wash.
 function drawDistantAtmosphere(r, now, rect, options = {}) {
   const treatment = options.treatment || atmosphereTreatment(options.page);
   const mood = options.mood || chapterMood(options.chapter || 0);
@@ -229,9 +223,7 @@ function drawGameplayParticles(r, time, rect, amount, scale, mood) {
   }
 }
 
-// Large rounded light and shadow masses establish motion at a glance. Every
-// carrier follows a small closed orbit, so the decorative layer cannot be read
-// as the directional instruction emitted by a real wind tile.
+// Closed orbits avoid implying a wind-tile direction.
 function drawGameplayAir(r, time, rect, amount, mood, quality) {
   const scale = gameplayScale(r);
   drawGameplayClouds(r, time, rect, amount, mood);
@@ -274,8 +266,20 @@ function drawLeaf(r, x, y, size, angle, color) {
   c.quadraticCurveTo(-size * .38, -size * .9, size, -size * .18);
   c.quadraticCurveTo(size * .28, size * .82, -size, size * .18);
   c.closePath(); c.fillStyle = color; c.fill();
-  c.beginPath(); c.moveTo(-size * .72, size * .2); c.lineTo(size * .68, -size * .13);
-  c.strokeStyle = '#fff8df99'; c.lineWidth = .7; c.stroke(); c.restore();
+  c.strokeStyle = '#435b4b50'; c.lineWidth = .65; c.stroke();
+  c.beginPath(); c.moveTo(-size, size * .18);
+  c.quadraticCurveTo(-size * .38, -size * .9, size, -size * .18);
+  c.closePath(); c.fillStyle = '#fff8df30'; c.fill();
+  c.beginPath(); c.moveTo(-size, size * .18);
+  c.lineTo(size, -size * .18);
+  c.quadraticCurveTo(size * .28, size * .82, -size, size * .18);
+  c.closePath(); c.fillStyle = '#314a411c'; c.fill();
+  c.beginPath(); c.moveTo(-size * .82, size * .15); c.lineTo(size * .8, -size * .14);
+  if (size >= 6) {
+    c.moveTo(-size * .28, size * .05); c.lineTo(-size * .36, -size * .32);
+    c.moveTo(size * .19, -size * .03); c.lineTo(size * .44, size * .21);
+  }
+  c.strokeStyle = '#fff8df99'; c.lineWidth = .6; c.lineCap = 'round'; c.stroke(); c.restore();
 }
 
 function drawPaper(r, x, y, size, angle, color) {
@@ -283,6 +287,8 @@ function drawPaper(r, x, y, size, angle, color) {
   c.beginPath(); c.moveTo(-size, -size * .58); c.lineTo(size, -size * .4);
   c.lineTo(size * .84, size * .58); c.lineTo(-size * .94, size * .42); c.closePath();
   c.fillStyle = color; c.fill(); c.strokeStyle = '#9d765563'; c.lineWidth = .65; c.stroke();
+  c.beginPath(); c.moveTo(-size * .94, size * .42); c.lineTo(0, size * .08);
+  c.lineTo(size * .84, size * .58); c.closePath(); c.fillStyle = '#9d76552b'; c.fill();
   c.beginPath(); c.moveTo(-size * .84, -size * .43); c.lineTo(0, size * .08); c.lineTo(size * .84, -size * .29);
   c.strokeStyle = '#fffdf0b8'; c.stroke(); c.restore();
 }
@@ -305,8 +311,7 @@ function drawWindbornePieces(r, time, rect, count, amount, mood) {
   }
 }
 
-// Near atmosphere is intentionally rendered after the page wash but before UI.
-// It never creates hit regions and solid cards naturally occlude it.
+// Near effects follow the wash, precede UI, and own no hit targets.
 function drawAmbientOverlay(r, now, page, rect, options = {}) {
   if (!TARGET_PAGES.has(page)) return;
   const treatment = options.treatment || atmosphereTreatment(page);
@@ -316,20 +321,17 @@ function drawAmbientOverlay(r, now, page, rect, options = {}) {
   const c = r.ctx, time = options.reducedMotion || quality === 'low' ? 2400 : now;
   c.save(); c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip();
   if (page === 'game') {
-    const impulse = Math.max(0, Math.min(1, Number(options.impulse) || 0));
-    drawGameplayAir(r, time, rect, treatment.near * (1 + impulse * .2), mood, quality);
+    drawGameplayAir(r, time, rect, treatment.near, mood, quality);
     c.restore();
     return;
   }
   drawPageAtmosphere(r, time, page, rect, { ...options, mood, quality, amount: treatment.near });
-  // Reading-heavy pages use their own sparse motif instead of generic motion.
   if (page !== 'publication' && page !== 'collection' && page !== 'leaderboard') {
     drawLightShafts(r, time, rect, treatment.near, mood);
     if (quality !== 'low' && treatment.ribbons) drawWindRibbons(r, time, rect, treatment.near * treatment.ribbons, mood);
     if (quality !== 'low' && treatment.pieces) drawWindbornePieces(r, time, rect, treatment.pieces, treatment.near, mood);
   }
-  // Gameplay keeps an undirected atmosphere so decorative wind cannot be read
-  // as a hint for the direction of a wind tile.
+  // Gameplay ambience is undirected.
   c.restore();
 }
 

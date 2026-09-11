@@ -11,15 +11,13 @@ const { drawObjectives } = require('./game-objectives');
 const { drawCollectionFlights } = require('./collection-flight');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
 
-// One- and two-line play hints share one slot, avoiding small board jumps as
-// the contextual copy changes between turns.
+// Fixed hint space prevents board jumps.
 const PLAY_HINT_HEIGHT = 50;
 
 function controlLayout(r, game) {
   const ready = !game.state.letters.length && !game.state.seals.length;
   const guide = game.guideStep();
-  // Renderer.H already excludes the device safe area. Reclaim the old 40px
-  // bottom spacer for readable guidance while retaining an 8px touch inset.
+  // H excludes safe areas; retain an 8px bottom inset.
   const hintLines = r.wrapLines(game.playHint(), ready ? 278 : 310, 12), buttonY = r.H - CONTROL.height - 8;
   const hintHeight = guide ? guideCardLayout(r, guide).height : Math.max(PLAY_HINT_HEIGHT, hintLines.length * 18 + 14);
   return { buttonY, hintY: buttonY - hintHeight - 8, hintHeight, hintLines, ready, guide };
@@ -66,9 +64,7 @@ function drawControls(r, game, layout, now, feedback) {
 
 function gameBoardRect(r, layout) {
   const top = 148, gap = 4;
-  // The old fixed band always reserved a full lesson card, even when the much
-  // shorter play hint was visible. Reclaim that space for centering, while
-  // adding the same amount to the projection padding so tile size stays fixed.
+  // Reclaimed height shifts centering, not tile scale.
   const reclaimed = Math.max(0, GUIDE_HEIGHT - layout.hintHeight);
   return { x: r.viewport.x, y: top, w: r.viewport.w,
     h: layout.hintY - top - gap, paddingY: 62 + reclaimed, centerOffsetY: 2 };
@@ -78,11 +74,6 @@ function drawGame(r, game, now) {
   const layout = controlLayout(r, game), boardRect = gameBoardRect(r, layout);
   const feedback = gameFeedback(r, game, now);
   const atmosphereNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
-  const feedbackNow = game.modal && Number.isFinite(r.ambientFreezeAt) ? r.ambientFreezeAt : now;
-  const actionAge = feedbackNow - game.transitionAt;
-  const ambientImpulse = !r.reducedMotion && r.effectsQuality !== 'low' && game.previousState && actionAge >= 0 && actionAge < 720
-    ? Math.sin(actionAge / 720 * Math.PI) : 0;
-  r.ambientImpulse = ambientImpulse;
   const showGuideEntry = !layout.guide && game.canShowGuide() && game.state.status === 'playing' && !game.reviewing;
   r.label(game.level.title, 24, 32, showGuideEntry ? 138 : 254, 24, C.ink, 'left', '600');
   if (game.reviewing) r.text('路线回顾', 24, 60, 11, C.muted);
@@ -95,11 +86,10 @@ function drawGame(r, game, now) {
     style: 'quiet', icon: game.reviewing ? 'route' : 'pause', disabled: !!game.modal || game.busy || (!game.reviewing && game.state.status !== 'playing')
   });
   drawObjectives(r, game, now, feedback);
-  // Gameplay ambience is clipped to the dynamic board band and painted beneath
-  // the island, keeping the HUD and controls still while the scenery breathes.
+  // Board-clipped ambience stays below the island.
   drawAmbientOverlay(r, atmosphereNow, 'game', boardRect, {
     reducedMotion: r.reducedMotion, quality: r.effectsQuality, mood: r.atmosphereMood,
-    treatment: atmosphereTreatment('game'), impulse: ambientImpulse
+    treatment: atmosphereTreatment('game')
   });
   drawBoard(r, game, now, boardRect, game.modal ? null : layout.guide);
   drawCollectionFlights(r, game, now);
