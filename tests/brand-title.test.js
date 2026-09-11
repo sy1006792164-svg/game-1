@@ -93,7 +93,7 @@ test('both real page views draw the four outlined title characters at their exis
   const { drawStartup } = loadView('startup-view.js');
   const game = {
     savedRun: () => null, completion: () => 0, nextLevel: () => CAMPAIGN[0],
-    gameCircle: { available: false }, startup: { progress: .5 },
+    startup: { progress: .5 },
   };
   for (const height of [680, 844, 1000]) {
     for (const [draw, size, spacing, y] of [

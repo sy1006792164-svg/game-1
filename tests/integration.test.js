@@ -2243,37 +2243,24 @@ test('the fresh home separates its settings shortcut from the three primary link
   h.destroy();
 });
 
-test('home renders and opens the game circle only in WeChat develop and trial versions', async () => {
+test('home keeps five accessible actions across browser and WeChat versions', () => {
   for (const kind of ['wechat', 'browser']) {
     for (const envVersion of ['develop', 'trial', 'release', undefined]) {
-      const shown = [];
       const h = harness({ kind, wx: {
-        getAccountInfoSync: () => ({ miniProgram: { envVersion } }),
-        createPageManager: () => ({ show: options => { shown.push(options); return Promise.resolve(); } })
+        getAccountInfoSync: () => ({ miniProgram: { envVersion } })
       } });
       try {
         h.draw();
-        const available = kind === 'wechat' && ['develop', 'trial'].includes(envVersion);
         const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
-        assert.equal(texts.includes('圈子'), available, kind + '/' + envVersion);
+        assert.equal(texts.includes('圈子'), false, kind + '/' + envVersion);
         const hits = h.game.renderer.hits;
-        assert.equal(hits.length, available ? 6 : 5, 'hidden circles have no hit target');
+        assert.equal(hits.length, 5, 'delivery, three primary links and settings are available');
         const bottomY = Math.max(...hits.map(hit => hit.y));
         const links = hits.filter(hit => hit.y === bottomY);
-        assert.equal(links.length, available ? 4 : 3, 'bottom navigation contains only primary destinations');
+        assert.equal(links.length, 3, 'bottom navigation contains only primary destinations');
         assert.equal(links[0].x + links.at(-1).x + links.at(-1).w, 390, 'navigation stays centered');
         assert.ok(hits.every(hit => hit.x >= 0 && hit.x + hit.w <= 390 && hit.w >= 44 && hit.h >= 44),
           'all home actions remain visible and touch accessible');
-        if (available) {
-          await links.at(-1).action();
-          assert.equal(shown.length, 1);
-        } else {
-          h.soundCalls.length = 0;
-          await h.game.openGameCircle();
-          await h.game.gameCircle.open();
-          assert.deepEqual(shown, []);
-          assert.deepEqual(h.soundCalls, [], 'disabled entry points have no tap sound');
-        }
       } finally { h.destroy(); }
     }
   }

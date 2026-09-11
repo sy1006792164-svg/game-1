@@ -2,7 +2,6 @@
 const { createPlatform } = require('./platform');
 const { createStore } = require('./storage');
 const { createAds } = require('./ads');
-const { createGameCircle } = require('./game-circle');
 const { createFriendLeaderboard } = require('./friend-leaderboard');
 const { createRankingAuthorization } = require('./ranking-authorization');
 const { createSystemMessageSubscription, SYSTEM_MESSAGE_TYPES } = require('./system-message-subscription');
@@ -42,7 +41,6 @@ class Game {
     Object.defineProperty(this, 'development', { value: platform.isDevelopment === true });
     this.store = createStore(platform.storage, { development: this.development });
     this.sound = createSound(platform);
-    this.gameCircle = createGameCircle(platform, config.GAME_CIRCLE_OPENLINK, message => this.toast(message));
     this.rankMessageSubscription = createSystemMessageSubscription(platform, [SYSTEM_MESSAGE_TYPES.RANK]);
     this.friendResumeRevision = 0;
     const rankingAllowed = () => !this.hidden && !!this.rankingAuthorization && this.rankingAuthorization.getState().enabled;
@@ -539,11 +537,6 @@ class Game {
       buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
   }
   home() { if (this.busy || this.startupActive()) return; this.cancelRankingPointer(); this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
-  openGameCircle() {
-    if (!this.gameCircle.available || this.page !== 'home' || this.busy || this.hidden || this.modal) return;
-    this.cue('tap');
-    return this.gameCircle.open();
-  }
   openPage(page) {
     if (this.busy || this.startupActive() || !['home', 'levels', 'collection', 'leaderboard', 'settings'].includes(page)) return;
     this.cancelRankingPointer();

@@ -37,16 +37,12 @@ function drawLinks(r, game, y) {
     { title: '邮票', icon: 'stamp', action: () => game.openPage('collection') },
     { title: '排行', icon: 'ranking', action: () => game.openPage('leaderboard') }
   ];
-  if (game.gameCircle.available) links.push({ title: '圈子', icon: 'community', action: () => game.openGameCircle() });
-  const dense = links.length > 4;
-  let width = 82, gap = 6;
-  if (links.length === 3) { width = 104; gap = 8; }
-  else if (dense) { width = 66; gap = 5; }
+  const width = 104, gap = 8;
   const startX = (390 - (links.length * width + (links.length - 1) * gap)) / 2;
   links.forEach((item, index) => {
     const x = startX + index * (width + gap);
     r.button(item.title, x, y, width, CONTROL.compactHeight, item.action,
-      { style: 'quiet', icon: dense ? null : item.icon, size: dense ? 12 : 13 });
+      { style: 'quiet', icon: item.icon, size: 13 });
   });
 }
 
