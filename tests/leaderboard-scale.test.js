@@ -111,7 +111,8 @@ function assertFullSize(frame, width = 354) {
   assert.deepEqual(name, { value: '本人', x: 85, y: 147, size: 15 }, 'cached text keeps its rendered position and font size');
 }
 
-for (const pixelRatio of [1, 1.5, 2]) {
+// Includes native high-DPI phones and a desktop page enlarged beyond 2x.
+for (const pixelRatio of [1, 1.5, 2, 3, 4]) {
   test(`cached leaderboard remains full size through asynchronous re-entry at DPR ${pixelRatio}`, async t => {
     const h = harness(t, pixelRatio);
     await h.seed(); assertFullSize(h.draw());
@@ -163,4 +164,21 @@ test('a pending friend permission callback never shrinks repeated cached frames'
   assert.deepEqual(h.counts(), before);
   h.requests.authorization[1].success(); await opening; h.deliver();
   assertFullSize(h.draw()); h.resolve(1); assertFullSize(h.draw());
+});
+
+test('ranking follows main-canvas dimensions and resolution without an independent budget', async t => {
+  const h = harness(t, 3);
+  await h.seed();
+  const before = h.counts();
+  for (const dimensions of [
+    { width: 354, height: 2400, pixelRatio: 2 },
+    { width: 354, height: 470, pixelRatio: 8 },
+    { width: 354, height: 470, pixelRatio: .5 },
+  ]) {
+    h.board.resize(dimensions); h.deliver();
+    assert.equal(h.canvas.width, dimensions.width * dimensions.pixelRatio);
+    assert.equal(h.canvas.height, dimensions.height * dimensions.pixelRatio);
+    assertFullSize(h.draw(dimensions.width, dimensions.height));
+  }
+  assert.deepEqual(h.counts(), before, 'main-canvas sizing does not trigger friend reads or score writes');
 });

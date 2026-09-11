@@ -2,6 +2,8 @@
 
 const { createMultiTouchGuard } = require('./multi-touch');
 const { isDevelopmentEnvironment } = require('./runtime-environment');
+const { getWindowInfo, getDeviceInfo, getSafeInsets, isDesktop } = require('./wechat-viewport');
+const { getCanvasPixelRatio, resizeCanvas } = require('./canvas-resolution');
 
 // A small platform boundary; game rules never depend on wx or the DOM.
 function defaultEnvironment() {
@@ -22,13 +24,13 @@ function positive(value, fallback) {
 function createPlatform(environment) {
   const env = environment || defaultEnvironment();
   const api = env.wx && typeof env.wx.createCanvas === 'function' ? env.wx : null;
+  const device = api ? getDeviceInfo(api) : null;
   const win = env.window;
   const doc = env.document;
   const canvas = api ? api.createCanvas() : doc && doc.getElementById('game');
   if (api && typeof GameGlobal !== 'undefined') GameGlobal.canvas = canvas;
   if (!canvas) throw new Error('Game canvas is unavailable.');
   let dimensions = { width: 390, height: 844, pixelRatio: 1, safeTop: 0, safeBottom: 0 };
-  let lowMemory = false;
   let reducedMotionQuery = null;
   if (!api && win && typeof win.matchMedia === 'function') {
     try { reducedMotionQuery = win.matchMedia('(prefers-reduced-motion: reduce)'); } catch (_) { /* Optional browser preference. */ }
@@ -47,33 +49,16 @@ function createPlatform(environment) {
   // Lists opt into 60 FPS; the turn-based scenes keep their lower native frame rate.
   setFrameRate(30);
 
-  function resize() {
+  function resize(event) {
     let width, height, pixelRatio, safeTop = 0, safeBottom = 0;
     if (api) {
-      let info = {};
-      try {
-        info = typeof api.getWindowInfo === 'function' ? api.getWindowInfo() : api.getSystemInfoSync();
-      } catch (_) {
-        try { info = api.getSystemInfoSync(); } catch (_) { /* Keep a usable default. */ }
-      }
-      width = positive(info.windowWidth, 390);
-      height = positive(info.windowHeight, 844);
+      const info = getWindowInfo(api);
+      // Mini Game resize events carry windowWidth/windowHeight at the top level.
+      // Use them immediately even if the synchronous window snapshot is older.
+      width = positive(event && event.windowWidth, positive(info.windowWidth, 390));
+      height = positive(event && event.windowHeight, positive(info.windowHeight, 844));
       pixelRatio = positive(info.pixelRatio, 1);
-      safeTop = Math.max(0, Number(info.statusBarHeight) || 0, Number(info.safeArea && info.safeArea.top) || 0);
-      if (info.safeArea && Number.isFinite(info.safeArea.bottom)) {
-        safeBottom = Math.max(0, height - info.safeArea.bottom);
-      }
-      let hasCapsuleBounds = false;
-      try {
-        const capsule = api.getMenuButtonBoundingClientRect && api.getMenuButtonBoundingClientRect();
-        if (capsule && Number.isFinite(capsule.bottom) && capsule.bottom > 0) {
-          safeTop = Math.max(safeTop, capsule.bottom + 8);
-          hasCapsuleBounds = true;
-        }
-      } catch (_) { /* Some older runtimes have no capsule geometry. */ }
-      // Mini Game runtimes may omit the Mini Program capsule geometry API.
-      // Reserve its navigation row below the status bar in that case.
-      if (!hasCapsuleBounds) safeTop += 44 + 8;
+      ({ safeTop, safeBottom } = getSafeInsets(api, info, device, height));
     } else {
       const rect = canvas.getBoundingClientRect();
       width = positive(rect.width, positive(win && win.innerWidth, 390));
@@ -81,22 +66,13 @@ function createPlatform(environment) {
       pixelRatio = positive(win && win.devicePixelRatio, 1);
     }
     width = Math.max(1, Math.round(width)); height = Math.max(1, Math.round(height));
-    // Bound the native backing texture, including large tablet/desktop windows.
-    // Keep logical coordinates unchanged so touch and safe-area layout still match.
-    pixelRatio = api ? Math.min(pixelRatio, lowMemory ? 1 : 2,
-      Math.sqrt((lowMemory ? 1024 * 1024 : 2 * 1024 * 1024) / (width * height)),
-      4096 / width, 4096 / height) : Math.min(3, pixelRatio);
+    // Resolution changes only the backing surface, never layout or touch coordinates.
+    pixelRatio = getCanvasPixelRatio(pixelRatio, api && isDesktop(device));
     dimensions = {
       width, height, pixelRatio,
       safeTop: Math.min(height / 3, safeTop), safeBottom: Math.min(height / 3, safeBottom),
     };
-    const backingWidth = Math.max(1, Math.floor(dimensions.width * pixelRatio));
-    const backingHeight = Math.max(1, Math.floor(dimensions.height * pixelRatio));
-    // Reassigning even the same size resets the context and reallocates native storage.
-    // Shrink before growing so a window rotation cannot allocate a large intermediate texture.
-    if (canvas.width > backingWidth) canvas.width = backingWidth;
-    if (canvas.height !== backingHeight) canvas.height = backingHeight;
-    if (canvas.width !== backingWidth) canvas.width = backingWidth;
+    resizeCanvas(canvas, dimensions.width, dimensions.height, pixelRatio);
     return Object.assign({}, dimensions);
   }
 
@@ -207,11 +183,6 @@ function createPlatform(environment) {
         removeListeners.push(function () { if (typeof api['off' + name] === 'function') api['off' + name](cancel); });
       });
 
-      let device = {};
-      try { device = typeof api.getDeviceInfo === 'function' ? api.getDeviceInfo() : {}; } catch (_) { /* Older SDK. */ }
-      if (!device || !device.platform) {
-        try { device = typeof api.getSystemInfoSync === 'function' ? api.getSystemInfoSync() : {}; } catch (_) { /* Native touch remains available. */ }
-      }
       // DevTools returns its real DOM canvas. Its iPhone simulator only forwards
       // mouse clicks when the tool's touch-emulation mode is enabled; keep the
       // canvas usable when that mode is off. This path never runs on a phone.
@@ -327,7 +298,7 @@ function createPlatform(environment) {
 
   function onResize(listener) {
     // Consumers call resize before repainting; changing canvas size resets its context.
-    const handler = function () { listener(); };
+    const handler = function (event) { listener(event); };
     if (api && typeof api.onWindowResize === 'function') {
       api.onWindowResize(handler);
       return function () { if (typeof api.offWindowResize === 'function') api.offWindowResize(handler); };
@@ -363,7 +334,7 @@ function createPlatform(environment) {
   return {
     kind: api ? 'wechat' : 'browser', wx: api, canvas, resize, onPointer, onKey, onResize, storage, setFrameRate,
     get reducedMotion() { return !!(reducedMotionQuery && reducedMotionQuery.matches); },
-    get effectsQuality() { return lowMemory ? 'low' : 'high'; },
+    effectsQuality: 'high',
     isDevelopment: isDevelopmentEnvironment(api, win && win.location),
     onMemoryWarning: function (listener) {
       if (!api || typeof api.onMemoryWarning !== 'function') return function () {};
@@ -371,12 +342,11 @@ function createPlatform(environment) {
       return function () { if (typeof api.offMemoryWarning === 'function') api.offMemoryWarning(listener); };
     },
     reduceMemory: function () {
-      lowMemory = true;
-      const metrics = resize();
+      // The caller releases caches/audio; memory pressure never lowers image quality.
       if (api && typeof api.triggerGC === 'function') {
         try { api.triggerGC(); } catch (_) { /* GC timing belongs to the host. */ }
       }
-      return metrics;
+      return Object.assign({}, dimensions);
     },
     onHide: function (listener) { return lifecycle('Hide', listener); },
     onShow: function (listener) { return lifecycle('Show', listener); },

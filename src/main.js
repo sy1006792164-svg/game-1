@@ -79,7 +79,7 @@ class Game {
     this.toastText = ''; this.toastUntil = 0; this.transitionAt = 0; this.motionPath = null;
     this.busy = false; this.hidden = false; this.lastFrame = -Infinity; this.pointer = null; this.pendingAction = null; this.blockedAt = null;
     this.metrics = { ...platform.resize() };
-    platform.onResize(() => { this.cancelRankingPointer(); this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.setMetrics(platform.resize()); this.lastFrame = -Infinity; });
+    platform.onResize(event => { this.cancelRankingPointer(); this.stopListScrolling(); this.camera.stopShake(); this.pointer = null; this.pendingAction = null; this.setMetrics(platform.resize(event)); this.lastFrame = -Infinity; });
     platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor) => this.zoomScene(x, y, factor), (x, y, delta) => this.scrollList(x, y, delta));
     platform.onKey(key => {
       const page = this.page, modal = this.modal, session = this.session;
@@ -595,7 +595,7 @@ class Game {
   previewRanking() {
     if (!this.rankingAuthorization.getState().canDisplay) return false;
     return this.friendLeaderboard.preview({ width: 354, height: leaderboardRect(this.renderer.H).h,
-      pixelRatio: Math.min(2, (this.metrics.pixelRatio || 1) * this.renderer.scale) });
+      pixelRatio: (this.metrics.pixelRatio || 1) * this.renderer.scale });
   }
   openFriendLeaderboard(options) {
     if (this.hidden || !this.rankingAuthorization.getState().enabled) return;
@@ -604,7 +604,7 @@ class Game {
       !(options.checked && options.checked['scope.WxFriendInteraction'] === true)) return;
     this.cancelRankingPointer();
     const rect = leaderboardRect(this.renderer.H);
-    const opening = this.friendLeaderboard.open({ width: rect.w, height: rect.h, pixelRatio: Math.min(2, (this.metrics.pixelRatio || 1) * this.renderer.scale) }, options && options.checked);
+    const opening = this.friendLeaderboard.open({ width: rect.w, height: rect.h, pixelRatio: (this.metrics.pixelRatio || 1) * this.renderer.scale }, options && options.checked);
     this.syncFriendScore();
     return opening;
   }

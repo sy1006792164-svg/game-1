@@ -43,12 +43,12 @@ test('wheel events route to collection scrolling before board zoom and preserve 
   assert.equal(zoomed.length, 1);
 });
 
-test('browser canvas uses CSS dimensions, bounded DPR and relative pointer coordinates', () => {
+test('browser canvas uses CSS dimensions, native DPR and relative pointer coordinates', () => {
   const { platform, canvas } = browser();
   assert.equal(platform.kind, 'browser');
-  assert.deepEqual(platform.resize(), { width: 390, height: 800, pixelRatio: 3, safeTop: 0, safeBottom: 0 });
-  assert.equal(canvas.width, 1170);
-  assert.equal(canvas.height, 2400);
+  assert.deepEqual(platform.resize(), { width: 390, height: 800, pixelRatio: 4, safeTop: 0, safeBottom: 0 });
+  assert.equal(canvas.width, 1560);
+  assert.equal(canvas.height, 3200);
   const points = [];
   const off = platform.onPointer((x, y, type) => points.push([x, y, type]));
   const event = { clientX: 120, clientY: 210, pointerId: 1, button: 0, preventDefault() {} };
@@ -78,18 +78,20 @@ test('platform exposes native channel or browser origin development detection', 
   assert.ok(browserCanvas);
 });
 
-test('browser motion preference stays live and memory pressure lowers native effect quality', () => {
+test('browser motion preference stays live and memory pressure preserves native effect quality', () => {
   const reduced = browser(true);
   assert.equal(reduced.platform.reducedMotion, true);
   assert.equal(reduced.platform.effectsQuality, 'high');
   reduced.motion.matches = false;
   assert.equal(reduced.platform.reducedMotion, false);
 
-  const platform = createPlatform({ wx: { createCanvas: () => ({}) } });
+  let collections = 0;
+  const platform = createPlatform({ wx: { createCanvas: () => ({}), triggerGC() { collections++; } } });
   assert.equal(platform.reducedMotion, false);
   assert.equal(platform.effectsQuality, 'high');
   platform.reduceMemory();
-  assert.equal(platform.effectsQuality, 'low');
+  assert.equal(platform.effectsQuality, 'high');
+  assert.equal(collections, 1);
 });
 
 test('browser multi-touch neither zooms nor releases a tap and the next single-finger tap works', () => {
@@ -198,8 +200,9 @@ test('WeChat reserves capsule/safe area, uses native local storage and single-to
   const platform = createPlatform({ wx });
   assert.equal(platform.wx, wx);
   assert.equal(platform.kind, 'wechat');
-  assert.deepEqual(platform.resize(), { width: 393, height: 852, pixelRatio: 2, safeTop: 87, safeBottom: 34 });
-  assert.equal(canvas.width, 786);
+  assert.deepEqual(platform.resize(), { width: 393, height: 852, pixelRatio: 3, safeTop: 87, safeBottom: 34 });
+  assert.equal(canvas.width, 1179);
+  assert.equal(canvas.height, 2556);
   const points = [];
   const off = platform.onPointer((...args) => points.push(args));
   callbacks.Start({ changedTouches: [{ identifier: 4, clientX: 12, clientY: 45 }] });
@@ -231,6 +234,43 @@ test('older WeChat versions use system info and animation callbacks are cancella
   const callback = () => {};
   assert.equal(platform.raf(callback), 9); assert.equal(called, callback);
   platform.cancelRaf(9); assert.equal(cancelled, 9);
+});
+
+test('partial window info retains current dimensions and recovers real device density', () => {
+  for (const pixelRatio of [undefined, 0, NaN]) {
+    const canvas = {}, platform = createPlatform({ wx: {
+      createCanvas: () => canvas, getDeviceInfo: () => ({ platform: 'ios' }),
+      getWindowInfo: () => ({ windowWidth: 393, windowHeight: 852, pixelRatio }),
+      getSystemInfoSync: () => ({ windowWidth: 375, windowHeight: 667, pixelRatio: 3 }),
+    } });
+    const metrics = platform.resize();
+    assert.equal(metrics.width, 393); assert.equal(metrics.height, 852);
+    assert.equal(metrics.pixelRatio, 3);
+    assert.equal(canvas.width, 1179); assert.equal(canvas.height, 2556);
+  }
+});
+
+test('native window resize uses event dimensions before the system snapshot catches up', () => {
+  const canvas = {};
+  let handler, pixelRatio = 1.25, metrics;
+  const platform = createPlatform({ wx: {
+    createCanvas: () => canvas, getDeviceInfo: () => ({ platform: 'windows' }),
+    getWindowInfo: () => ({ windowWidth: 420, windowHeight: 745, pixelRatio }),
+    onWindowResize: callback => { handler = callback; },
+    offWindowResize: callback => { assert.equal(callback, handler); handler = null; },
+  } });
+  platform.resize();
+  const off = platform.onResize(event => { metrics = platform.resize(event); });
+  handler({ windowWidth: 840, windowHeight: 1490 });
+  assert.deepEqual(metrics, { width: 840, height: 1490, pixelRatio: 2, safeTop: 0, safeBottom: 0 });
+  assert.equal(canvas.width, 1680); assert.equal(canvas.height, 2980);
+  // Moving to a denser display changes resolution even when the window size is unchanged.
+  pixelRatio = 3;
+  handler({ windowWidth: 840, windowHeight: 1490 });
+  assert.equal(canvas.width, 2520); assert.equal(canvas.height, 4470);
+  assert.deepEqual(platform.reduceMemory(), metrics, 'memory cleanup must not restore a stale window snapshot');
+  assert.equal(canvas.width, 2520); assert.equal(canvas.height, 4470);
+  off(); assert.equal(handler, null);
 });
 
 test('native frame rate switches between lists and scenes without repeated SDK calls', () => {
@@ -294,6 +334,70 @@ test('WeChat reserves the capsule row when its geometry API is missing or unavai
       getMenuButtonBoundingClientRect: capsule,
     } });
     assert.equal(platform.resize().safeTop, 99);
+  }
+});
+
+test('desktop WeChat never reserves its external title bar inside the game canvas', () => {
+  for (const name of ['windows', 'mac', 'ohos_pc']) {
+    for (const capsule of [undefined, () => { throw new Error('unsupported'); }, () => ({ bottom: 0 }), () => ({ bottom: 79 })]) {
+      for (const legacy of [false, true]) {
+        const info = { platform: name, windowWidth: 420, windowHeight: 745, pixelRatio: 1.5,
+          statusBarHeight: 44, safeArea: { top: 44, bottom: 711 } };
+        const canvas = {}, platform = createPlatform({ wx: {
+          createCanvas: () => canvas, getWindowInfo: () => info,
+          getDeviceInfo: legacy ? undefined : () => ({ platform: name }),
+          getSystemInfoSync: () => info, getMenuButtonBoundingClientRect: capsule,
+        } });
+        assert.deepEqual(platform.resize(), { width: 420, height: 745, pixelRatio: 2, safeTop: 0, safeBottom: 0 });
+        assert.equal(canvas.width, 840);
+      }
+    }
+  }
+});
+
+test('phones and DevTools convert screen safe areas and capsule bounds to canvas coordinates', () => {
+  for (const name of ['ios', 'android', 'ohos', 'devtools']) {
+    for (const screenTop of [0, 20, 100]) {
+      const platform = createPlatform({ wx: {
+        createCanvas: () => ({}), getDeviceInfo: () => ({ platform: name }),
+        getWindowInfo: () => ({ windowWidth: 393, windowHeight: 852 - screenTop, pixelRatio: 3,
+          screenTop, statusBarHeight: 47, safeArea: { top: 47, bottom: 818 } }),
+        getMenuButtonBoundingClientRect: () => ({ bottom: 79 }),
+      } });
+      const metrics = platform.resize();
+      assert.equal(metrics.safeTop, Math.max(0, 87 - screenTop));
+      assert.equal(metrics.safeBottom, 34);
+    }
+  }
+});
+
+test('native canvas has no DPR or backing-size ceiling on phones and desktops', () => {
+  for (const name of ['windows', 'mac', 'ohos_pc', 'ios', 'android', 'ohos', 'devtools']) {
+    let info;
+    const writes = [], canvas = { _width: 0, _height: 0,
+      get width() { return this._width; }, set width(value) { writes.push(value); this._width = value; },
+      get height() { return this._height; }, set height(value) { writes.push(value); this._height = value; },
+    };
+    const platform = createPlatform({ wx: { createCanvas: () => canvas,
+      getDeviceInfo: () => ({ platform: name }), getWindowInfo: () => info } });
+    for (const [windowWidth, windowHeight, pixelRatio] of [
+      [420, 745, 1], [420, 745, 1.25], [420, 745, 1.5], [420, 745, 2],
+      [393, 852, 3], [430, 932, 3.5], [430, 932, 4], [1920, 1080, 2],
+      [7680, 4320, 2], [430, 932, 6],
+    ]) {
+      info = { windowWidth, windowHeight, pixelRatio };
+      const density = ['windows', 'mac', 'ohos_pc'].includes(name) ? Math.max(2, pixelRatio) : pixelRatio;
+      const metrics = platform.resize();
+      assert.equal(metrics.pixelRatio, density);
+      assert.equal(metrics.width, windowWidth); assert.equal(metrics.height, windowHeight);
+      assert.equal(canvas.width, Math.floor(windowWidth * density));
+      assert.equal(canvas.height, Math.floor(windowHeight * density));
+      const before = writes.length;
+      platform.resize();
+      assert.deepEqual(platform.reduceMemory(), metrics);
+      assert.equal(writes.length, before, 'unchanged frames and memory cleanup must not clear or reallocate the canvas');
+      assert.equal(platform.effectsQuality, 'high');
+    }
   }
 });
 

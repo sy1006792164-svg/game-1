@@ -86,9 +86,11 @@ function createOpenDataLeaderboard(api) {
     history.remember(key, { rank: self.rank, index });
   }
   function resize(message) {
-    if (Number.isFinite(message.width) && message.width > 0) width = Math.min(2048, message.width);
-    if (Number.isFinite(message.height) && message.height > 0) height = Math.min(2048, message.height);
-    if (Number.isFinite(message.pixelRatio) && message.pixelRatio > 0) ratio = Math.min(2, message.pixelRatio);
+    if (Number.isFinite(message.width) && message.width > 0) width = message.width;
+    if (Number.isFinite(message.height) && message.height > 0) height = message.height;
+    // The main domain already sized sharedCanvas. A second DPR cap
+    // would shrink the child content inside that higher-resolution surface.
+    if (Number.isFinite(message.pixelRatio) && message.pixelRatio > 0) ratio = message.pixelRatio;
     paint();
   }
   function stop() {

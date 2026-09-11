@@ -1,5 +1,7 @@
 'use strict';
 
+const { resizeCanvas } = require('./canvas-resolution');
+
 // Only our score enters the child; hosted records and friend identities stay there.
 const FRIEND_STORAGE_KEY = 'stars';
 const CHANNEL = 'wind-letter-friends-v1';
@@ -45,20 +47,16 @@ function createFriendLeaderboard(platform, config, options) {
   }
   function resize(next) {
     next = next || {};
-    const width = Number.isFinite(next.width) && next.width > 0 ? Math.min(2048, next.width) : dimensions.width;
-    const height = Number.isFinite(next.height) && next.height > 0 ? Math.min(2048, next.height) : dimensions.height;
-    const ratio = Number.isFinite(next.pixelRatio) && next.pixelRatio > 0 ? next.pixelRatio : dimensions.pixelRatio;
-    const pixelRatio = Math.min(2, ratio, Math.sqrt(2 * 1024 * 1024 / (width * height)));
+    const width = Number.isFinite(next.width) && next.width > 0 ? next.width : dimensions.width;
+    const height = Number.isFinite(next.height) && next.height > 0 ? next.height : dimensions.height;
+    // The main renderer owns layout and resolution without an independent DPR cap.
+    // sharedCanvas only carries its friend-content region back to that renderer.
+    const pixelRatio = Number.isFinite(next.pixelRatio) && next.pixelRatio > 0 ? next.pixelRatio : dimensions.pixelRatio;
     const changed = width !== dimensions.width || height !== dimensions.height || pixelRatio !== dimensions.pixelRatio;
     if (changed) cancelPointer();
     dimensions = { width, height, pixelRatio };
     if (context && context.canvas) {
-      const backingWidth = Math.max(1, Math.floor(width * dimensions.pixelRatio));
-      const backingHeight = Math.max(1, Math.floor(height * dimensions.pixelRatio));
-      const backingChanged = context.canvas.width !== backingWidth || context.canvas.height !== backingHeight;
-      if (context.canvas.width > backingWidth) context.canvas.width = backingWidth;
-      if (context.canvas.height !== backingHeight) context.canvas.height = backingHeight;
-      if (context.canvas.width !== backingWidth) context.canvas.width = backingWidth;
+      const backingChanged = resizeCanvas(context.canvas, width, height, pixelRatio);
       if (visible && authorized && (changed || backingChanged)) post('resize', dimensions);
     }
     return getState();

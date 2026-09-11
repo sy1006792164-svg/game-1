@@ -73,7 +73,7 @@ function drawRankPlaceholder(r, game, box) {
 function drawFriends(r, game, box) {
   const friend = game.friendLeaderboard, state = friend.getState();
   if (state.status === 'ready' || state.status === 'preview') {
-    friend.resize({ width: box.w, height: box.h, pixelRatio: Math.min(2, (game.metrics.pixelRatio || 1) * r.scale) });
+    friend.resize({ width: box.w, height: box.h, pixelRatio: (game.metrics.pixelRatio || 1) * r.scale });
     friend.draw(r.ctx, box.x, box.y, box.w, box.h);
     // The host forwards complete gestures; scrolling and tap recognition both
     // stay in the child, so a drag can never trigger a second canvas tap.

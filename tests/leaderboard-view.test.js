@@ -45,7 +45,7 @@ function harness(options = {}) {
 
 test('ready ranking paints the child without a duplicate host tap target or manual list controls', () => {
   const h = harness({ H: 760, scale: .8 });
-  assert.deepEqual(h.events.find(event => event[0] === 'resize'), ['resize', { width: 354, height: 628, pixelRatio: 2 }]);
+  assert.deepEqual(h.events.find(event => event[0] === 'resize'), ['resize', { width: 354, height: 628, pixelRatio: 3 * .8 }]);
   assert.deepEqual(h.events.find(event => event[0] === 'draw').slice(2), [18, 94, 354, 628]);
   assert.equal(h.hits.length, 0, 'the full gesture bridge owns shared-canvas taps');
   assert.equal(h.events.some(event => event[0] === 'tap'), false);
@@ -89,7 +89,7 @@ test('permission checks and loading use the normal ranking skeleton without anot
 test('a previously authorized preview draws cached rankings during a silent recheck without a waiting card', () => {
   const h = harness({ authorization: { enabled: false, canDisplay: true, status: 'authorizing', message: '正在确认微信授权' },
     friendState: { status: 'preview' } });
-  assert.deepEqual(h.events.find(event => event[0] === 'resize'), ['resize', { width: 354, height: 568, pixelRatio: 2 }]);
+  assert.deepEqual(h.events.find(event => event[0] === 'resize'), ['resize', { width: 354, height: 568, pixelRatio: 3 }]);
   assert.deepEqual(h.events.find(event => event[0] === 'draw').slice(2), [18, 94, 354, 568]);
   assert.equal(h.labels.some(label => /等待|正在确认微信授权|我的邮路/.test(label)), false, 'cached child replaces both waiting card and empty skeleton');
   assert.deepEqual(h.buttons, []);

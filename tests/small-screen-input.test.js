@@ -182,7 +182,7 @@ test('native WeChat touch coordinates keep the small-screen target and multi-tou
   };
   for (const name of ['Start', 'Move', 'End', 'Cancel']) api['onTouch' + name] = fn => { handlers[name] = fn; };
   const native = createPlatform({ wx: api }), resized = native.resize();
-  assert.equal(resized.pixelRatio, 2, 'the backing texture is capped independently of touch coordinates');
+  assert.equal(resized.pixelRatio, metrics.pixelRatio, 'native pixel density does not change touch coordinates');
   assert.equal(resized.safeTop, metrics.safeTop);
   native.onPointer((x, y, type) => h.game.pointerEvent(x, y, type), (...args) => h.game.zoomScene(...args));
   const [x, y] = h.devicePoint(h.game.state.player + 1);
