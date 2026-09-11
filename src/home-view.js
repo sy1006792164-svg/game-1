@@ -35,17 +35,25 @@ function drawLinks(r, game, y) {
   const links = [
     { title: '选关', icon: 'route', action: () => game.openPage('levels') },
     { title: '邮票', icon: 'stamp', action: () => game.openPage('collection') },
-    { title: '排行', icon: 'ranking', action: () => game.openPage('leaderboard') },
-    { title: '设置', icon: 'grid', action: () => game.openPage('settings') }
+    { title: '排行', icon: 'ranking', action: () => game.openPage('leaderboard') }
   ];
   if (game.gameCircle.available) links.push({ title: '圈子', icon: 'community', action: () => game.openGameCircle() });
-  const dense = links.length > 4, width = dense ? 66 : 82, gap = dense ? 5 : 6;
+  const dense = links.length > 4;
+  let width = 82, gap = 6;
+  if (links.length === 3) { width = 104; gap = 8; }
+  else if (dense) { width = 66; gap = 5; }
   const startX = (390 - (links.length * width + (links.length - 1) * gap)) / 2;
   links.forEach((item, index) => {
     const x = startX + index * (width + gap);
     r.button(item.title, x, y, width, CONTROL.compactHeight, item.action,
       { style: 'quiet', icon: dense ? null : item.icon, size: dense ? 12 : 13 });
   });
+}
+
+function drawSettingsShortcut(r, game) {
+  const size = CONTROL.compactHeight;
+  r.button('', 390 - 16 - size, 10, size, size, () => game.openPage('settings'),
+    { style: 'quiet', icon: 'settings' });
 }
 
 function drawHome(r, game, now) {
@@ -71,6 +79,7 @@ function drawHome(r, game, now) {
   drawLinks(r, game, ui.linksY);
   const footerY = ui.linksY + CONTROL.compactHeight + 32;
   r.text(completed ? '已送达 ' + completed + ' 封信 · 每一程都算数' : '不必赶路，想好了再出发', 195, footerY, 10, C.muted, 'center');
+  drawSettingsShortcut(r, game);
 }
 
 module.exports = { drawHome };

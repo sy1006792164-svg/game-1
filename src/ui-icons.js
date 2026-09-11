@@ -60,6 +60,12 @@ function drawUiGlyph(c, type) {
     line([[-3, 6], [3, 6]]);
   } else if (type === 'grid') {
     for (const y of [-9, 2]) for (const x of [-9, 2]) box(x, y, 7, 7, 1);
+  } else if (type === 'settings') {
+    circle(0, 0, 7); circle(0, 0, 3);
+    for (let i = 0; i < 8; i++) {
+      const angle = i * Math.PI / 4, dx = Math.cos(angle), dy = Math.sin(angle);
+      line([[dx * 7, dy * 7], [dx * 10, dy * 10]]);
+    }
   } else if (type === 'close') {
     line([[-8, -8], [8, 8]]); line([[8, -8], [-8, 8]]);
   } else if (type === 'check') {

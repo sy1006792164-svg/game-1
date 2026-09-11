@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { drawSettings, ROWS } = require('../src/settings-view');
 const { CONTROL } = require('../src/controls');
+const { GAME_NAME, VERSION } = require('../src/config');
 
 function harness(options = {}) {
   const calls = [], hits = [], buttons = [], events = [];
@@ -52,6 +53,8 @@ test('settings view exposes four persisted choices with full-row touch targets',
     assert.ok(clear.y >= 0 && clear.y + clear.h < H - 18);
     clear.action(); assert.equal(h.events.at(-1), 'reset');
     h.calls.find(call => call.method === 'header').args[2](); assert.equal(h.events.at(-1), 'home');
+    assert.equal(h.labels.some(label => String(label).includes(GAME_NAME) || String(label).includes(VERSION)), false,
+      'settings does not render product or version metadata');
   }
 });
 

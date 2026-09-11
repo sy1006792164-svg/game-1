@@ -2170,14 +2170,20 @@ test('a current-version save resumes its exact actions without an upgrade notice
   h.destroy(); reloaded.destroy();
 });
 
-test('the fresh home offers delivery and four compact links without an unverified game circle', () => {
+test('the fresh home separates its settings shortcut from the three primary links', () => {
   const h = harness(); h.draw();
   const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
-  for (const label of ['开始送信', '选关', '邮票', '排行', '设置']) assert.ok(texts.includes(label));
+  for (const label of ['开始送信', '选关', '邮票', '排行']) assert.ok(texts.includes(label));
+  assert.equal(texts.includes('设置'), false, 'the icon-only settings shortcut stays out of the bottom labels');
   assert.equal(texts.includes('圈子'), false);
   assert.equal(texts.some(text => /每日|成长|LV\.|已走 0 拍|本周|下一小步/.test(text)), false);
-  assert.equal(h.game.renderer.hits.length, 5, 'delivery and four home links are available');
-  h.game.renderer.hits.at(-1).action(); h.draw();
+  const hits = h.game.renderer.hits;
+  assert.equal(hits.length, 5, 'delivery, three primary links and settings are available');
+  const settings = hits.find(hit => hit.x === 330 && hit.y === 10 && hit.w === 44 && hit.h === 44);
+  assert.ok(settings, 'settings uses a top-right touch target below the platform safe area');
+  const bottomY = Math.max(...hits.map(hit => hit.y));
+  assert.equal(hits.filter(hit => hit.y === bottomY).length, 3, 'settings is not grouped with bottom navigation');
+  settings.action(); h.draw();
   assert.equal(h.game.page, 'settings');
   assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '体验设置'));
   h.callbacks.key('Escape'); assert.equal(h.game.page, 'home');
@@ -2199,11 +2205,14 @@ test('home renders and opens the game circle only in WeChat develop and trial ve
         assert.equal(texts.includes('圈子'), available, kind + '/' + envVersion);
         const hits = h.game.renderer.hits;
         assert.equal(hits.length, available ? 6 : 5, 'hidden circles have no hit target');
-        assert.equal(hits[1].x + hits.at(-1).x + hits.at(-1).w, 390, 'navigation stays centered');
-        assert.ok(hits.slice(1).every(hit => hit.x >= 0 && hit.x + hit.w <= 390 && hit.w >= 44 && hit.h >= 44),
-          'all four or five links remain visible and touch accessible');
+        const bottomY = Math.max(...hits.map(hit => hit.y));
+        const links = hits.filter(hit => hit.y === bottomY);
+        assert.equal(links.length, available ? 4 : 3, 'bottom navigation contains only primary destinations');
+        assert.equal(links[0].x + links.at(-1).x + links.at(-1).w, 390, 'navigation stays centered');
+        assert.ok(hits.every(hit => hit.x >= 0 && hit.x + hit.w <= 390 && hit.w >= 44 && hit.h >= 44),
+          'all home actions remain visible and touch accessible');
         if (available) {
-          await hits.at(-1).action();
+          await links.at(-1).action();
           assert.equal(shown.length, 1);
         } else {
           h.soundCalls.length = 0;

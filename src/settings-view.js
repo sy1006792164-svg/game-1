@@ -2,7 +2,6 @@
 
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
-const { VERSION } = require('./config');
 
 const ROWS = Object.freeze([
   Object.freeze({ key: 'sound', title: '操作音效', detail: '移动、收集与结果提示音' }),
@@ -49,7 +48,6 @@ function drawSettings(r, game) {
   lines.forEach((line, index) => r.text(line, 42, y + 47 + index * 19, 12, C.muted));
   r.button('清除这台设备的数据', 24, y + panelH + 12, 342, CONTROL.compactHeight,
     () => game.resetPrompt(), { style: 'quiet' });
-  if (game.toastUntil <= r.now) r.text('风笺回廊  /  ' + VERSION, 195, r.H - 18, 10, C.goldText, 'center');
 }
 
 module.exports = { drawSettings, ROWS };
