@@ -57,13 +57,13 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   c.translate(x + w / 2, y + h / 2); c.scale(scale, scale); c.translate(-x - w / 2, -y - h / 2);
   drawLetterCard(r, x, y, w, h, unlocked, next, held);
   r.text(String(level.id).padStart(3, '0'), x + 17, y + 26, 22, unlocked ? C.green : '#74897a', 'left', '600');
-  if (inProgress) r.text('进行中', x + 77, y + 26, 10, C.gold);
+  if (inProgress) r.text('进行中', x + 77, y + 26, 10, C.goldText);
   r.actionIcon(unlocked ? record ? 'check' : 'letter' : 'lock', x + 136, y + 25, unlocked ? C.gold : '#74897a');
   r.label(level.title, x + 17, y + 60, 132, 14, unlocked ? C.ink : C.muted, 'left', '500');
   if (record) {
     for (let star = 0; star < 3; star++) r.icon('star', x + 23 + star * 21, y + h - 24, 14, star < record.stars ? C.gold : C.line);
     r.text(record.bestTurns + ' 拍', x + 125, y + h - 24, 10, C.muted, 'right');
-  } else r.text(inProgress ? '继续投递' : game.development ? '开发试玩' : unlocked ? '开始投递' : '先送达上一封', x + 17, y + h - 23, 11, next ? C.gold : unlocked ? C.green : C.muted);
+  } else r.text(inProgress ? '继续投递' : game.development ? '开发试玩' : unlocked ? '开始投递' : '先送达上一封', x + 17, y + h - 23, 11, next ? C.goldText : unlocked ? C.green : C.muted);
   if (unlocked) r.actionIcon('arrow-right', x + 145, y + h - 24, next ? C.gold : C.green);
   c.restore();
   r.hit(x, y, w, h, () => unlocked ? game.selectLevel(level.id) : game.toast('送达上一封信后开启'),

@@ -35,13 +35,16 @@ function drawLinks(r, game, y) {
   const links = [
     { title: '选关', icon: 'route', action: () => game.openPage('levels') },
     { title: '邮票', icon: 'stamp', action: () => game.openPage('collection') },
-    { title: '排行', icon: 'ranking', action: () => game.openPage('leaderboard') }
+    { title: '排行', icon: 'ranking', action: () => game.openPage('leaderboard') },
+    { title: '设置', icon: 'grid', action: () => game.openPage('settings') }
   ];
   if (game.gameCircle.available) links.push({ title: '圈子', icon: 'community', action: () => game.openGameCircle() });
-  const startX = (390 - (links.length * 88 - 6)) / 2;
+  const dense = links.length > 4, width = dense ? 66 : 82, gap = dense ? 5 : 6;
+  const startX = (390 - (links.length * width + (links.length - 1) * gap)) / 2;
   links.forEach((item, index) => {
-    const x = startX + index * 88;
-    r.button(item.title, x, y, 82, CONTROL.compactHeight, item.action, { style: 'quiet', icon: item.icon });
+    const x = startX + index * (width + gap);
+    r.button(item.title, x, y, width, CONTROL.compactHeight, item.action,
+      { style: 'quiet', icon: dense ? null : item.icon, size: dense ? 12 : 13 });
   });
 }
 

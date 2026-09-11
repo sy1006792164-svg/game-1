@@ -19,7 +19,7 @@ function drawDeveloperPicker(r, game) {
   r.round(x + 22, y + 82, w - 44, 56, 12, '#e8eee0', '#bdcfb8');
   r.line([[x + 34, y + 85], [x + w - 34, y + 85]], '#d7e1cf', 2);
   r.text(modal.digits || '关卡编号', 195, y + 110, modal.digits ? 28 : 17, modal.digits ? C.gold : C.muted, 'center', '600');
-  r.text(modal.error || '开发存档与正式存档独立', 195, y + 155, 11, modal.error ? C.gold : C.muted, 'center');
+  r.text(modal.error || '开发存档与正式存档独立', 195, y + 155, 11, modal.error ? C.goldText : C.muted, 'center');
   ['1', '2', '3', '4', '5', '6', '7', '8', '9', '清空', '0', '退格'].forEach((key, index) => {
     r.button(key, x + 22 + index % 3 * 94, y + 176 + Math.floor(index / 3) * 52, 86, CONTROL.compactHeight,
       () => game.developmentKey(key === '清空' ? 'Delete' : key === '退格' ? 'Backspace' : key),

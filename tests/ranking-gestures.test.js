@@ -16,7 +16,7 @@ const source = fs.readFileSync(mainPath, 'utf8').replace(/new Game\(createPlatfo
 const factory = vm.runInThisContext('(function(require, module, exports) {\n' + source + '\n})', { filename: mainPath });
 
 function harness(t) {
-  const noop = () => {}, messages = [], callbacks = {}, frameRates = [], permissions = { 'scope.userInfo': true, 'scope.WxFriendInteraction': true };
+  const noop = () => {}, messages = [], callbacks = {}, frameRates = [], permissions = { 'scope.WxFriendInteraction': true };
   let now = 1000;
   const ctx = new Proxy({ globalAlpha: 1, measureText: value => ({ width: String(value).length * 7 }),
     createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }) },
@@ -34,8 +34,6 @@ function harness(t) {
     onMemoryWarning: fn => { callbacks.memory = fn; }, onAudioInterruptionBegin: noop, onAudioInterruptionEnd: noop,
     reduceMemory: () => metrics,
     wx: { requirePrivacyAuthorize: options => options.success(), getSetting: options => options.success({ authSetting: { ...permissions } }),
-      getUserInfo: options => options.success({ userInfo: { nickName: '送信人', avatarUrl: '' } }),
-      createUserInfoButton() { throw new Error('The existing profile is already authorized'); },
       authorize: options => options.success(), getOpenDataContext: () => shared },
   };
   const module = { exports: {} };
@@ -71,7 +69,7 @@ test('friend gesture bridge validates starts and permissions while allowing capt
   const count = messages.length;
   assert.equal(board.pointer('move', 1, 40, 210), false);
   assert.equal(board.wheel(120, 220), false); assert.equal(board.scroll('end', 230), false);
-  assert.equal(messages.length, count, 'a closed privacy/profile gate prevents input traffic');
+  assert.equal(messages.length, count, 'a closed privacy gate prevents input traffic');
   allowed = true; assert.equal(board.pointer('end', 1, 40, 240), false);
   board.close(); assert.equal(board.wheel(120, 250), false);
 });

@@ -23,19 +23,20 @@
       animation: fireflies 7s ease-in-out infinite alternate;
     }
     aside { position: relative; width: 310px; flex: 0 0 310px; }
-    .eyebrow { display: flex; align-items: center; gap: 12px; color: #668d7d; letter-spacing: 3px; font-size: 10px; }
-    .eyebrow::before { content: ""; width: 27px; height: 1px; background: #668d7d; }
+    .eyebrow { display: flex; align-items: center; gap: 12px; color: #316c5f; letter-spacing: 3px; font-size: 10px; }
+    .eyebrow::before { content: ""; width: 27px; height: 1px; background: #316c5f; }
     h1 { font-family: "Songti SC", "SimSun", serif; font-size: 47px; letter-spacing: 8px; font-weight: 500; margin: 24px 0 17px; }
-    .lead { font-size: 20px; line-height: 1.9; color: #60796b; margin: 0; }
-    .lead em { font-style: normal; color: #bc7e47; }
+    .lead { font-size: 20px; line-height: 1.9; color: #4d6359; margin: 0; }
+    .lead em { font-style: normal; color: #885729; }
     .rule { margin-top: 37px; padding-top: 24px; border-top: 1px solid #c4d2c0; }
-    .touch { margin: 0; color: #60796b; font-size: 12px; line-height: 2; }
-    .touch strong { font-weight: 400; color: #368f9d; }
-    .keys { margin: 18px 0 0; color: #748d7d; font-size: 10px; line-height: 2; }
+    .touch { margin: 0; color: #4d6359; font-size: 12px; line-height: 2; }
+    .touch strong { font-weight: 400; color: #246b76; }
+    .keys { margin: 18px 0 0; color: #4d6359; font-size: 10px; line-height: 2; }
     #phone { height: min(844px, 96dvh); aspect-ratio: 390 / 844; position: relative; flex-shrink: 0;
       border: 6px solid #ffffffc9; box-shadow: 0 35px 100px #59756226, 0 0 60px #7e9b7510;
       border-radius: 30px; overflow: hidden; background: #e9efe7; }
     canvas { width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+    canvas:focus-visible { outline: 3px solid #316c5f; outline-offset: -3px; }
     @keyframes fireflies { from { opacity: .15; transform: translateY(0); } to { opacity: .6; transform: translateY(-8px); } }
     @media (prefers-reduced-motion: reduce) { body::before { animation: none; } }
     @media (max-width: 850px) {

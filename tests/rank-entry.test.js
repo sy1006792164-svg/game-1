@@ -1,14 +1,14 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { createOpenDataLeaderboard } = require('../open-data/index');
-const { DEFAULT_KEY: KEY } = require('../open-data/leaderboard-data');
+const { DEFAULT_KEY: KEY, LEGACY_KEY, serializeScore } = require('../open-data/leaderboard-data');
 const { historyKey } = require('../open-data/rank-history');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const score = extra => ({ v: 2, stars: 30, completed: 10, turns: 100, name: '本人', ownerToken: 'wl1_' + 'a'.repeat(48), ...extra });
 
 function harness(t, previous = null, cloud = new Map()) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 100000 });
-  if (!cloud.has(KEY)) cloud.set(KEY, JSON.stringify(score()));
+  if (!cloud.has(KEY)) cloud.set(KEY, serializeScore(score(), KEY, 100));
   if (previous) cloud.set(historyKey(KEY), JSON.stringify({ v: 1, ...previous }));
   const labels = [], requests = { mine: [], friends: [], identity: [], writes: [] };
   let message, paintCount = 0;
@@ -70,6 +70,18 @@ test('first visit and unchanged rank never invent movement, but locate the real 
     h.send({ action: 'close' }); h.open(); h.resolve(1, 8); h.advance(700);
     assert.equal(h.text().some(v => /上升|下降/.test(v)), false);
     assert.equal(h.requests.writes.filter(o => o.KVDataList[0].key === historyKey(KEY)).length, 1);
+  } finally { h.send({ action: 'close' }); }
+});
+
+test('a legacy rank snapshot is used once and future snapshots move to the new key', t => {
+  const h = harness(t);
+  h.cloud.set(historyKey(LEGACY_KEY), JSON.stringify({ v: 1, rank: 6, index: 5 }));
+  try {
+    h.open();
+    assert.ok(h.requests.mine[0].keyList.includes(historyKey(LEGACY_KEY)));
+    h.resolve(0, 2); h.advance(1300);
+    assert.ok(h.text().includes('↑ 上升 4 名'));
+    assert.deepEqual(JSON.parse(h.cloud.get(historyKey(KEY))), { v: 1, rank: 2, index: 1 });
   } finally { h.send({ action: 'close' }); }
 });
 

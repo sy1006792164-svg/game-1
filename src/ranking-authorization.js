@@ -1,28 +1,37 @@
 'use strict';
 
-// WeChat owns consent; only the public profile stays in this session.
+// WeChat owns consent. Friend identities stay in the open data domain and
+// scope.WxFriendInteraction is requested by friend-leaderboard.
 function createRankingAuthorization(platform, callbacks) {
   const api = platform && platform.kind === 'wechat' && platform.wx;
   const handlers = callbacks || {};
-  let state = { status: 'idle', message: '授权头像昵称后即可参与排行榜' };
-  let active = false, foreground = true, revision = 0, needsProfile = false, settingsAllowed = false, sessionEnabled = false;
-  let flight = null, profileFlight = null, validationFlight = null, button = null, buttonTap = null, buttonVisible = false;
-  let rect = null, wantsButton = false;
-  let sessionProfile = null, sessionConfirmed = false, profileRevoked = false, checking = false, authSetting = null;
+  let state = { status: 'idle', message: '同意微信隐私授权后即可查看排行榜' };
+  let active = false, foreground = true, revision = 0;
+  let sessionConfirmed = false, privacyRevoked = false, sessionEnabled = false;
+  let checking = false, authSetting = null;
+  let flight = null, validationFlight = null;
   const cancellations = new Set();
 
   function getState() {
-    return Object.assign({}, state, { enabled: sessionEnabled, canDisplay: sessionConfirmed && !!sessionProfile && !profileRevoked,
-      checking, authSetting: authSetting && { ...authSetting }, profile: sessionProfile && { ...sessionProfile }, needsProfile, canOpenSettings: settingsAllowed, hasNativeButton: !!button && buttonVisible });
+    return Object.assign({}, state, {
+      enabled: sessionEnabled,
+      canDisplay: sessionConfirmed && !privacyRevoked,
+      checking,
+      authSetting: authSetting && { ...authSetting },
+      // Compatibility fields for the existing view and resume coordinator.
+      // Public profile data is supplied by WeChat inside the open data domain.
+      profile: null,
+      needsProfile: false,
+      canOpenSettings: false,
+      hasNativeButton: false,
+    });
   }
   function current(token, allowInactive) { return (active || allowInactive === true) && revision === token; }
-  function setState(status, message, profileNeeded, allowSettings) {
-    state = { status, message }; needsProfile = profileNeeded === true; settingsAllowed = allowSettings === true;
-    reconcileButton(); return getState();
-  }
+  function setState(status, message) { state = { status, message }; return getState(); }
   function cancelled() { const error = new Error('CANCELLED'); error.cancelled = true; return error; }
   function check(token) { if (!current(token)) throw cancelled(); }
   function denial(error) { return !!error && /deny|denied|denial|cancel|disagree|auth\s+deny/i.test(error.errMsg || error.message || ''); }
+  function cancelPending() { Array.from(cancellations).forEach(function (cancel) { cancel(); }); }
   function runTask(token, start, timeout, allowInactive) {
     return new Promise(function (resolve, reject) {
       let done = false, timer = null;
@@ -46,120 +55,34 @@ function createRankingAuthorization(platform, callbacks) {
       if (result && typeof result.then === 'function') result.then(resolve, reject);
     }, timeout, allowInactive);
   }
-  function external(token, action) {
-    return runTask(token, function (resolve, reject) { Promise.resolve().then(function () { check(token); return action(); }).then(resolve, reject); }, 20000);
-  }
-  function destroyButton() {
-    const previous = button, listener = buttonTap;
-    button = null; buttonTap = null; buttonVisible = false;
-    if (!previous) return;
-    try { if (typeof previous.offTap === 'function' && listener) previous.offTap(listener); } catch (_) {}
-    try { previous.destroy(); } catch (_) {}
-  }
-  function styleFor(value) {
-    return { left: value.left, top: value.top, width: value.width, height: value.height,
-      lineHeight: value.height, fontSize: Math.max(10, Math.min(16, Math.round(value.height * .30))),
-      borderRadius: Math.min(10, value.height / 4), borderWidth: 1, borderColor: '#4c8a77',
-      backgroundColor: '#39796b', color: '#fffdf4', textAlign: 'center' };
-  }
-  function reconcileButton() {
-    const visible = active && foreground && wantsButton && rect && needsProfile;
-    if (!visible) {
-      if (button && buttonVisible) { try { button.hide(); } catch (_) {} buttonVisible = false; }
-      return;
-    }
-    if (!api || typeof api.createUserInfoButton !== 'function') return;
-    const style = styleFor(rect);
-    if (!button) {
-      const token = revision;
-      try {
-        button = api.createUserInfoButton({ type: 'text', text: '授权头像昵称并查看', withCredentials: false, lang: 'zh_CN', style });
-        if (!button || typeof button.onTap !== 'function' || typeof button.destroy !== 'function') throw new Error('BUTTON_UNAVAILABLE');
-        buttonTap = function (result) { handleProfileTap(token, result); };
-        button.onTap(buttonTap); buttonVisible = true;
-        if (typeof button.show === 'function') button.show();
-      } catch (_) {
-        destroyButton(); state = { status: 'unavailable', message: '微信授权按钮暂不可用，请更新微信后重试' }; needsProfile = false;
-      }
-    } else {
-      try {
-        Object.keys(style).forEach(function (key) { if (button.style[key] !== style[key]) button.style[key] = style[key]; });
-        if (!buttonVisible) { button.show(); buttonVisible = true; }
-      } catch (_) {
-        destroyButton(); state = { status: 'error', message: '授权按钮暂时未能显示，请重新打开排行榜' }; needsProfile = false;
-      }
-    }
-  }
-  function publicProfile(result) {
-    if (!result || (typeof result.errMsg === 'string' && /:fail|deny|denied|cancel/i.test(result.errMsg))) return null;
-    const userInfo = result.userInfo;
-    if (!userInfo || typeof userInfo !== 'object' || Array.isArray(userInfo) || typeof userInfo.nickName !== 'string') return null;
-    const nickName = Array.from(userInfo.nickName.slice(0, 2048)
-      .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').trim()).slice(0, 20).join('');
-    if (!nickName) return null;
-    // Keep only bounded WeChat avatar URLs, discarding credentials and IDs.
-    const source = typeof userInfo.avatarUrl === 'string' ? userInfo.avatarUrl : '';
-    const avatarUrl = source.length <= 2048 && /^https?:\/\/(?:[a-z0-9-]+\.)*qlogo\.cn\/[^\s#]*$/i.test(source) ? source.replace(/^http:/i, 'https:') : '';
-    return { nickName, avatarUrl };
+  function settingsOf(result) {
+    const settings = result && result.authSetting;
+    return settings && typeof settings === 'object' && !Array.isArray(settings) ? { ...settings } : null;
   }
   function notifyReady() {
-    if (typeof handlers.onReady === 'function') { try { handlers.onReady({ authSetting: authSetting && { ...authSetting } }); } catch (_) {} }
-  }
-  async function saveProfile(token, firstResult, refresh) {
-    const result = firstResult === undefined ? await native(token, 'getUserInfo', { withCredentials: false, lang: 'zh_CN' }, 20000) : firstResult;
-    check(token);
-    if (refresh && denial(result)) throw result;
-    const profile = publicProfile(result);
-    if (refresh && !sessionEnabled) return false;
-    if (!profile) { if (!refresh && current(token)) setState('error', '未取得微信头像昵称，请重新授权后重试'); return false; }
-    const saved = typeof handlers.onProfile === 'function' ? await external(token, function () { return handlers.onProfile({ ...profile }); }) : true;
-    if (saved === false) { if (!refresh && current(token)) setState('error', '头像昵称暂未准备好，请重新打开后重试'); return false; }
-    if (!current(token) || refresh && !sessionEnabled) return false;
-    sessionProfile = { ...profile };
-    if (refresh) return true;
-    sessionConfirmed = true; sessionEnabled = true; profileRevoked = false;
-    authSetting = Object.assign({}, authSetting, { 'scope.userInfo': true }); destroyButton(); setState('ready', '微信授权已完成'); notifyReady();
-    return true;
-  }
-  function handleProfileTap(token, result) {
-    if (!current(token) || !needsProfile || profileFlight) return;
-    const failed = !publicProfile(result);
-    if (failed) { setState('denied', '你暂未授权头像昵称，可前往微信设置开启，或返回继续游戏', false, true); return; }
-    setState('authorizing', '正在读取微信头像昵称…');
-    profileFlight = saveProfile(token, result).catch(function (error) {
-      if (current(token) && !error.cancelled) setState(denial(error) ? 'denied' : 'error', denial(error) ? '微信头像昵称授权未完成，可前往设置开启' : '头像昵称暂未准备好，请重新打开后重试', false, denial(error));
-      return false;
-    }).finally(function () { if (current(token)) profileFlight = null; });
+    if (typeof handlers.onReady === 'function') {
+      try { handlers.onReady({ authSetting: authSetting && { ...authSetting } }); } catch (_) {}
+    }
   }
   function available() {
     if (!api) { setState('unavailable', '请在微信小游戏中授权并查看排行榜'); return false; }
-    if (['requirePrivacyAuthorize', 'getSetting', 'getUserInfo', 'createUserInfoButton'].some(function (name) { return typeof api[name] !== 'function'; })) {
+    if (['requirePrivacyAuthorize', 'getSetting'].some(function (name) { return typeof api[name] !== 'function'; })) {
       setState('unavailable', '当前微信版本暂不支持排行榜授权，请更新微信后重试'); return false;
     }
     return true;
   }
+
   // Privacy requests must start directly from the player's ranking/retry tap.
   function open() {
     if (flight) return flight;
-    if (profileFlight) return profileFlight.then(getState);
-    if (active && settingsAllowed) return openSettings();
     foreground = true;
-    if (sessionConfirmed && sessionProfile && !profileRevoked) {
-      active = true; destroyButton(); const token = ++revision;
-      Array.from(cancellations).forEach(function (cancel) { cancel(); }); validationFlight = null;
-      setState('ready', '微信授权已完成');
+    if (sessionConfirmed && !privacyRevoked) {
+      active = true;
+      const token = ++revision;
+      cancelPending(); validationFlight = null;
+      setState('ready', '微信隐私授权已完成');
       flight = revalidate().then(function () {
-        if (current(token) && sessionEnabled) {
-          notifyReady();
-          // Refresh public names without reopening or delaying the cached list.
-          saveProfile(token, undefined, true).catch(function (error) {
-            if (current(token) && !error.cancelled && denial(error)) {
-              sessionEnabled = false; profileRevoked = true;
-              authSetting = Object.assign({}, authSetting, { 'scope.userInfo': false });
-              setState('denied', '头像昵称权限尚未开启，请前往微信设置授权', false, true);
-            }
-          });
-        }
+        if (current(token) && sessionEnabled) notifyReady();
         return getState();
       }).finally(function () { if (current(token)) flight = null; });
       return flight;
@@ -167,141 +90,122 @@ function createRankingAuthorization(platform, callbacks) {
     return authorize();
   }
   function authorize() {
-    sessionConfirmed = false; sessionEnabled = false; active = true; destroyButton();
-    authSetting = null; checking = false;
+    sessionEnabled = false; active = true; authSetting = null; checking = false;
     const token = ++revision;
-    Array.from(cancellations).forEach(function (cancel) { cancel(); }); validationFlight = null;
+    cancelPending(); validationFlight = null;
     if (!available()) return Promise.resolve(getState());
     setState('privacy', '请阅读并选择是否同意微信隐私授权');
     flight = (async function () {
-      let stage = 'privacy';
+      let privacyAccepted = false;
       try {
         // Consent has no timeout; only closing the page cancels it.
         await native(token, 'requirePrivacyAuthorize', {}, 0);
         check(token);
-        stage = 'profile'; setState('authorizing', '正在检查微信头像昵称授权…');
-        const setting = await native(token, 'getSetting', {}, 20000);
+        privacyAccepted = true; sessionConfirmed = true; privacyRevoked = false;
+        setState('authorizing', '正在确认好友榜权限…');
+        const settings = settingsOf(await native(token, 'getSetting', {}, 20000));
         check(token);
-        authSetting = setting && setting.authSetting && typeof setting.authSetting === 'object' && !Array.isArray(setting.authSetting) ? { ...setting.authSetting } : null;
-        stage = 'profile';
-        if (setting && setting.authSetting && setting.authSetting['scope.userInfo'] === true) {
-          setState('authorizing', '正在读取微信头像昵称…'); await saveProfile(token);
-        } else if (setting && setting.authSetting && setting.authSetting['scope.userInfo'] === false) {
-          setState('denied', '头像昵称权限尚未开启，请前往微信设置授权', false, true);
-        } else setState('needs-profile', '点击下方微信按钮，授权使用头像和昵称展示排行榜', true);
+        if (!settings) throw new Error('SETTING_UNAVAILABLE');
+        authSetting = settings; sessionEnabled = true;
+        setState('ready', '微信隐私授权已完成'); notifyReady();
       } catch (error) {
         if (current(token) && !error.cancelled) {
-          const refused = denial(error);
-          setState(refused ? 'denied' : 'error', stage === 'privacy' ?
-            (refused ? '你暂未同意隐私授权，可以返回继续游戏，或点击重试' : '微信隐私授权暂未完成，请重新打开后重试') :
-            refused ? '微信头像昵称授权未完成，可前往设置开启' : '头像昵称暂未准备好，请重新打开后重试', false, refused && stage === 'profile');
+          if (!privacyAccepted) {
+            sessionConfirmed = false; privacyRevoked = denial(error); authSetting = null;
+            setState(denial(error) ? 'denied' : 'error', denial(error) ?
+              '你暂未同意隐私授权，可以返回继续游戏，或点击重试' : '微信隐私授权暂未完成，请重新打开后重试');
+          } else {
+            sessionEnabled = false;
+            setState('error', '微信授权状态暂未确认，请点击重试');
+          }
         }
       } finally { if (current(token)) flight = null; }
       return getState();
     })();
     return flight;
   }
-  function updateButton(next, options) {
-    const requested = typeof options === 'boolean' ? options : !options || options.visible !== false;
-    if (next && [next.left, next.top, next.width, next.height].every(Number.isFinite) && next.width > 0 && next.height > 0) {
-      rect = { left: next.left, top: next.top, width: next.width, height: next.height }; wantsButton = requested;
-    } else { rect = null; wantsButton = false; }
-    reconcileButton(); return getState();
-  }
+
+  // Retained as no-op compatibility methods until the profile-button view code
+  // is removed. They never construct or open native user profile controls.
+  function updateButton() { return getState(); }
+  function openSettings() { return Promise.resolve(getState()); }
   function hide() {
     foreground = false;
+    // A cold restore must not complete after the game has entered background.
+    // Explicit system consent dialogs are allowed to return normally.
     if (!sessionConfirmed && validationFlight) {
-      revision++; Array.from(cancellations).forEach(cancel => cancel());
-      validationFlight = null; checking = false;
+      revision++; cancelPending(); validationFlight = null; checking = false;
     }
-    reconcileButton();
   }
-  function show() { foreground = true; reconcileButton(); }
-  // Open settings directly from a tap, then recheck consent.
-  function openSettings() {
-    if (flight) return flight;
-    if (!active || !settingsAllowed) return Promise.resolve(getState());
-    if (typeof api.openSetting !== 'function') return Promise.resolve(setState('unavailable', '当前微信暂不支持打开授权设置，请更新微信后重试'));
-    const token = revision;
-    sessionConfirmed = false; sessionEnabled = false;
-    checking = false;
-    destroyButton(); setState('authorizing', '请在微信设置中允许使用头像昵称');
-    flight = native(token, 'openSetting', {}, 0).then(function (result) {
-      check(token);
-      if (!result || !result.authSetting || result.authSetting['scope.userInfo'] !== true) return setState('denied', '头像昵称权限尚未开启，可再次前往设置，或返回继续游戏', false, true);
-      flight = null;
-      return authorize();
-    }).catch(function (error) {
-      if (current(token) && !error.cancelled) setState('denied', '微信授权设置暂未完成，可以点击重试', false, true);
-      return getState();
-    }).finally(function () { if (current(token)) flight = null; });
-    return flight;
-  }
-  // Read-only checks may outlive the page. Failure disables sync until rechecked.
+  function show() { foreground = true; }
+
+  // Read-only checks may outlive the ranking page. Failure disables writes but
+  // keeps a previously confirmed cached list visible until a definitive revoke.
   function revalidate() {
     if (validationFlight) return validationFlight;
-    if (flight || profileFlight) return Promise.resolve(null);
+    if (flight) return Promise.resolve(null);
     if (!sessionConfirmed) return restore();
     const token = revision;
     sessionEnabled = false; checking = true;
-    // Retain both outcomes: a failed request must not hide an explicit revocation
-    // returned by the other request, or leave its callback in the next check.
+    // Retain both outcomes: a failed request must not hide an explicit privacy
+    // revocation returned by the other request or leak a callback into a retry.
     const outcome = task => task.then(value => ({ value }), error => ({ error }));
-    const privacy = typeof api.getPrivacySetting === 'function' ? native(token, 'getPrivacySetting', {}, 20000, true) : Promise.resolve(null);
-    validationFlight = Promise.all([outcome(native(token, 'getSetting', {}, 20000, true)), outcome(privacy)]).then(function ([settingResult, privacyResult]) {
+    const privacy = typeof api.getPrivacySetting === 'function' ?
+      native(token, 'getPrivacySetting', {}, 20000, true) : Promise.resolve(null);
+    validationFlight = Promise.all([
+      outcome(native(token, 'getSetting', {}, 20000, true)),
+      outcome(privacy),
+    ]).then(function ([settingResult, privacyResult]) {
       if (!current(token, true)) throw cancelled();
-      const result = settingResult.value, privacySetting = privacyResult.value;
+      const privacySetting = privacyResult.value;
       if (privacySetting && privacySetting.needAuthorization === true) {
-        sessionConfirmed = false; profileRevoked = true; authSetting = null;
-        if (active) setState('denied', '微信隐私授权需要重新确认，请点击重试', false, false);
+        sessionConfirmed = false; privacyRevoked = true; authSetting = null;
+        if (active) setState('denied', '微信隐私授权需要重新确认，请点击重试');
         return null;
       }
-      if (result && result.authSetting && result.authSetting['scope.userInfo'] === false) profileRevoked = true;
       if (settingResult.error || privacyResult.error) throw settingResult.error || privacyResult.error;
-      if (typeof api.getPrivacySetting === 'function' && (!privacySetting || privacySetting.needAuthorization !== false)) throw new Error('PRIVACY_UNAVAILABLE');
-      if (!result || !result.authSetting || typeof result.authSetting !== 'object' || Array.isArray(result.authSetting)) throw new Error('SETTING_UNAVAILABLE');
-      authSetting = { ...result.authSetting };
-      sessionEnabled = authSetting['scope.userInfo'] === true;
-      profileRevoked = !sessionEnabled;
-      if (active) {
-        if (sessionEnabled) setState('ready', '微信授权已完成');
-        else setState('denied', '头像昵称权限尚未开启，请前往微信设置授权', false, true);
-      }
+      if (typeof api.getPrivacySetting === 'function' &&
+          (!privacySetting || privacySetting.needAuthorization !== false)) throw new Error('PRIVACY_UNAVAILABLE');
+      const settings = settingsOf(settingResult.value);
+      if (!settings) throw new Error('SETTING_UNAVAILABLE');
+      authSetting = settings; sessionConfirmed = true; privacyRevoked = false; sessionEnabled = true;
+      if (active) setState('ready', '微信隐私授权已完成');
       return { ...authSetting };
     }).catch(function (error) {
       if (current(token, true) && !error.cancelled && active) setState('error', '微信授权状态暂未确认，请点击重试');
       return null;
-    }).finally(function () { if (current(token, true)) { validationFlight = null; checking = false; } });
+    }).finally(function () {
+      if (current(token, true)) { validationFlight = null; checking = false; }
+    });
     return validationFlight;
   }
-  // Cold launches recover existing consent without opening any native dialog.
+
+  // Cold launches recover existing privacy consent without opening a dialog.
+  // The returned setting snapshot is interpreted by friend-leaderboard.
   function restore() {
-    if (!foreground || active || sessionProfile || profileRevoked || !api ||
-        ['getPrivacySetting', 'getSetting', 'getUserInfo'].some(name => typeof api[name] !== 'function')) return Promise.resolve(null);
+    if (!foreground || active || privacyRevoked || !api ||
+        ['getPrivacySetting', 'getSetting'].some(name => typeof api[name] !== 'function')) return Promise.resolve(null);
     const token = revision;
     checking = true;
-    validationFlight = (async () => {
+    validationFlight = (async function () {
       const privacy = await native(token, 'getPrivacySetting', {}, 20000, true);
-      if (!privacy || privacy.needAuthorization !== false) return null;
-      const result = await native(token, 'getSetting', {}, 20000, true);
-      const settings = result && result.authSetting;
-      if (!settings || settings['scope.userInfo'] !== true || settings['scope.WxFriendInteraction'] !== true) return null;
-      const profile = publicProfile(await native(token, 'getUserInfo', { withCredentials: false, lang: 'zh_CN' }, 20000, true));
-      if (!profile || !current(token, true) || !foreground) return null;
-      if (typeof handlers.onProfile === 'function' && await handlers.onProfile({ ...profile }) === false) return null;
-      if (!current(token, true) || !foreground) return null;
-      sessionProfile = profile; sessionConfirmed = true; sessionEnabled = true;
-      authSetting = { ...settings };
+      if (!privacy || privacy.needAuthorization !== false) {
+        if (privacy && privacy.needAuthorization === true) privacyRevoked = true;
+        return null;
+      }
+      const settings = settingsOf(await native(token, 'getSetting', {}, 20000, true));
+      if (!settings || !current(token, true) || !foreground) return null;
+      authSetting = settings; sessionConfirmed = true; privacyRevoked = false; sessionEnabled = true;
       return { ...authSetting };
-    })().catch(() => null).finally(() => {
+    })().catch(function () { return null; }).finally(function () {
       if (current(token, true)) { validationFlight = null; checking = false; }
     });
     return validationFlight;
   }
   function close() {
-    active = false; revision++; Array.from(cancellations).forEach(function (cancel) { cancel(); });
-    flight = null; profileFlight = null; validationFlight = null; checking = false; rect = null; wantsButton = false; destroyButton();
-    state = { status: 'idle', message: '授权头像昵称后即可参与排行榜' }; needsProfile = false; settingsAllowed = false;
+    active = false; revision++; cancelPending();
+    flight = null; validationFlight = null; checking = false;
+    state = { status: 'idle', message: '同意微信隐私授权后即可查看排行榜' };
   }
   function openContract() {
     if (!api || typeof api.openPrivacyContract !== 'function') return Promise.resolve(false);

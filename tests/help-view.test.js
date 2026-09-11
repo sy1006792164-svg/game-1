@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { CAMPAIGN } = require('../src/levels');
+const { STAR_TWO_MARGIN } = require('../src/engine');
 const { Renderer } = require('../src/renderer');
 const { helpContent } = require('../src/help-view');
 const { drawModal } = require('../src/modal-view');
@@ -33,7 +34,9 @@ test('help only offers rewarded relighting when the active platform can show it'
     assert.equal(helpContent(level, 0, kind, { canRevive: false }).lines.some(line => /广告/.test(line)), false);
   }
   const available = helpContent(level, 0, 'wechat', { canRevive: true });
-  assert.ok(available.lines.some(line => /最高二星/.test(line)), 'the star consequence is available before a player chooses an ad');
+  assert.ok(available.lines.some(line => /封顶二星/.test(line)), 'the star consequence is available before a player chooses an ad');
+  const late = helpContent(CAMPAIGN[0], 1, 'wechat', { canRevive: true, turn: CAMPAIGN[0].par + STAR_TWO_MARGIN });
+  assert.ok(late.sections.some(section => /本次最多一星/.test(section.text)), 'late relights disclose the reachable rating');
   assert.ok(helpContent(level, 0, 'browser').sections.some(section => section.title === '电脑操作' && /WASD/.test(section.text)));
 });
 

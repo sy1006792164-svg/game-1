@@ -25,11 +25,11 @@ function drawStatusCard(r, box) {
 
 function drawMessage(r, message, y, warning) {
   r.wrapLines(message, 294, 12).slice(0, 4).forEach((line, index) =>
-    r.text(line, 195, y + index * 20, 12, warning ? C.gold : C.muted, 'center'));
+    r.text(line, 195, y + index * 20, 12, warning ? C.goldText : C.muted, 'center'));
 }
 
 function drawFooter(r, note, warning) {
-  r.label(note, 195, r.H - 18, 342, 10, warning ? C.gold : C.muted, 'center');
+  r.label(note, 195, r.H - 18, 342, 10, warning ? C.goldText : C.muted, 'center');
 }
 
 function drawRankPlaceholder(r, game, box) {
@@ -85,26 +85,16 @@ function drawAuthorization(r, game, box, state) {
   const unavailable = state.status === 'unavailable';
   const warning = ['denied', 'error'].includes(state.status);
   const top = drawStatusCard(r, box);
-  const title = unavailable ? '好友排行，在微信里相见' : '用熟悉的名字，点亮好友榜';
+  const title = unavailable ? '好友排行，在微信里相见' : '开启好友排行';
   r.text(title, 195, top + 121, 20, C.ink, 'center', '600');
-  r.text(unavailable ? '浏览器中可以完整体验解谜旅程' : '头像和昵称用于展示你的成绩', 195, top + 156, 12, C.muted, 'center');
-  if (!unavailable) r.text('随后由微信确认好友互动权限', 195, top + 179, 11, C.muted, 'center');
+  r.text(unavailable ? '浏览器中可以完整体验解谜旅程' : '好友头像与昵称由微信好友榜提供', 195, top + 156, 12, C.muted, 'center');
+  if (!unavailable) r.text('确认隐私授权后，再申请好友互动权限', 195, top + 179, 11, C.muted, 'center');
   drawMessage(r, state.message || '首次使用时，请完成微信隐私授权', top + 216, warning);
 
   const buttonY = top + 302;
-  if (state.needsProfile && !unavailable) {
-    // The real consent control is native; keep its CSS-pixel bounds aligned.
-    r.round(55, buttonY + 3, 280, 48, 12, '#285c50');
-    r.round(55, buttonY, 280, 48, 12, C.green);
-    r.text('授权头像昵称并查看', 195, buttonY + 24, 15, C.white, 'center', '600');
-    auth.updateButton({ left: r.ox + 55 * r.scale, top: r.oy + buttonY * r.scale, width: 280 * r.scale, height: 48 * r.scale },
-      { visible: !game.hidden && !game.modal });
-  } else {
-    auth.updateButton(null);
-    if (!unavailable) {
-      if (state.canOpenSettings) r.button('去设置授权', 55, buttonY, 280, 48, () => auth.openSettings(), { style: 'primary' });
-      else if (['idle', 'denied', 'error'].includes(state.status)) r.button('重新申请授权', 55, buttonY, 280, 48, () => auth.open(), { style: 'primary' });
-    }
+  auth.updateButton(null);
+  if (!unavailable && ['idle', 'denied', 'error'].includes(state.status)) {
+    r.button(state.status === 'error' ? '重试' : '确认并查看好友榜', 55, buttonY, 280, 48, () => auth.open(), { style: 'primary' });
   }
   if (!unavailable) {
     r.button('隐私保护指引', 45, top + 375, 144, 38, () => auth.openContract(), { style: 'quiet' });

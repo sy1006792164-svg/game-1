@@ -37,8 +37,8 @@ function drawStampArt(r, stamp, rect, { next = false, held = false } = {}) {
   stampOutline(c, 0, 0, w, h); c.fillStyle = paper; c.fill(); c.strokeStyle = border; c.lineWidth = held ? 1.8 : next ? 1.3 : .8; c.stroke();
   r.round(6, 6, w - 12, h - 12, 2, null, owned ? '#d9dfc6' : next ? '#e2c796' : '#c9d7c6');
   r.text(String(stamp.index + 1).padStart(2, '0'), 13, 17, 9, C.muted);
-  if (next) r.round(w - 56, 9, 45, 17, 5, '#edd1a1');
-  r.text(owned ? '已收藏' : next ? '下一枚' : '待收藏', w - 14, 17, 9, next ? '#926c39' : C.muted, 'right');
+  if (next) r.round(w - 56, 9, 45, 17, 5, '#f5dfb5');
+  r.text(owned ? '已收藏' : next ? '下一枚' : '待收藏', w - 14, 17, 9, next ? C.goldText : C.muted, 'right');
   r.circle(middle, 65, 28, owned ? '#7f967521' : next ? '#b8874220' : '#8da18d15');
   r.circle(middle, 62, 28, owned ? '#eff1df' : next ? '#f9e6bd' : '#d9e5d5', owned ? '#c3d0b1' : next ? '#d7b777' : '#b6cbb6');
   r.circle(middle, 62, 23, null, owned ? '#fffdf4' : next ? '#fff2d8' : '#ecf1e7');
@@ -52,8 +52,8 @@ function drawStampArt(r, stamp, rect, { next = false, held = false } = {}) {
     c.restore();
   }
   r.line([[18, 94], [w - 18, 94]], owned ? '#c9d2b6' : next ? '#d5b98b' : '#bbceb9', .8);
-  r.label(stamp.name, middle, 110, w - 18, 12, owned ? C.ink : next ? '#92643c' : '#637d68', 'center', '600');
-  r.label(owned ? '累计 ' + stamp.target + ' 星' : '还差 ' + (stamp.goal - stamp.current) + ' 星', middle, 130, w - 18, 9.5, next ? '#98703e' : C.muted, 'center');
+  r.label(stamp.name, middle, 110, w - 18, 12, owned ? C.ink : next ? '#92643c' : C.muted, 'center', '600');
+  r.label(owned ? '累计 ' + stamp.target + ' 星' : '还差 ' + (stamp.goal - stamp.current) + ' 星', middle, 130, w - 18, 9.5, next ? C.goldText : C.muted, 'center');
   c.restore();
 }
 

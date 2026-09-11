@@ -1,7 +1,7 @@
 'use strict';
 
 // Only our score enters the child; hosted records and friend identities stay there.
-const FRIEND_STORAGE_KEY = 'wind_letter_rank_v1';
+const FRIEND_STORAGE_KEY = 'stars';
 const CHANNEL = 'wind-letter-friends-v1';
 const FRIEND_SCOPE = 'scope.WxFriendInteraction';
 

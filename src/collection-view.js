@@ -17,11 +17,11 @@ function drawSummary(r, game, album) {
     const held = !game.modal && game.pointer && insideRect({ x: 139, y: 100, w: 220, h: 101 }, game.pointer.x, game.pointer.y);
     r.round(139, 101, 219, 99, 12, held ? '#efe0bd' : '#f5ecd7', held ? '#c59c65' : '#dfcba8');
   }
-  r.text(next ? '下一枚收藏 · 去送信' : '全套珍藏已集齐', contentX, 114, 10, next ? C.gold : C.green);
+  r.text(next ? '下一枚收藏 · 去送信' : '全套珍藏已集齐', contentX, 114, 10, next ? C.goldText : C.green);
   r.label(next ? next.name : '沿途的风，都在这里', contentX, 140, contentWidth - (next ? 32 : 0), 16, C.ink, 'left', '600');
   if (next) {
     r.text('再得 ' + (next.goal - next.current) + ' 星', contentX, 165, 11, C.muted);
-    r.text(next.current + ' / ' + next.goal + ' 星', contentRight, 165, 10, C.gold, 'right');
+    r.text(next.current + ' / ' + next.goal + ' 星', contentRight, 165, 10, C.goldText, 'right');
     r.meter(contentX, 187, contentWidth, next.current, next.goal, C.gold);
     r.actionIcon('arrow-right', contentRight - 10, 140, C.gold);
     r.hit(139, 100, 220, 101, () => game.openPage('levels'));

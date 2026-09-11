@@ -32,7 +32,7 @@ function handleGameKey(game, key) {
   }
   if (key === 'Escape') {
     if (game.page === 'game') game.pause();
-    else if (['levels', 'collection', 'leaderboard'].includes(game.page)) game.home();
+    else if (['levels', 'collection', 'leaderboard', 'settings'].includes(game.page)) game.home();
     return true;
   }
   const delta = SCROLL_DELTA[key], edge = key === 'Home' || key === 'End';

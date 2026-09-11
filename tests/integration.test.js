@@ -46,7 +46,7 @@ function harness(options = {}) {
   const audio = [];
   const { canvas, calls } = canvasMock();
   const closeListeners = new Set(); const errorListeners = new Set();
-  let now = options.now ?? 1000; let frame = 0; let showCount = 0;
+  let now = options.now ?? 1000; let frame = 0; let showCount = 0; let vibrations = 0;
   const ad = {
     show: () => { showCount++; return Promise.resolve(); }, load: () => Promise.resolve(),
     onClose: handler => closeListeners.add(handler), offClose: handler => closeListeners.delete(handler),
@@ -68,7 +68,7 @@ function harness(options = {}) {
       },
     }, canvas,
     storage: { get: key => clone(data.get(key)), set: (key, value) => data.set(key, clone(value)), remove: key => data.delete(key) },
-    resize: () => metrics, now: () => now, raf: callback => { callbacks.frame = callback; return ++frame; }, cancelRaf: () => {}, vibrate: () => {},
+    resize: () => metrics, now: () => now, raf: callback => { callbacks.frame = callback; return ++frame; }, cancelRaf: () => {}, vibrate: () => { vibrations++; },
     setFrameRate: fps => frameRates.push(fps),
     onResize: handler => { callbacks.resize = handler; }, onPointer: handler => { callbacks.pointer = handler; },
     onKey: handler => { callbacks.key = handler; }, onHide: handler => { callbacks.hide = handler; }, onShow: handler => { callbacks.show = handler; },
@@ -106,6 +106,7 @@ function harness(options = {}) {
   return {
     game, data, clock, calls, callbacks, platform, draw, soundCalls, audio, ad, frameRates, metrics,
     get showCount() { return showCount; },
+    get vibrations() { return vibrations; },
     advance(ms, runLoop = true) { now += ms; if (runLoop) game.loop(); },
     act(action) { now += 200; game.act(action); },
     start(level = CAMPAIGN[0], mode = 'campaign') { game.start(level, mode); },
@@ -689,7 +690,8 @@ test('browser idle scenery paints at 30 FPS while input and active scrolling rem
     h.game.levelScroll.touching = true;
     paints = 0;
     for (let i = 0; i < 6; i++) frame();
-    assert.equal(paints, 6, 'a held list still paints each incoming frame');
+    assert.equal(paints, quiet ? 3 : 6,
+      quiet ? 'reduced motion caps active lists at 30 FPS' : 'a held list still paints each incoming frame');
   }
 });
 
@@ -825,21 +827,83 @@ test('an ad timeout cannot unmute a video that has not closed or award a late re
   h.destroy();
 });
 
-test('removed audio settings cannot leave legacy players muted and progress survives migration', () => {
+test('saved experience settings independently control music, sounds and effective motion', () => {
   const completed = { 1: { stars: 3, bestTurns: 8 } };
   const data = new Map([[PROFILE_KEY, { version: 1, completed, daily: {}, totalWins: 1,
     settings: { music: false, sound: false, haptics: false, reducedMotion: true } }]]);
   const h = harness({ withAudio: true, data });
-  assert.equal('settings' in h.game.profile(), false);
-  assert.equal(h.game.renderer.reducedMotion, false);
+  assert.deepEqual(h.game.profile().settings,
+    { music: false, sound: false, haptics: false, reducedMotion: true });
+  assert.equal(h.game.renderer.reducedMotion, true);
   assert.deepEqual(h.game.profile().completed, completed);
-  assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1);
+  assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 0);
   h.game.cue('tap');
-  assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 1);
-  h.callbacks.audioBegin(); h.callbacks.hide(); h.callbacks.show(); h.callbacks.audioEnd();
-  h.game.unlockAudio(); h.game.cue('tap');
+  assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 0);
+  h.game.toggle('music');
   assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1);
+  h.game.toggle('sound'); h.game.cue('tap');
   assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 1);
+  h.game.toggle('reducedMotion'); h.draw();
+  assert.equal(h.game.renderer.reducedMotion, false);
+  const reloaded = harness({ data });
+  assert.deepEqual(reloaded.game.profile().settings,
+    { music: true, sound: true, haptics: false, reducedMotion: false });
+  h.destroy(); reloaded.destroy();
+});
+
+test('reduced motion combines the saved choice with the live system preference and caps frame rate', () => {
+  const h = harness({ kind: 'browser' });
+  const frame = () => { h.advance(1000 / 60, false); h.callbacks.frame(); };
+  h.platform.reducedMotion = true;
+  h.game.openPage('levels'); h.game.levelScroll.touching = true;
+  frame(); h.draw();
+  assert.equal(h.game.reducedMotion(), true);
+  assert.equal(h.game.renderer.reducedMotion, true);
+  assert.equal(h.frameRates.at(-1), 30);
+  h.platform.reducedMotion = false; h.game.toggle('reducedMotion');
+  frame(); h.draw();
+  assert.equal(h.game.reducedMotion(), true, 'the saved choice works without a system preference');
+  assert.equal(h.frameRates.at(-1), 30);
+  h.game.toggle('reducedMotion'); frame();
+  assert.equal(h.game.reducedMotion(), false);
+  assert.equal(h.frameRates.at(-1), 60, 'active scrolling can use 60 FPS after both preferences are off');
+  h.destroy();
+});
+
+test('disabling haptics stops only hardware vibration and retains visual collection feedback', () => {
+  for (const enabled of [true, false]) {
+    const h = harness({ kind: 'wechat' }), level = CAMPAIGN[0];
+    if (!enabled) h.game.toggle('haptics');
+    h.start(level); h.draw(900);
+    level.solution.slice(0, 3).forEach(action => h.act(action));
+    assert.equal(h.vibrations > 0, enabled);
+    const camera = h.game.camera, baseline = { panX: camera.panX, panY: camera.panY };
+    h.draw(45);
+    const view = h.game.renderer.boardGeometry.view;
+    assert.ok(Math.hypot(view.panX - baseline.panX, view.panY - baseline.panY) > 0,
+      'canvas feedback remains visible when hardware vibration is ' + (enabled ? 'on' : 'off'));
+    h.destroy();
+  }
+});
+
+test('clearing local data requires confirmation and accurately resets the current environment only', () => {
+  const h = harness();
+  h.game.store.recordWin(1, 3, 4); h.start(); h.game.toggle('sound');
+  h.game.openPage('settings');
+  assert.equal(h.game.resetPrompt(), true);
+  assert.equal(h.game.profile().totalWins, 1, 'opening the confirmation does not clear anything');
+  assert.match(h.game.modal.lines.join(''), /正式版本.*通关记录.*体验设置/);
+  assert.match(h.game.modal.lines.join(''), /排行榜.*不会随之删除/);
+  h.game.modal.buttons[0].action();
+  assert.equal(h.game.profile().totalWins, 1, 'the primary cancellation keeps local data');
+  h.game.resetPrompt(); h.game.modal.buttons[1].action();
+  assert.equal(h.game.page, 'home');
+  assert.equal(h.game.savedRun(), null);
+  assert.deepEqual(h.game.profile(), {
+    version: 1, completed: {}, daily: {},
+    settings: { sound: true, music: true, haptics: true, reducedMotion: false }, totalWins: 0,
+  });
+  assert.match(h.game.toastText, /本机数据已清除.*恢复默认/);
   h.destroy();
 });
 
@@ -1079,7 +1143,7 @@ test('cancelled ads do not revive and the same route can relight repeatedly acro
   assert.equal(h.game.state.status, 'failed');
   const failed = clone(h.game.state);
   assert.match(h.game.modal.buttons[0].text, /看广告续灯 \+8 拍/);
-  assert.ok(h.game.modal.lines.some(line => line.includes('不限次数')));
+  assert.ok(h.game.modal.lines.some(line => line.includes('可再次续灯')));
   let pending = h.game.requestRevive();
   await Promise.resolve();
   assert.equal(h.game.busy, true);
@@ -1270,7 +1334,8 @@ test('a transient profile read failure retries before checking whether the saved
 
 test('unread profile or route data cannot be cleared or replaced by a continue attempt', t => {
   for (const unreadKey of [PROFILE_KEY, RUN_KEY]) for (const entry of ['primary', 'restore']) {
-    const profile = { version: 1, completed: { 1: { stars: 3, bestTurns: 4 } }, daily: {}, totalWins: 1 };
+    const profile = { version: 1, completed: { 1: { stars: 3, bestTurns: 4 } }, daily: {},
+      settings: { sound: true, music: true, haptics: true, reducedMotion: false }, totalWins: 1 };
     const progress = { mode: 'campaign', levelId: 2, revision: CAMPAIGN[1].revision,
       actions: ['right'], reviveHistory: [], undosUsed: 0 };
     const data = new Map([[PROFILE_KEY, clone(profile)], [RUN_KEY, clone(progress)]]), get = data.get.bind(data);
@@ -1680,7 +1745,7 @@ test('a failed route can be reviewed without spending turns and free retry prese
   const failed = clone(h.game.state), saved = clone(h.game.store.loadRun());
   assert.equal(h.game.modal.buttons[0].primary, true);
   assert.match(h.game.modal.buttons[0].text, /看广告续灯/, 'with a configured ad the relight leads the failure dialog');
-  assert.ok(h.game.modal.lines.some(line => /最高二星/.test(line)), 'the score limit is disclosed before choosing an ad');
+  assert.ok(h.game.modal.lines.some(line => /本次通关至多一星/.test(line)), 'the reachable score is disclosed before choosing an ad');
   const retry = h.game.modal.buttons.find(button => /免费再试/.test(button.text));
   assert.ok(retry, 'the free retry always remains available');
   assert.equal(retry.primary, false);
@@ -2105,13 +2170,17 @@ test('a current-version save resumes its exact actions without an upgrade notice
   h.destroy(); reloaded.destroy();
 });
 
-test('the fresh home offers delivery, selection, stamps and rankings without an unverified game circle', () => {
+test('the fresh home offers delivery and four compact links without an unverified game circle', () => {
   const h = harness(); h.draw();
   const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
-  for (const label of ['开始送信', '选关', '邮票', '排行']) assert.ok(texts.includes(label));
+  for (const label of ['开始送信', '选关', '邮票', '排行', '设置']) assert.ok(texts.includes(label));
   assert.equal(texts.includes('圈子'), false);
-  assert.equal(texts.some(text => /设置|每日|成长|LV\.|已走 0 拍|本周|下一小步/.test(text)), false);
-  assert.equal(h.game.renderer.hits.length, 4, 'delivery, selection, stamps and rankings are available');
+  assert.equal(texts.some(text => /每日|成长|LV\.|已走 0 拍|本周|下一小步/.test(text)), false);
+  assert.equal(h.game.renderer.hits.length, 5, 'delivery and four home links are available');
+  h.game.renderer.hits.at(-1).action(); h.draw();
+  assert.equal(h.game.page, 'settings');
+  assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '体验设置'));
+  h.callbacks.key('Escape'); assert.equal(h.game.page, 'home');
   h.destroy();
 });
 
@@ -2129,8 +2198,10 @@ test('home renders and opens the game circle only in WeChat develop and trial ve
         const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
         assert.equal(texts.includes('圈子'), available, kind + '/' + envVersion);
         const hits = h.game.renderer.hits;
-        assert.equal(hits.length, available ? 5 : 4, 'hidden circles have no hit target');
+        assert.equal(hits.length, available ? 6 : 5, 'hidden circles have no hit target');
         assert.equal(hits[1].x + hits.at(-1).x + hits.at(-1).w, 390, 'navigation stays centered');
+        assert.ok(hits.slice(1).every(hit => hit.x >= 0 && hit.x + hit.w <= 390 && hit.w >= 44 && hit.h >= 44),
+          'all four or five links remain visible and touch accessible');
         if (available) {
           await hits.at(-1).action();
           assert.equal(shown.length, 1);
@@ -2520,21 +2591,16 @@ test('friend-only ranking navigation preserves the active route and has no world
   }
 });
 
-test('friend ranking uses existing local bests after native consent without login or cloud development', async () => {
-  const events = [], privacy = [], buttons = [], authorizations = [], messages = [];
-  const avatarUrl = 'https://thirdwx.qlogo.cn/mmopen/authorized/132';
+test('friend ranking uses existing local bests after privacy and friend consent without login or profile access', async () => {
+  const events = [], privacy = [], authorizations = [], messages = [];
   const context = { canvas: { width: 1, height: 1 }, postMessage(message) { messages.push(message); } };
   const h = harness({ development: true, wx: {
     get cloud() { throw new Error('Cloud development must not be accessed'); },
     get login() { throw new Error('Native friend ranking needs no login'); },
     requirePrivacyAuthorize(options) { events.push('privacy'); privacy.push(options); },
-    getSetting(options) { options.success({ authSetting: {} }); },
-    getUserInfo(options) { assert.equal(options.withCredentials, false); options.success({ userInfo: { nickName: '微信邮差', avatarUrl } }); },
-    createUserInfoButton(options) {
-      assert.equal(options.withCredentials, false);
-      const button = { style: options.style, onTap(fn) { this.tap = fn; }, offTap() {}, show() {}, hide() {}, destroy() { this.destroyed = true; } };
-      buttons.push(button); return button;
-    },
+    getSetting(options) { options.success({ authSetting: { 'scope.userInfo': false } }); },
+    getUserInfo() { throw new Error('Friend ranking must not read profile data in the main domain'); },
+    createUserInfoButton() { throw new Error('Friend ranking must not create a profile button'); },
     authorize(options) { events.push('friend-permission'); authorizations.push(options); },
     getOpenDataContext() { return context; }
   } });
@@ -2544,16 +2610,13 @@ test('friend ranking uses existing local bests after native consent without logi
   h.game.openPage('leaderboard'); privacy[0].fail({ errMsg: 'requirePrivacyAuthorize:fail auth deny' });
   await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(messages, []);
   h.game.home(); h.game.openPage('leaderboard'); privacy[1].success();
-  await new Promise(resolve => setImmediate(resolve)); h.draw();
-  assert.equal(buttons.length, 1); assert.equal(buttons[0].style.width, 280 * h.game.renderer.scale);
-  buttons[0].tap({ errMsg: 'getUserInfo:ok', userInfo: { nickName: '微信邮差', avatarUrl } });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(authorizations[0].scope, 'scope.WxFriendInteraction'); assert.deepEqual(messages, []);
   authorizations[0].success(); await new Promise(resolve => setImmediate(resolve)); h.draw();
   const submitted = messages.find(message => message.action === 'submit');
-  assert.ok(submitted); assert.equal(submitted.key, 'wind_letter_rank_v1_development');
-  assert.deepEqual(submitted.score, { v: 2, stars: 5, completed: 2, turns: 10, name: '微信邮差', avatarUrl });
-  assert.equal(buttons[0].destroyed, true); assert.equal(h.game.friendLeaderboard.getState().status, 'ready');
+  assert.ok(submitted); assert.equal(submitted.key, 'stars_development');
+  assert.deepEqual(submitted.score, { v: 2, stars: 5, completed: 2, turns: 10, name: '我', avatarUrl: '' });
+  assert.equal(h.game.friendLeaderboard.getState().status, 'ready');
   h.game.home(); h.game.store.recordWin(2, 3, 5); h.game.syncFriendScore();
   assert.equal(messages.filter(message => message.action === 'submit').at(-1).score.stars, 6);
   assert.equal(Array.from(h.data.keys()).some(key => key.startsWith('wind-letter.ranking.')), false);
@@ -2562,14 +2625,14 @@ test('friend ranking uses existing local bests after native consent without logi
 
 function rankingHarness(options = {}) {
   const messages = [], authorizations = [], settings = [], checks = [], privacy = [];
-  let nickName = '微信邮差', holdChecks = false;
-  const permissions = { 'scope.userInfo': true, ...(options.friendGranted ? { 'scope.WxFriendInteraction': true } : {}) };
+  let holdChecks = false;
+  const permissions = { 'scope.userInfo': false, ...(options.friendGranted ? { 'scope.WxFriendInteraction': true } : {}) };
   const context = { canvas: { width: 1, height: 1 }, postMessage: message => messages.push(message) };
   const h = harness({ wx: {
-    requirePrivacyAuthorize: options => { privacy.push(options); options.success(); },
+    requirePrivacyAuthorize: request => { privacy.push(request); if (!options.holdPrivacy) request.success(); },
     getSetting: options => { if (holdChecks) checks.push(options); else options.success({ authSetting: { ...permissions } }); },
-    getUserInfo: options => options.success({ userInfo: { nickName, avatarUrl: '' } }),
-    createUserInfoButton() { throw new Error('Already authorized profile needs no native button'); },
+    getUserInfo() { throw new Error('Friend ranking must not read profile data in the main domain'); },
+    createUserInfoButton() { throw new Error('Friend ranking must not create a profile button'); },
     authorize: options => authorizations.push({ ...options,
       success: result => { permissions['scope.WxFriendInteraction'] = true; options.success(result); },
       fail: error => { permissions['scope.WxFriendInteraction'] = false; options.fail(error); } }),
@@ -2579,16 +2642,16 @@ function rankingHarness(options = {}) {
   } });
   h.game.store.recordWin(1, 3, 4);
   return { ...h, messages, authorizations, settings, checks, privacy, permissions,
-    rename: value => { nickName = value; }, holdChecks: value => { holdChecks = value; } };
+    holdChecks: value => { holdChecks = value; } };
 }
 const rankingTick = () => new Promise(resolve => setImmediate(resolve));
 
-test('revisiting rankings rechecks friend permission before a changed profile submits any score', async () => {
+test('revisiting rankings rechecks friend permission before a changed local score is submitted', async () => {
   for (const revoked of [false, true]) {
     const h = rankingHarness();
     try {
       h.game.openPage('leaderboard'); await rankingTick(); h.authorizations[0].success(); await rankingTick();
-      h.game.home(); h.rename('新昵称'); h.messages.length = 0; h.holdChecks(true);
+      h.game.home(); h.game.store.recordWin(2, 3, 5); h.messages.length = 0; h.holdChecks(true);
       h.game.openPage('leaderboard'); h.draw();
       assert.equal(h.game.friendLeaderboard.getState().status, 'preview', 'the click immediately restores the cached child');
       assert.ok(h.calls.some(call => call.method === 'drawImage'), 'cached ranks are drawn before any permission reply');
@@ -2598,7 +2661,7 @@ test('revisiting rankings rechecks friend permission before a changed profile su
       assert.equal(h.authorizations.length, 1); assert.equal(h.privacy.length, 1);
       assert.equal(h.checks.length, 1);
       assert.equal(h.messages.some(message => ['open', 'refresh', 'retry', 'submit'].includes(message.action)), false,
-        'showing cached ranks cannot initiate reads or changed-profile uploads during permission validation');
+        'showing cached ranks cannot initiate reads or changed-score uploads during permission validation');
       h.checks[0].success({ authSetting: { ...h.permissions, 'scope.WxFriendInteraction': !revoked } }); await rankingTick();
       assert.equal(h.authorizations.length, 1, 'a current settings snapshot replaces repeated friend authorization');
       if (revoked) {
@@ -2607,24 +2670,28 @@ test('revisiting rankings rechecks friend permission before a changed profile su
       } else {
         assert.equal(h.messages.filter(message => message.action === 'open').length, 1);
         const submitted = h.messages.filter(message => message.action === 'submit');
-        assert.equal(submitted.length, 1); assert.equal(submitted[0].score.name, '新昵称');
+        assert.equal(submitted.length, 1);
+        assert.deepEqual(submitted[0].score,
+          { v: 2, stars: 6, completed: 2, turns: 9, name: '我', avatarUrl: '' });
       }
     } finally { h.game.home(); h.destroy(); }
   }
 });
 
-test('a delayed background profile denial removes the already visible cached leaderboard', async () => {
-  const h = rankingHarness(), profiles = [];
+test('scope.userInfo false does not remove an already visible cached leaderboard', async () => {
+  const h = rankingHarness();
   try {
     h.game.openPage('leaderboard'); await rankingTick(); h.authorizations[0].success(); await rankingTick();
-    h.game.home(); h.game.platform.wx.getUserInfo = options => profiles.push(options); h.messages.length = 0;
-    h.game.openPage('leaderboard'); await rankingTick(); h.draw();
-    assert.equal(profiles.length, 1); assert.ok(h.calls.some(call => call.method === 'drawImage'));
-    profiles[0].fail({ errMsg: 'getUserInfo:fail auth deny' }); await rankingTick();
-    h.game.loop(); h.draw();
-    assert.equal(h.game.rankingAuthorization.getState().canDisplay, false);
-    assert.ok(h.messages.some(message => message.action === 'close'), 'known revocation purges the private child cache');
-    assert.equal(h.calls.some(call => call.method === 'drawImage'), false);
+    h.game.home(); h.messages.length = 0; h.holdChecks(true);
+    h.game.openPage('leaderboard'); h.draw(); await rankingTick();
+    assert.ok(h.calls.some(call => call.method === 'drawImage'));
+    h.checks[0].success({ authSetting: { 'scope.userInfo': false, 'scope.WxFriendInteraction': true } });
+    await rankingTick(); h.game.loop(); h.draw();
+    assert.equal(h.game.rankingAuthorization.getState().enabled, true);
+    assert.equal(h.game.rankingAuthorization.getState().canDisplay, true);
+    assert.equal(h.game.friendLeaderboard.getState().status, 'ready');
+    assert.equal(h.messages.some(message => message.action === 'close'), false);
+    assert.ok(h.calls.some(call => call.method === 'drawImage'));
   } finally { h.game.home(); h.destroy(); }
 });
 
@@ -2644,8 +2711,8 @@ test('a denied friend permission opens settings only from the visible authorizat
   } finally { h.game.home(); h.destroy(); }
 });
 
-test('foreground recovery revalidates both permissions before resuming friend traffic', async () => {
-  for (const revoked of ['scope.userInfo', 'scope.WxFriendInteraction', null]) {
+test('foreground recovery gates friend traffic only on the friend permission snapshot', async () => {
+  for (const friendRevoked of [true, false]) {
     const h = rankingHarness();
     try {
       h.game.openPage('leaderboard'); await rankingTick(); h.authorizations[0].success(); await rankingTick();
@@ -2654,11 +2721,14 @@ test('foreground recovery revalidates both permissions before resuming friend tr
       assert.equal(h.checks.length, 1); assert.equal(h.game.rankingAuthorization.getState().enabled, false);
       assert.equal(h.messages.some(message => ['open', 'submit', 'retry', 'refresh'].includes(message.action)), false,
         'cached preview draws cannot resume data traffic while permissions are being checked');
-      h.checks[0].success({ authSetting: { ...h.permissions, ...(revoked ? { [revoked]: false } : {}) } }); await rankingTick();
+      h.checks[0].success({ authSetting: { ...h.permissions, 'scope.userInfo': false,
+        'scope.WxFriendInteraction': !friendRevoked } }); await rankingTick();
       const traffic = h.messages.filter(message => ['submit', 'retry', 'refresh'].includes(message.action));
-      if (revoked) {
+      assert.equal(h.game.rankingAuthorization.getState().enabled, true,
+        'scope.userInfo is not a privacy or friend-ranking gate');
+      if (friendRevoked) {
         assert.deepEqual(traffic, []);
-        assert.equal(revoked === 'scope.userInfo' ? h.game.rankingAuthorization.getState().status : h.game.friendLeaderboard.getState().status, 'denied');
+        assert.equal(h.game.friendLeaderboard.getState().status, 'denied');
       } else {
         assert.equal(traffic.filter(message => message.action === 'submit').length, 1);
         assert.equal(traffic.filter(message => message.action === 'refresh').length, 1);
@@ -2669,38 +2739,43 @@ test('foreground recovery revalidates both permissions before resuming friend tr
   }
 });
 
-test('late profile authorization in the background waits for the player to open friends in the foreground', async () => {
-  const h = rankingHarness({ friendGranted: true });
+test('privacy authorization completed in the background restores sync without opening the friend list', async () => {
+  const h = rankingHarness({ friendGranted: true, holdPrivacy: true });
   try {
-    h.game.openPage('leaderboard'); h.callbacks.hide(); await rankingTick();
+    h.game.openPage('leaderboard'); h.callbacks.hide();
+    h.privacy[0].success(); await rankingTick();
     assert.equal(h.game.rankingAuthorization.getState().enabled, true);
     assert.equal(h.authorizations.length, 0); assert.deepEqual(h.messages, []);
     h.callbacks.show(); await rankingTick();
-    assert.equal(h.authorizations.length, 0); assert.deepEqual(h.messages, []);
+    assert.equal(h.authorizations.length, 0, 'an existing friend grant is restored without another prompt');
+    assert.equal(h.game.friendLeaderboard.getState().status, 'idle', 'a background callback cannot open the visible list');
+    assert.ok(h.messages.some(message => message.action === 'submit'));
+    assert.equal(h.messages.some(message => message.action === 'open'), false);
     h.game.openFriendLeaderboard(); assert.equal(h.authorizations.length, 1);
     h.authorizations[0].success(); await rankingTick();
-    assert.ok(h.messages.some(message => message.action === 'submit'));
+    assert.equal(h.game.friendLeaderboard.getState().status, 'ready');
+    assert.ok(h.messages.some(message => message.action === 'open'));
   } finally { h.game.home(); h.destroy(); }
 });
 
-test('friend grants wait for foreground permission validation and cannot bypass a revoked profile', async () => {
-  for (const revoked of [false, true]) {
+test('friend grants wait for foreground validation and obey its current friend-permission result', async () => {
+  for (const friendAllowed of [false, true]) {
     const h = rankingHarness();
     try {
       h.game.openPage('leaderboard'); await rankingTick();
       h.callbacks.hide(); h.holdChecks(true); h.callbacks.show();
-      if (revoked) {
-        h.checks[0].success({ authSetting: { ...h.permissions, 'scope.userInfo': false } }); await rankingTick();
-        h.authorizations[0].success(); await rankingTick();
-        assert.equal(h.game.rankingAuthorization.getState().enabled, false);
-        assert.deepEqual(h.messages, [], 'the late friend grant cannot open the child after profile revocation');
-      } else {
-        h.authorizations[0].success(); await rankingTick();
-        assert.deepEqual(h.messages, [], 'no friend data is requested before the settings check completes');
-        h.checks[0].success({ authSetting: { ...h.permissions } }); await rankingTick();
+      h.authorizations[0].success(); await rankingTick();
+      assert.deepEqual(h.messages, [], 'no friend data is requested before the settings check completes');
+      h.checks[0].success({ authSetting: { 'scope.userInfo': false,
+        'scope.WxFriendInteraction': friendAllowed } }); await rankingTick();
+      assert.equal(h.game.rankingAuthorization.getState().enabled, true);
+      if (friendAllowed) {
         assert.equal(h.game.friendLeaderboard.getState().status, 'ready');
         assert.ok(h.messages.some(message => message.action === 'open'));
         assert.ok(h.messages.some(message => message.action === 'submit'));
+      } else {
+        assert.equal(h.game.friendLeaderboard.getState().status, 'denied');
+        assert.deepEqual(h.messages, [], 'a stale grant callback cannot bypass the current denied snapshot');
       }
     } finally { h.game.home(); h.destroy(); }
   }

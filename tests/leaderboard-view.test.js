@@ -49,18 +49,15 @@ test('ready ranking paints the child without a duplicate host tap target or manu
   assert.deepEqual(h.events.at(-1), ['home'], 'the header remains the exit to the home page');
 });
 
-test('native profile consent stays aligned with the painted button and respects foreground/modal visibility', () => {
-  for (const options of [{}, { hidden: true }, { modal: { kind: 'pause' } }]) {
-    const h = harness({ ...options, H: 700, scale: .72, authorization: { enabled: false, status: 'needs-profile', needsProfile: true } });
-    const native = h.events.find(event => event[0] === 'native-button');
-    assert.deepEqual(native[1], { left: 9 + 55 * .72, top: 26 + 422 * .72, width: 280 * .72, height: 48 * .72 });
-    assert.equal(native[2].visible, !options.hidden && !options.modal);
-    assert.ok(h.calls.some(call => call.method === 'round' && call.args[0] === 55 && call.args[1] === 422 && call.args[2] === 280 && call.args[3] === 48));
-    assert.equal(h.buttons.some(button => button.label === '授权头像昵称并查看'), false, 'consent is handled by the native button, not a canvas imitation');
-    h.buttons.find(button => button.label === '隐私保护指引').action();
-    h.buttons.find(button => button.label === '暂不授权').action();
-    assert.deepEqual(h.events.slice(-2), [['contract'], ['home']]);
-  }
+test('privacy consent uses the game action without creating an avatar or nickname button', () => {
+  const h = harness({ H: 700, scale: .72, authorization: { enabled: false, status: 'idle' } });
+  assert.deepEqual(h.events.find(event => event[0] === 'native-button'), ['native-button', null]);
+  assert.ok(h.labels.includes('好友头像与昵称由微信好友榜提供'));
+  assert.equal(h.labels.some(label => /授权头像|授权昵称/.test(label)), false);
+  h.buttons.find(button => button.label === '确认并查看好友榜').action();
+  h.buttons.find(button => button.label === '隐私保护指引').action();
+  h.buttons.find(button => button.label === '暂不授权').action();
+  assert.deepEqual(h.events.slice(-3), [['authorize'], ['contract'], ['home']]);
 });
 
 test('permission checks and loading use the normal ranking skeleton without another authorization waiting card', () => {
@@ -94,12 +91,12 @@ test('a previously authorized preview draws cached rankings during a silent rech
   assert.deepEqual(h.events[0], ['native-button', null]);
 });
 
-test('authorization recovery keeps explicit settings, retry and friend-consent actions', () => {
-  const settings = harness({ authorization: { enabled: false, status: 'denied', canOpenSettings: true, message: '头像权限已关闭' } });
-  settings.buttons.find(button => button.label === '去设置授权').action();
-  assert.deepEqual(settings.events.at(-1), ['settings']);
+test('authorization recovery keeps privacy retry and friend-consent actions separate', () => {
+  const denied = harness({ authorization: { enabled: false, status: 'denied', message: '隐私授权尚未同意' } });
+  denied.buttons.find(button => button.label === '确认并查看好友榜').action();
+  assert.deepEqual(denied.events.at(-1), ['authorize']);
   const retry = harness({ authorization: { enabled: false, status: 'error', message: '网络暂不可用' } });
-  retry.buttons.find(button => button.label === '重新申请授权').action();
+  retry.buttons.find(button => button.label === '重试').action();
   assert.deepEqual(retry.events.at(-1), ['authorize']);
   const friend = harness({ friendState: { status: 'denied', message: '朋友权限已关闭' } });
   const consent = friend.buttons.find(button => button.label === '去授权');
@@ -120,7 +117,7 @@ test('browser unavailable page is truthful and returns home from the header', ()
 
 test('all ranking states keep content and actions inside the 700-point safe layout', () => {
   const variants = [
-    {}, { authorization: { enabled: false, status: 'needs-profile', needsProfile: true } },
+    {}, { authorization: { enabled: false, status: 'denied' } },
     { authorization: { enabled: false, status: 'privacy', message: '等待微信确认' } },
     { authorization: { enabled: false, status: 'unavailable' } },
     { friendState: { status: 'denied' } }, { friendState: { status: 'loading' } },

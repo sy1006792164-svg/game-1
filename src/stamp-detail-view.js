@@ -61,7 +61,7 @@ function drawStampDetail(r, game, now) {
   r.line([[left, y + 297], [right, y + 297]], C.line, 1, [2, 5]);
   r.text('收藏条件', left, y + 317, 12, C.muted);
   r.text(stamp.condition, right, y + 317, 12, C.ink, 'right', '600');
-  r.text(stamp.owned ? '已收入邮票册' : '还差 ' + (stamp.goal - stamp.current) + ' 星', left, y + 344, 12, stamp.owned ? C.green : C.gold);
+  r.text(stamp.owned ? '已收入邮票册' : '还差 ' + (stamp.goal - stamp.current) + ' 星', left, y + 344, 12, stamp.owned ? C.green : C.goldText);
   r.text(stamp.owned ? '当前 ' + stamp.current + ' 星' : stamp.current + ' / ' + stamp.goal + ' 星', right, y + 344, 11, C.muted, 'right');
   r.meter(left, y + 365, width, stamp.current, stamp.goal, stamp.owned ? C.green : C.gold);
   r.text(stamp.owned ? '这枚邮票记录了你的主线旅程。' : '通关新关卡，或提高已通关关卡的星级。', 195, y + 391, 11, C.muted, 'center');

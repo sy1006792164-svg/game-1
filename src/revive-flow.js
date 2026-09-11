@@ -1,10 +1,17 @@
 'use strict';
 
-const { revive, reviveEnergy } = require('./engine');
+const { STAR_TWO_MARGIN, revive, reviveEnergy } = require('./engine');
 const { isReviveRouteBlocked } = require('./revive-policy');
 const { MOVE_MS } = require('./motion');
 
-const BLOCKED_HINT = '纸桥已断，补拍也无法送达，请免费重新规划。';
+const BLOCKED_HINT = '这条路线补拍也无法送达，请免费重新规划。';
+
+function reviveScoreHint(level, state) {
+  const par = Math.max(1, level.par || level.budget);
+  return state.turn >= par + STAR_TWO_MARGIN
+    ? '本次通关至多一星'
+    : '续灯封顶二星，最终按总拍数结算';
+}
 
 function failureHint(game, blocked = isReviveRouteBlocked(game.level, game.state)) {
   const s = game.state, l = game.level;
@@ -26,7 +33,7 @@ function showFailure(game) {
   game.modal = {
     kind: 'fail', title: canRevive ? '灯灭了，路线还在' : '换条路线，再寄一次',
     lines: [remaining.length ? '还差 ' + remaining.join(' / ') : '信笺和邮票已收齐', failureHint(game, blocked),
-      ...(canRevive ? ['不限次数 · 保留路线与收集 · 最高二星'] : [])],
+      ...(canRevive ? ['可再次续灯 · 保留路线与收集 · ' + reviveScoreHint(game.level, game.state)] : [])],
     buttons: [
       ...(canRevive ? [{ text: '看广告续灯 +' + reviveEnergy(game.level) + ' 拍 · 接着送', primary: true,
         icon: 'lamp', action: () => game.requestRevive() }] : []),
@@ -48,7 +55,7 @@ async function requestRevive(game) {
   }
   const session = game.session, level = game.level, failed = game.state;
   game.busy = true; game.pendingAction = null; game.pointer = null; game.renderer.hits = [];
-  game.modal = { title: '正在连接广告', lines: ['完整观看后 +' + reviveEnergy(level) + ' 拍，续灯不限次数。'], buttons: [] };
+  game.modal = { title: '正在连接广告', lines: ['完整观看后 +' + reviveEnergy(level) + ' 拍；灯再次熄灭后仍可选择续灯。'], buttons: [] };
   game.sound.suspend('ad'); game.syncMusic();
   let result;
   try { result = await game.ads.showRevive(); } catch (_) { result = { rewarded: false, reason: 'error' }; }

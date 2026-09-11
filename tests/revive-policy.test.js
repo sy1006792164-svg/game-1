@@ -15,6 +15,12 @@ function trappedRoute() {
   return { level, state: replay(level, detour.concat(Array(level.budget - detour.length).fill('wait'))) };
 }
 
+function intactBridgeTrap() {
+  const level = CAMPAIGN[15];
+  const route = ['right', 'up', 'right', 'right', 'up', 'up', 'left', 'left', 'left', 'up'];
+  return { level, state: replay(level, route.concat(Array(level.budget - route.length).fill('wait'))) };
+}
+
 test('the real level 20 wind trap cannot be repaired by relighting its torn bridge route', () => {
   const { level, state } = trappedRoute(), before = JSON.stringify(state);
   assert.equal(state.status, 'failed');
@@ -47,6 +53,54 @@ test('a proven wind trap hides the advertisement and rejects stale revival reque
   assert.equal(retry.primary, true);
   retry.action();
   assert.equal(restarted, 1);
+});
+
+test('the real level 16 intact-bridge failure cannot offer an impossible advertisement', async () => {
+  const { level, state } = intactBridgeTrap(), before = JSON.stringify(state);
+  assert.equal(state.status, 'failed');
+  assert.equal(state.player, 7);
+  assert.deepEqual(state.bridges, [7], 'the courier is still standing on the intact bridge');
+  assert.deepEqual(state.letters, [1, 5, 35]);
+  assert.deepEqual(state.seals, [9, 17, 24]);
+  assert.equal(isReviveRouteBlocked(level, state), true,
+    'every departure strands either the post office or the remaining targets');
+
+  let requested = 0;
+  const game = {
+    level, state, page: 'game', mode: 'campaign', hidden: false, busy: false,
+    platform: { kind: 'wechat' },
+    ads: { isActive: () => false, isConfigured: () => true, showRevive: async () => { requested++; } },
+    toast(message) { this.toastText = message; },
+    start() {}
+  };
+  showFailure(game);
+  assert.equal(game.modal.buttons.some(button => /看广告/.test(button.text)), false);
+  assert.ok(game.modal.lines.some(line => /这条路线补拍也无法送达/.test(line)));
+  assert.equal(game.modal.lines.some(line => /纸桥已断/.test(line)), false,
+    'an intact bridge is not described as already torn');
+  await requestRevive(game);
+  assert.equal(requested, 0);
+  assert.equal(JSON.stringify(state), before, 'eligibility checks preserve the failed route');
+});
+
+test('queued echo may finish at an intact bridge post office without leaving it', () => {
+  const level = {
+    id: 'bridge-exit-echo', width: 3, height: 1, start: 2, exit: 0, walls: [],
+    letters: [], seals: [1], lights: [], bridges: [0], winds: {}, budget: 2
+  };
+  const failed = replay(level, ['left', 'left']);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.player, level.exit);
+  assert.deepEqual(failed.bridges, [level.exit]);
+  assert.deepEqual(failed.seals, [1]);
+  assert.equal(isReviveRouteBlocked(level, failed), false, 'waiting keeps the bridge intact while the echo catches up');
+
+  let relit = revive(level, failed);
+  relit = step(level, relit, 'wait').state;
+  assert.equal(relit.status, 'playing');
+  relit = step(level, relit, 'wait').state;
+  assert.equal(relit.status, 'won');
+  assert.deepEqual(relit.bridges, [level.exit]);
 });
 
 test('a bridge that may tear later can stop a wind and open a valid landing', () => {

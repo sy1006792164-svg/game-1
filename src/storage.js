@@ -8,6 +8,7 @@ const DEV_PROFILE_KEY = 'minigame.development.profile.v1';
 const DEV_RUN_KEY = 'minigame.development.run.v1';
 const MAX_BYTES = 192 * 1024;
 const BAD_KEYS = ['__proto__', 'prototype', 'constructor'];
+const SETTING_KEYS = Object.freeze(['sound', 'music', 'haptics', 'reducedMotion']);
 const NATIVE_OBJECT_SOURCE = Function.prototype.toString.call(Object);
 
 function plain(value) {
@@ -36,7 +37,11 @@ function dateId(id) {
 }
 
 function defaults() {
-  return { version: 1, completed: {}, daily: {}, totalWins: 0 };
+  return {
+    version: 1, completed: {}, daily: {},
+    settings: { sound: true, music: true, haptics: true, reducedMotion: false },
+    totalWins: 0
+  };
 }
 
 function score(value) {
@@ -52,6 +57,11 @@ function bestScore(before, stars, turns) {
 function profileFrom(value) {
   const next = defaults();
   if (!plain(value) || value.version !== 1) return next;
+  if (plain(value.settings)) {
+    SETTING_KEYS.forEach(function (key) {
+      if (typeof value.settings[key] === 'boolean') next.settings[key] = value.settings[key];
+    });
+  }
   if (value.guideDismissed === true) next.guideDismissed = true;
   if (plain(value.mechanicGuides)) {
     const seen = {};
@@ -135,6 +145,7 @@ function createStore(adapter, options = {}) {
   let revision = 0;
   const dirty = new Set();
   const unread = new Set();
+  const settingsChanged = new Set();
   let guideDismissedChanged = false, runChanged = false, runRejected = false;
   function failure(message) { status = { persisted: false, message }; }
   function readFailed(key, error) {
@@ -162,6 +173,9 @@ function createStore(adapter, options = {}) {
         if (profile.guideDismissed) recovered.guideDismissed = true;
         else delete recovered.guideDismissed;
       }
+      // A recovered snapshot is older than choices made after its failed read.
+      // Overlay only those choices; untouched settings should still come from disk.
+      settingsChanged.forEach(key => { recovered.settings[key] = profile.settings[key]; });
       profile = profileFrom(recovered);
     } else if (!runChanged) run = runFrom(stored);
     unread.delete(key); revision += 1;
@@ -176,6 +190,7 @@ function createStore(adapter, options = {}) {
         catch (_) { adapter.set(key, null); }
       } else adapter.set(key, cleanJson(value));
       dirty.delete(key);
+      if (key === profileKey) settingsChanged.clear();
       if (!dirty.size && !runRejected) status = { persisted: true, message: '' };
       return true;
     } catch (_) {
@@ -218,6 +233,18 @@ function createStore(adapter, options = {}) {
     getStatus: function () { return Object.assign({}, status); },
     hasPendingReads: function () { return unread.size > 0; },
     flush,
+    updateSettings: function (partial) {
+      if (!plain(partial)) return snapshot();
+      let changed = false;
+      SETTING_KEYS.forEach(function (key) {
+        const descriptor = Object.getOwnPropertyDescriptor(partial, key);
+        if (!descriptor || !own(descriptor, 'value') || typeof descriptor.value !== 'boolean') return;
+        profile.settings[key] = descriptor.value;
+        settingsChanged.add(key); changed = true;
+      });
+      if (changed) save(profileKey);
+      return snapshot();
+    },
     setGuideDismissed: function (dismissed) {
       if (typeof dismissed !== 'boolean') return false;
       guideDismissedChanged = true;
@@ -257,7 +284,7 @@ function createStore(adapter, options = {}) {
     clearRun: function () { run = null; runRejected = false; unread.delete(runKey); return save(runKey); },
     reset: function () {
       profile = defaults(); run = null;
-      unread.clear(); guideDismissedChanged = false; runChanged = false; runRejected = false;
+      unread.clear(); settingsChanged.clear(); guideDismissedChanged = false; runChanged = false; runRejected = false;
       save(runKey);
       save(profileKey);
       return !dirty.size;

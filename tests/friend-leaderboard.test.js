@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { createFriendLeaderboard, FRIEND_STORAGE_KEY: KEY } = require('../src/friend-leaderboard');
-const { buildRows, parseScore, serializeScore } = require('../open-data/leaderboard-data');
+const { LEGACY_KEY, legacyKeyFor, buildRows, parseScore, serializeScore } = require('../open-data/leaderboard-data');
 const { createHostedScoreSync } = require('../open-data/hosted-score');
 const { createOpenDataLeaderboard } = require('../open-data/index');
 const SCOPE = 'scope.WxFriendInteraction', CHANNEL = 'wind-letter-friends-v1';
@@ -18,8 +18,8 @@ function bridge(extra = {}) {
   const open = async () => { const opening = board.open({ width: 354, height: 400, pixelRatio: 2 }); authorizations.at(-1).success(); await opening; };
   return { board, messages, authorizations, settings, context, api, open };
 }
-function hosted(initial) {
-  let stored = initial ? kv(initial) : [], failRead = false, failWrite = false;
+function hosted(initial, initialKey = KEY) {
+  let stored = initial ? kv(initial, initialKey) : [], failRead = false, failWrite = false;
   const writes = [], changes = [];
   const api = {
     getUserCloudStorage(o) { queueMicrotask(() => failRead ? o.fail({ errMsg: 'offline' }) : o.success({ KVDataList: stored })); },
@@ -48,7 +48,7 @@ test('browser never invokes WeChat and new players do not create zero-score rank
   assert.equal(await h.board.submit(score({ stars: 0, completed: 0, turns: 0 })), false);
   assert.equal(h.messages.length, 0);
 });
-test('submit caches local aggregates until privacy/profile gate and native friend permission both allow syncing', async () => {
+test('submit caches local aggregates until privacy and native friend permission both allow syncing', async () => {
   let allowed = false; const h = bridge({ canSync: () => allowed });
   assert.equal(await h.board.submit(score()), false); assert.equal(h.messages.length, 0);
   await h.open(); assert.equal(h.messages.some(m => m.action === 'submit'), false);
@@ -94,6 +94,12 @@ test('development runtime uses a distinct native WeChat storage key', async () =
   const h = bridge({ isDevelopment: true }); await h.open(); await h.board.submit(score());
   assert.equal(h.messages.at(-1).key, KEY + '_development'); h.board.close();
 });
+test('the production ranking key satisfies the immutable MP identifier rules and maps both legacy environments', () => {
+  assert.match(KEY, /^[A-Za-z]{1,8}$/);
+  assert.equal(legacyKeyFor(KEY), LEGACY_KEY);
+  assert.equal(legacyKeyFor(KEY + '_development'), LEGACY_KEY + '_development');
+  assert.equal(legacyKeyFor('another'), '');
+});
 
 test('read-only permission revocation closes friend data and a later confirmed grant reopens its canvas', async () => {
   const h = bridge(); await h.open();
@@ -122,6 +128,13 @@ test('open data accepts legacy v1 records without trusting or requiring their ol
   assert.equal('selfId' in parseScore(kv(score({ v: 1, selfId: 'old-hash' }))), false);
   assert.equal(parseScore(kv(score({ stars: Infinity }))), null);
   assert.equal(parseScore(kv(score({ stars: 0, completed: 0, turns: 0 }))), null);
+});
+test('hosted values follow the WeChat social ranking schema without losing in-game tie-break fields', () => {
+  const updateTime = 1513080573, value = serializeScore(score(), KEY, updateTime), stored = JSON.parse(value);
+  assert.deepEqual(stored.wxgame, { score: 6, update_time: updateTime });
+  assert.deepEqual({ stars: stored.stars, completed: stored.completed, turns: stored.turns },
+    { stars: 6, completed: 2, turns: 20 });
+  assert.equal(parseScore([{ key: KEY, value }]).stars, 6);
 });
 test('own identity uses native openId while equal names and scores remain separate people', () => {
   const friends = [{ openid: 'native-peer', nickname: 'same', KVDataList: kv(score()) }, { openid: 'native-me', nickname: 'same', KVDataList: kv(score()) }];
@@ -157,22 +170,65 @@ test('competition ranks follow the same star/clear/turn comparison using only na
   const result = buildRows(friends, kv(score()), KEY, { openId: 'my-native-id', nickName: 'my-name' });
   assert.deepEqual(result.rows.map(r => r.rank), [1, 1, 3]); assert.equal(result.self.rank, 1);
 });
+test('legacy-key friends stay visible while accounts migrate to the MP-compatible key', () => {
+  const legacy = kv(score({ stars: 9, completed: 3, turns: 30 }), LEGACY_KEY);
+  const result = buildRows([{ openid: 'native-me', nickname: '旧榜本人', KVDataList: legacy }], legacy, KEY,
+    { openId: 'native-me', nickName: '旧榜本人' });
+  assert.equal(result.rows.length, 1); assert.equal(result.self.rank, 1); assert.equal(result.self.stars, 9);
+});
 test('hosted synchronization reads and preserves higher history before writing an older local save', async () => {
-  const h = hosted(score({ v: 1, selfId: 'legacy', stars: 30, completed: 10, turns: 100 }));
+  const h = hosted(score({ v: 1, selfId: 'legacy', stars: 30, completed: 10, turns: 100 }), LEGACY_KEY);
   assert.equal(await h.sync.submit(score()), true);
   assert.equal(h.current().stars, 30); assert.equal(h.current().completed, 10);
-  assert.equal(JSON.parse(h.writes[0].KVDataList[0].value).selfId, undefined);
+  const stored = JSON.parse(h.writes[0].KVDataList[0].value);
+  assert.equal(stored.selfId, undefined);
+  assert.equal(stored.wxgame.score, 30); assert.ok(Number.isSafeInteger(stored.wxgame.update_time));
   assert.equal(h.sync.getState().status, 'saved');
 });
+test('a better legacy-key aggregate migrates to the new key without being lowered by local progress', async () => {
+  const updatedAt = 1513080573;
+  const legacy = JSON.parse(serializeScore(score({ stars: 30, completed: 10, turns: 100 }), LEGACY_KEY, updatedAt));
+  const h = hosted(legacy, LEGACY_KEY);
+  assert.equal(await h.sync.submit(score()), true); assert.equal(h.writes.length, 1);
+  assert.equal(h.writes[0].KVDataList[0].key, KEY);
+  assert.equal(h.current().stars, 30);
+  assert.deepEqual(JSON.parse(h.writes[0].KVDataList[0].value).wxgame, { score: 30, update_time: updatedAt });
+});
+test('unchanged standardized hosted scores keep their update time and avoid redundant writes', async () => {
+  for (const updateTime of [0, 1513080573]) {
+    const initial = JSON.parse(serializeScore(score({ ownerToken: 'wl1_' + 'a'.repeat(48) }), KEY, updateTime));
+    const h = hosted(initial);
+    assert.equal(await h.sync.submit(score()), true);
+    assert.equal(h.writes.length, 0); assert.equal(h.current().stars, 6);
+  }
+});
+test('a legacy millisecond rank timestamp is repaired to Unix seconds', async () => {
+  const initial = JSON.parse(serializeScore(score({ ownerToken: 'wl1_' + 'a'.repeat(48) }), KEY, Date.now()));
+  const h = hosted(initial);
+  assert.equal(await h.sync.submit(score()), true); assert.equal(h.writes.length, 1);
+  const repaired = JSON.parse(h.writes[0].KVDataList[0].value).wxgame.update_time;
+  assert.ok(repaired <= Math.floor(Date.now() / 1000)); assert.ok(repaired < initial.wxgame.update_time);
+});
 test('aggregate comparison never adds independent device totals or silently invents per-level merged progress', async () => {
-  const h = hosted(score({ stars: 20, completed: 10, turns: 100 }));
+  const h = hosted(JSON.parse(serializeScore(score({ stars: 20, completed: 10, turns: 100 }), KEY, 1513080573)));
   await h.sync.submit(score({ stars: 21, completed: 7, turns: 80 }));
   assert.equal(h.current().stars, 21); assert.equal(h.current().completed, 7); assert.equal(h.current().turns, 80);
 });
 test('hosted reads failing never overwrite old records and explicit retry recovers', async () => {
-  const h = hosted(score({ stars: 9, completed: 3, turns: 30 })); h.failRead(true);
+  const h = hosted(JSON.parse(serializeScore(score({ stars: 9, completed: 3, turns: 30 }), KEY, 1513080573))); h.failRead(true);
   assert.equal(await h.sync.submit(score()), false); assert.equal(h.writes.length, 0); assert.equal(h.sync.getState().status, 'error');
   h.failRead(false); assert.equal(await h.sync.retry(), true); assert.equal(h.current().stars, 9);
+});
+test('unrecognized or malformed ranking values already stored under stars are never overwritten', async () => {
+  for (const existing of [
+    { unrelated: true },
+    score(),
+    { ...score(), wxgame: { score: 999, update_time: 1513080573 } },
+  ]) {
+    const h = hosted(existing);
+    assert.equal(await h.sync.submit(score()), false);
+    assert.equal(h.writes.length, 0); assert.equal(h.sync.getState().status, 'error');
+  }
 });
 test('failed hosted writes retain the desired aggregate for a later explicit retry', async () => {
   const h = hosted(); h.failWrite(true);
@@ -295,7 +351,7 @@ test('a new marker is generated only inside hosted storage and cannot be supplie
 });
 
 test('existing account markers survive legacy migration and older-device score submissions', async () => {
-  const token = 'wl1_' + 'b'.repeat(48), h = hosted(score({ v: 1, ownerToken: token, selfId: 'old', stars: 9, completed: 3, turns: 30 }));
+  const token = 'wl1_' + 'b'.repeat(48), h = hosted(score({ v: 1, ownerToken: token, selfId: 'old', stars: 9, completed: 3, turns: 30 }), LEGACY_KEY);
   await h.sync.submit(score({ ownerToken: 'wl1_' + 'c'.repeat(48) }));
   assert.equal(h.current().ownerToken, token); assert.equal(h.current().stars, 9); assert.equal('selfId' in h.current(), false);
   assert.ok(Buffer.byteLength(KEY + h.writes[0].KVDataList[0].value, 'utf8') <= 1024);

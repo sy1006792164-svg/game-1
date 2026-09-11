@@ -35,7 +35,9 @@ const ignored = project.packOptions.ignore.filter(x => x.type === 'folder').map(
 check(['work', 'output', 'docs', 'tests', 'tools', 'preview'].every(x => ignored.includes(x)), 'Tooling and QA excluded from game upload.');
 check(!project.cloudfunctionRoot && !config.CLOUD_ENV_ID && game.openDataContext === 'open-data', 'Only the native friend leaderboard is configured; no cloud environment required.');
 const authorization = read('src/ranking-authorization.js');
-check(authorization.includes("'requirePrivacyAuthorize'") && authorization.includes('api.createUserInfoButton(') && !authorization.includes('api.onNeedPrivacyAuthorization('), 'Ranking requests the real WeChat privacy dialog and native profile authorization button.');
+check(authorization.includes("'requirePrivacyAuthorize'") && !authorization.includes('scope.userInfo') &&
+  !authorization.includes('createUserInfoButton') && !authorization.includes("'getUserInfo'"),
+'Ranking requests privacy consent without an extra avatar/nickname authorization gate.');
 for (const file of fs.readdirSync(path.join(root, 'open-data')).filter(f => f.endsWith('.js'))) {
   const source = read('open-data/' + file);
   try { new vm.Script(source, { filename: 'open-data/' + file }); } catch (error) { check(false, error.message); }

@@ -10,6 +10,7 @@ const { drawLevels, levelChapterAtOffset } = require('./level-view');
 const { drawCollection } = require('./collection-view');
 const { drawStampDetail } = require('./stamp-detail-view');
 const { drawLeaderboard } = require('./leaderboard-view');
+const { drawSettings } = require('./settings-view');
 const { drawModal } = require('./modal-view');
 const { RESULT_DELAY_MS } = require('./result-effects');
 const { drawDeveloperPicker } = require('./developer-view');
@@ -24,7 +25,7 @@ const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, 
 function atmosphereChapter(game, height) {
   if (game.page === 'game' && game.level) return game.level.chapter || 0;
   if (game.page === 'levels' && game.levelScroll) return levelChapterAtOffset(game.levelScroll.offset, height);
-  if (['home', 'collection'].includes(game.page) && typeof game.nextLevel === 'function') {
+  if (['home', 'collection', 'settings'].includes(game.page) && typeof game.nextLevel === 'function') {
     const next = game.nextLevel();
     if (next) return next.chapter || 0;
   }
@@ -210,7 +211,8 @@ class Renderer {
     c.translate(this.ox, this.oy); c.scale(this.scale, this.scale);
     this.hits = []; this.boardRect = null; this.boardProjection = null; this.collectionRect = null; this.levelRect = null; this.pointer = game.modal ? null : game.pointer;
     this.now = now;
-    this.reducedMotion = !!(game.platform && game.platform.reducedMotion);
+    this.reducedMotion = typeof game.reducedMotion === 'function' ? game.reducedMotion() :
+      !!(game.platform && game.platform.reducedMotion);
     this.effectsQuality = game.platform && game.platform.effectsQuality === 'low' ? 'low' : 'high';
     this.ambientImpulse = 0;
     if (!game.modal) this.ambientFreezeAt = null;
@@ -244,6 +246,7 @@ class Renderer {
     else if (game.page === 'levels') this.levels(game);
     else if (game.page === 'collection') this.collection(game);
     else if (game.page === 'leaderboard') drawLeaderboard(this, game);
+    else if (game.page === 'settings') drawSettings(this, game);
     else this.home(game, pageNow);
     if (game.modal !== this.currentModal) { this.currentModal = game.modal; this.modalAt = now; }
     let modalBounds = null;

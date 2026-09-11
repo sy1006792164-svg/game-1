@@ -1,7 +1,7 @@
 'use strict';
 
 // Friend identities and all conditional controls remain inside the open-data domain.
-const C = { ink: '#294d49', muted: '#61746a', green: '#39796b', gold: '#a36c35', paper: '#fffdf4', line: '#cedbcf' };
+const C = { ink: '#294d49', muted: '#4d6359', green: '#316c5f', gold: '#a36c35', goldText: '#885729', paper: '#fffdf4', line: '#cedbcf' };
 
 function leaderboardLayout(width, height) {
   const compact = height < 420, heroH = compact ? 96 : 126;
@@ -119,7 +119,7 @@ function paintLeaderboard(ctx, model, avatar) {
       if (row.isMe) round(0, y + 13, 3, rh - 26, 1.5, C.green);
       if (row.rank <= 3) {
         const cy = y + rh / 2, colors = [
-          ['#c69a45', '#f4dc96', '#78521f'], ['#a0b3b1', '#e0e8e4', '#536c69'], ['#bb8b65', '#e8c7a4', '#795033'],
+          ['#c69a45', '#f4dc96', '#78521f'], ['#a0b3b1', '#e0e8e4', '#536c69'], ['#bb8b65', '#e8c7a4', '#70482d'],
         ][row.rank - 1];
         [-1, 1].forEach(side => {
           ctx.beginPath();
@@ -193,7 +193,7 @@ function paintLeaderboard(ctx, model, avatar) {
   const date = updatedAt ? new Date(updatedAt) : null;
   const time = date ? String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0') : '';
   const footer = notice || (sync.status === 'error' ? sync.message : '') || (busy ? rows.length || self ? '正在更新，已有成绩仍可查看' : '正在读取好友成绩…' : time ? '更新于 ' + time : '成绩将在联网后更新');
-  text(fitted(footer, w - 12, 10), w / 2, h - 9, 10, notice || sync.status === 'error' ? '#98623b' : C.muted, 'center');
+  text(fitted(footer, w - 12, 10), w / 2, h - 9, 10, notice || sync.status === 'error' ? C.goldText : C.muted, 'center');
   return hits;
 }
 

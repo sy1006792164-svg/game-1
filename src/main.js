@@ -31,6 +31,7 @@ const { helpContent } = require('./help-view');
 
 // Each route supplies its undo allowance through levels.undoFor.
 const DEFAULT_UNDO = 3;
+const SETTING_KEYS = Object.freeze(['sound', 'music', 'haptics', 'reducedMotion']);
 
 class Game {
   constructor(platform) {
@@ -39,16 +40,15 @@ class Game {
     this.store = createStore(platform.storage, { development: this.development });
     this.sound = createSound(platform);
     this.gameCircle = createGameCircle(platform, config.GAME_CIRCLE_OPENLINK, message => this.toast(message));
-    this.rankingProfile = null; this.friendResumeRevision = 0;
+    this.friendResumeRevision = 0;
     const rankingAllowed = () => !this.hidden && !!this.rankingAuthorization && this.rankingAuthorization.getState().enabled;
     this.friendLeaderboard = createFriendLeaderboard(platform, config,
       { canSync: rankingAllowed, canShow: rankingAllowed,
         canPreview: () => !this.hidden && !!this.rankingAuthorization && this.rankingAuthorization.getState().canDisplay });
     this.rankingAuthorization = createRankingAuthorization(platform, {
-      onProfile: profile => { this.rankingProfile = profile; this.syncFriendScore(); return true; },
       onReady: result => {
         if (this.hidden || this.page !== 'leaderboard') return;
-        // Recheck friend permission before a changed profile can dispatch a score.
+        // Friend identity is supplied by WeChat inside the open data domain.
         this.openFriendLeaderboard({ automatic: true, checked: result && result.authSetting });
       }
     });
@@ -289,15 +289,49 @@ class Game {
   toast(message) { this.toastText = message; this.toastUntil = this.platform.now() + 2600; }
   cue(type) {
     this.cueCount++;
-    if (!this.hidden && !this.busy && !this.startupActive()) this.sound.play(type);
+    if (!this.hidden && !this.busy && !this.startupActive() && this.profile().settings.sound) this.sound.play(type);
   }
   unlockAudio() {
     if (this.hidden || this.busy || this.startupActive()) return;
     this.syncMusic(true); this.sound.unlock();
   }
   syncMusic(force = false) {
-    const enabled = !this.hidden && !this.busy && !this.modal && !this.startupActive();
+    const enabled = this.profile().settings.music && !this.hidden && !this.busy && !this.modal && !this.startupActive();
     if (force || enabled !== this.musicActive) { this.musicActive = enabled; this.sound.ambience(enabled); }
+  }
+  reducedMotion() { return this.platform.reducedMotion || this.profile().settings.reducedMotion; }
+  toggle(setting) {
+    if (!SETTING_KEYS.includes(setting)) return false;
+    const enabled = !this.profile().settings[setting];
+    this.store.updateSettings({ [setting]: enabled });
+    if (setting === 'music') this.syncMusic(true);
+    if (setting === 'reducedMotion' && enabled) this.camera.stopShake();
+    this.lastFrame = -Infinity;
+    return enabled;
+  }
+  resetPrompt() {
+    if (this.page !== 'settings' || this.hidden || this.busy || this.modal) return false;
+    const version = this.development ? '开发环境' : '正式版本';
+    this.modal = {
+      kind: 'reset-confirm', title: '确认清除本机数据？', kicker: '仅此设备 · 无法撤销',
+      lines: [
+        '将清除' + version + '在这台设备上的通关记录、邮票、引导状态、当前路线和体验设置。',
+        '好友排行榜中已经上传的成绩不属于本机存档，不会随之删除。'
+      ],
+      buttons: [
+        { text: '保留本机数据', primary: true, action: () => { this.modal = null; this.syncMusic(); } },
+        { text: '确认清除本机数据', action: () => {
+          this.store.reset();
+          this.state = null; this.previousState = null; this.level = null; this.actions = []; this.reviveHistory = [];
+          this.undosUsed = 0; this.mechanicGuide = null; this.guideEnabled = false; this.pendingAction = null;
+          this.home(); this.syncMusic(true);
+          this.toast(this.store.getStatus().persisted ? '本机数据已清除，体验设置已恢复默认'
+            : '本次运行数据已重置，但本机存档未能完全清除');
+        } }
+      ]
+    };
+    this.syncMusic();
+    return true;
   }
   persist() {
     if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', actions: this.actions.slice(), reviveHistory: this.reviveHistory.slice(), undosUsed: this.undosUsed,
@@ -400,7 +434,7 @@ class Game {
     feedback.sounds.forEach(type => this.cue(type));
     if (feedback.haptic) {
       this.camera.shake(now, this.state.status === 'won' ? 1 : .6);
-      this.platform.vibrate();
+      if (this.profile().settings.haptics) this.platform.vibrate();
     }
     this.persist();
     if (this.state.status === 'won') this.victory();
@@ -492,7 +526,10 @@ class Game {
     this.pendingAction = null;
     const old = this.modal, l = this.page === 'game' ? this.level : null;
     this.modal = { kind: 'help', title: '和回声一起送信',
-      ...helpContent(l, this.state ? this.state.reviveCount : 0, this.platform.kind, { canRevive: this.platform.kind === 'wechat' && this.ads.isConfigured() }),
+      ...helpContent(l, this.state ? this.state.reviveCount : 0, this.platform.kind, {
+        canRevive: this.platform.kind === 'wechat' && this.ads.isConfigured(),
+        turn: this.state ? this.state.turn : 0
+      }),
       buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
   }
   home() { if (this.busy || this.startupActive()) return; this.cancelRankingPointer(); this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
@@ -502,7 +539,7 @@ class Game {
     return this.gameCircle.open();
   }
   openPage(page) {
-    if (this.busy || this.startupActive() || !['home', 'levels', 'collection', 'leaderboard'].includes(page)) return;
+    if (this.busy || this.startupActive() || !['home', 'levels', 'collection', 'leaderboard', 'settings'].includes(page)) return;
     this.cancelRankingPointer();
     this.rankingAuthorization.close();
     this.friendLeaderboard.close();
@@ -521,11 +558,10 @@ class Game {
   }
   syncFriendScore() {
     if (this.hidden || !this.rankingAuthorization.getState().enabled) return;
-    return this.friendLeaderboard.submit(campaignScore(this.profile(), this.rankingProfile));
+    return this.friendLeaderboard.submit(campaignScore(this.profile()));
   }
   refreshFriendSession() {
     const token = ++this.friendResumeRevision;
-    const restoring = !this.rankingAuthorization.getState().profile;
     this.friendLeaderboard.suspend();
     const checking = this.rankingAuthorization.revalidate();
     if (this.page === 'leaderboard') this.previewRanking();
@@ -537,7 +573,7 @@ class Game {
         return;
       }
       if (!state.enabled) { this.friendLeaderboard.revalidate(null); return; }
-      if (!(restoring ? this.friendLeaderboard.restore(settings) : this.friendLeaderboard.revalidate(settings))) return;
+      if (!this.friendLeaderboard.restore(settings)) return;
       this.syncFriendScore();
       if (this.page === 'leaderboard') this.friendLeaderboard.refresh(); else this.friendLeaderboard.retry();
     });
@@ -705,14 +741,15 @@ class Game {
     const list = this.listScroll();
     const activeList = !!list && (list.touching || Math.abs(list.velocity) > 4 || list.wheelTarget !== null ||
       list.offset < 0 || list.offset > list.max);
-    const quietMotion = this.platform.reducedMotion || this.platform.effectsQuality === 'low';
+    const reducedMotion = this.reducedMotion();
+    const quietMotion = reducedMotion || this.platform.effectsQuality === 'low';
     const listTransition = !!list && !quietMotion &&
       (now - list.enteredAt < 600 || now - list.activeAt < 360);
     const smoothList = !!list && !this.modal && (activeList || listTransition);
     const smoothScene = this.page === 'game' && !this.modal && (
       now - this.transitionAt < MOVE_MS || now - this.camera.enteredAt < INTRO_MS ||
       now - this.camera.shakeAt < SHAKE_MS || now - this.cameraMovedAt < 250 || !!this.pointer);
-    const smooth = smoothList || smoothScene || this.rankingInteractive();
+    const smooth = !reducedMotion && (smoothList || smoothScene || this.rankingInteractive());
     if (this.platform.setFrameRate) this.platform.setFrameRate(smooth ? 60 : 30);
     // Idle scenes use 30 FPS; input and movement use every RAF.
     const frameInterval = smooth ? 0 : 1000 / 30;

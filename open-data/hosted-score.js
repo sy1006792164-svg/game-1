@@ -1,8 +1,9 @@
 'use strict';
 
-const { isKVDataList, cleanScore, parseScore, mergeScores, serializeScore, DEFAULT_KEY } = require('./leaderboard-data');
+const { isKVDataList, cleanScore, parseScoreRecord, mergeScores, serializeScore, legacyKeyFor, DEFAULT_KEY } = require('./leaderboard-data');
 
-// Keep the better hosted aggregate; this cannot merge per-level device saves.
+// Keep the better hosted aggregate when this client can read it first. WeChat
+// exposes no compare-and-set, so simultaneous devices cannot be made atomic.
 function createHostedScoreSync(api, options) {
   const settings = options || {};
   const getKey = typeof settings.key === 'function' ? settings.key : () => DEFAULT_KEY;
@@ -58,20 +59,35 @@ function createStorageKeySync(api, key, allowed, changed) {
     flight = (async () => {
       let readSucceeded = false, retryable = false;
       try {
-        const response = await call('getUserCloudStorage', { keyList: [key] });
+        const legacyKey = legacyKeyFor(key);
+        const response = await call('getUserCloudStorage', { keyList: [key, legacyKey].filter(Boolean) });
         // A malformed success is not proof of an empty account history.
         if (!response || !isKVDataList(response.KVDataList)) throw new Error('INVALID_HISTORY_RESPONSE');
         const list = response.KVDataList;
         const existing = list.find(item => item.key === key);
-        const oldScore = parseScore(list, key);
-        if (existing && !oldScore) throw new Error('UNRECOGNIZED_HISTORY');
+        const currentRecord = parseScoreRecord(list, key);
+        const legacyRecord = legacyKey && parseScoreRecord(list, legacyKey);
+        const currentScore = currentRecord && currentRecord.score;
+        const legacyScore = legacyRecord && legacyRecord.score;
+        // `stars` may predate this feature as an unrelated generic key. Only
+        // records carrying the full WeChat ranking envelope are ours to update.
+        if (existing && (!currentScore || !currentRecord.wxgame)) throw new Error('UNRECOGNIZED_HISTORY');
         readSucceeded = true;
         // A late read must not write during suspension or permission checks.
         if (!allowed()) { message = '等待恢复微信成绩同步'; return false; }
-        const best = mergeScores(oldScore, desired);
+        const best = mergeScores(mergeScores(legacyScore, currentScore), desired);
         // Only this account's hosted record may choose the owner marker.
-        best.ownerToken = oldScore && oldScore.ownerToken || createOwnerToken();
-        const value = serializeScore(best, key);
+        best.ownerToken = currentScore && currentScore.ownerToken || legacyScore && legacyScore.ownerToken || createOwnerToken();
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const sameResult = score => score && ['stars', 'completed', 'turns'].every(field => score[field] === best[field]);
+        const sourceRecord = sameResult(currentScore) ? currentRecord : sameResult(legacyScore) ? legacyRecord : null;
+        const previousUpdate = sourceRecord && sourceRecord.wxgame ? sourceRecord.wxgame.update_time : null;
+        // Preserve a valid timestamp when the ranked result did not improve,
+        // including a migration from the former key and Unix epoch 0.
+        // Millisecond/far-future legacy values are normalized on the next sync.
+        const plausibleUpdate = Number.isSafeInteger(previousUpdate) && previousUpdate >= 0 && previousUpdate <= nowSeconds + 86400;
+        const updateTime = plausibleUpdate ? previousUpdate : nowSeconds;
+        const value = serializeScore(best, key, updateTime);
         if (!value) throw new Error('INVALID_SCORE');
         if (!existing || existing.value !== value) {
           await call('setUserCloudStorage', { KVDataList: [{ key, value }] }, () => {

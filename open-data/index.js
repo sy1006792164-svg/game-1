@@ -1,6 +1,6 @@
 'use strict';
 
-const { DEFAULT_KEY, isKVDataList, buildRows } = require('./leaderboard-data');
+const { DEFAULT_KEY, legacyKeyFor, isKVDataList, parseScore, buildRows } = require('./leaderboard-data');
 const { createHostedScoreSync } = require('./hosted-score');
 const { leaderboardLayout, paintLeaderboard } = require('./leaderboard-view');
 const { createRankMotion } = require('./rank-motion');
@@ -108,6 +108,7 @@ function createOpenDataLeaderboard(api) {
       notice = '好友榜暂时不可用，请更新微信后重试'; paint(); return;
     }
     let friends = null, mine = null, finished = false, ownFailed = false, friendsFailed = false, denied = false;
+    const legacyKey = legacyKeyFor(key);
     function active() { return token === request && visible && !denied; }
     function applyData() {
       if (friendsFailed) {
@@ -121,6 +122,12 @@ function createOpenDataLeaderboard(api) {
       }
       status = rows.length ? 'ready' : friendsFailed || ownFailed ? 'error' : self ? 'ready' : 'empty';
       observationOk = !friendsFailed && !ownFailed;
+      // Users with only the former key keep their score and republish it under
+      // the MP-compatible key after the same friend permission is confirmed.
+      if (!ownFailed && legacyKey && !parseScore(mine, key)) {
+        const legacyScore = parseScore(mine, legacyKey);
+        if (legacyScore) hostedSync.submit(legacyScore);
+      }
     }
     function finish() {
       if (finished || !active() || friends === null || mine === null) return;
@@ -157,18 +164,18 @@ function createOpenDataLeaderboard(api) {
           fail: () => identify(null) });
         else identify(null);
       } catch (_) { identify(null); }
-      api.getUserCloudStorage({ keyList: [key, historyKey(key)].filter(Boolean), success: function (result) {
+      api.getUserCloudStorage({ keyList: [key, legacyKey, historyKey(key), legacyKey && historyKey(legacyKey)].filter(Boolean), success: function (result) {
         if (!active() || finished) return;
         if (!result || !isKVDataList(result.KVDataList)) { fail(new Error('INVALID_HISTORY_RESPONSE'), true); return; }
         mine = result.KVDataList;
-        const previous = history.load(key, mine);
+        const previous = history.load(key, mine) || (legacyKey ? history.load(legacyKey, mine) : null);
         if (!visitSettled && !visitBaseline) visitBaseline = previous;
         finish();
       }, fail: error => fail(error, true) });
     } catch (error) { fail(error, true); }
     if (!active() || finished) return;
     try {
-      api.getFriendCloudStorage({ keyList: [key], success: function (result) {
+      api.getFriendCloudStorage({ keyList: [key, legacyKey].filter(Boolean), success: function (result) {
         if (!active() || finished) return;
         if (!result || !Array.isArray(result.data) || result.data.some(friend =>
           !friend || typeof friend.openid !== 'string' || !isKVDataList(friend.KVDataList))) {
