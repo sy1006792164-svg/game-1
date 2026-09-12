@@ -8,6 +8,7 @@ const { getCampaignProgress } = require('../src/campaign-progress');
 const { campaignScore } = require('../src/friend-score');
 const { createStore } = require('../src/storage');
 const { createState, step, revive, replay, stars } = require('../src/engine');
+const { STAMP_NOTES } = require('../src/stamp-copy');
 
 const win = (stars = 3) => ({ stars, bestTurns: 8 });
 function withStars(amount) {
@@ -22,14 +23,44 @@ function withStars(amount) {
 
 test('star thresholds stay reachable and the next stamp advances at every threshold', () => {
   const thresholds = STAMPS.map(stamp => stamp.target);
-  assert.deepEqual(thresholds, [1, 3, 9, 18, 30, 48, 72, 100, 135, 175, 220, 280, 350, 430, 520, 620, 730, 850, 980, 1120, 1270, 1430, 1600]);
-  assert.equal(STAMPS.length, 23);
+  assert.deepEqual(thresholds, [1, 3, 9, 18, 30, 48, 72, 100, 135, 175, 220, 280, 350, 430, 520, 620, 730, 850, 980, 1120, 1270, 1430, 1600, 1800, 2050, 2300, 2550, 2800, 2997]);
+  assert.equal(STAMPS.length, 29);
   assert.equal(new Set(STAMPS.map(stamp => stamp.id)).size, STAMPS.length);
-  assert.ok(thresholds[thresholds.length - 1] <= CAMPAIGN.length * 3 * .7, 'the final stamp must not require near-perfect stars');
+  assert.equal(thresholds[thresholds.length - 1], CAMPAIGN.length * 3, 'the final stamp celebrates mastery of all 999 routes');
+  assert.deepEqual(STAMPS[22], { id: 'final-letter', name: '寄往终章', target: 1600, icon: 'star', index: 22 },
+    'existing collectors keep the original final-letter milestone and position');
   for (const threshold of thresholds) {
     assert.equal(getAlbum(withStars(threshold - 1)).next.target, threshold);
     const next = getAlbum(withStars(threshold)).next;
     assert.equal(next && next.target, thresholds[thresholds.indexOf(threshold) + 1] || null);
+  }
+});
+
+test('late-campaign milestones continue after the original album and only all 999 perfect routes earn the final stamp', () => {
+  const originalComplete = getAlbum(withStars(1600));
+  assert.equal(originalComplete.ownedCount, 23);
+  assert.equal(originalComplete.next.target, 1800);
+  assert.deepEqual(STAMPS.slice(23).map(stamp => stamp.target), [1800, 2050, 2300, 2550, 2800, 2997]);
+  const completed = Object.fromEntries(CAMPAIGN.map(level => [level.id, { stars: 3, bestTurns: level.par }]));
+  for (const level of CAMPAIGN) {
+    completed[level.id] = { stars: 2, bestTurns: level.par + 1 };
+    const incomplete = getAlbum({ completed });
+    assert.equal(incomplete.stars, 2996);
+    assert.equal(incomplete.next.id, 'thousand-starlights', `${level.id}: every route contributes to final mastery`);
+    assert.equal(incomplete.next.remaining, 1);
+    assert.equal(incomplete.ownedCount, 28);
+    completed[level.id] = { stars: 3, bestTurns: level.par };
+  }
+  const complete = getAlbum({ completed });
+  assert.equal(complete.next, null);
+  assert.equal(complete.stamps[28].name, '千封星光');
+  assert.equal(complete.stamps[28].owned, true);
+  assert.equal(complete.ownedCount, 29);
+  for (const [index, stamp] of STAMPS.entries()) {
+    assert.equal(stamp.index, index);
+    assert.ok(typeof STAMP_NOTES[stamp.id] === 'string' && STAMP_NOTES[stamp.id].length > 10,
+      `${stamp.id}: every visible keepsake has detail copy`);
+    assert.ok(['leaf', 'echo', 'letter', 'tree', 'lamp', 'wind', 'moon', 'star', 'home', 'bridge'].includes(stamp.icon));
   }
 });
 

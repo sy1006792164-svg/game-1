@@ -127,18 +127,58 @@ test('assisted deliveries with relights and a stamp reward keep all result actio
   }
 });
 
+test('daily journey is a measured result button with a full target and no overlap on compact screens', () => {
+  const resultScreens = [...screens,
+    { width: 390, height: 700, safeTop: 0, safeBottom: 0, pixelRatio: 1 },
+    { width: 390, height: 844, safeTop: 0, safeBottom: 0, pixelRatio: 1 }];
+  for (const metrics of resultScreens) for (const saved of [false, true]) for (const tutorial of [false, true]) {
+    const h = dialogHarness(metrics, 'wechat', true), game = h.game;
+    game.level = { id: tutorial ? 1 : 20, chapter: tutorial ? 0 : 3, par: 30 };
+    game.state = { status: 'won', turn: 2048, itemsUsed: tutorial ? 0 : 2048, revived: true, reviveCount: 340 };
+    let opened = 0;
+    const lines = deliveryResultLines(game.level, game.state, 1, { stars: 3, bestTurns: 30 }, saved);
+    if (tutorial) lines.push('你收信；回声晚 3 次行动，替你收蓝票。', '收齐信和票，再走进邮局就能过关。');
+    lines.push('收到新邮票「山间的问候」');
+    game.modal = { kind: 'win', title: '信已送达', stars: 1,
+      progressLine: '今日邮程 6/6 · 本关今日已记', progressAction: () => { opened++; }, lines,
+      buttons: [{ text: '下一封信', primary: true, action() {} }, { text: '再走一次', icon: 'restart', textOnly: true, action() {} },
+        { text: '看看邮票册', icon: 'stamp', textOnly: true, action() {} }] };
+    const bounds = h.draw(), label = `${metrics.width}x${metrics.height}/${saved}/${tutorial}`;
+    const progress = h.r.hits.find(hit => hit.action === game.modal.progressAction);
+    assert.ok(progress && progress.h >= 44, label + ': daily journey uses a full touch target');
+    assert.ok(bounds.progress, label + ': progress takes up real layout space');
+    assert.ok(bounds.y >= 24 && bounds.y + bounds.h <= h.r.H - 24, label + ': panel retains safe insets');
+    const lastParagraph = bounds.paragraphs.at(-1);
+    const lastTextBottom = bounds.y + lastParagraph.y + (lastParagraph.lines.length - 1) * bounds.lineHeight + 13 / 2;
+    assert.ok(progress.y >= lastTextBottom + 8, label + ': journey has breathing room below the body');
+    assert.equal(h.r.hits.length, 4, label + ': journey and all three result actions remain reachable');
+    assert.ok(h.r.hits.every(hit => hit.y >= bounds.y + 20 && hit.y + hit.h <= bounds.y + bounds.h - 20));
+    for (let i = 0; i < h.r.hits.length; i++) for (let j = i + 1; j < h.r.hits.length; j++) {
+      const a = h.r.hits[i], b = h.r.hits[j];
+      assert.ok(!(a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y), label + ': action targets do not overlap');
+    }
+    for (let i = 0; i < h.boxes.length; i++) for (let j = i + 1; j < h.boxes.length; j++) {
+      const a = h.boxes[i], b = h.boxes[j];
+      assert.ok(!(a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y), label + ': result text does not overlap');
+    }
+    assert.ok(h.boxes.every(box => box.x >= bounds.x + 20 && box.x + box.w <= bounds.x + bounds.w - 20));
+    progress.action(); assert.equal(opened, 1);
+  }
+});
+
 test('actual supply dialogs keep every paragraph and action inside both phone safe areas', () => {
   for (const metrics of screens) for (const kind of ['wechat', 'browser']) {
-    for (const scenario of ['video', 'held', 'no-target', 'used', 'locked', 'unconfigured']) for (const id of ['oil', 'kite', 'bridge']) {
+    for (const scenario of ['video', 'held', 'no-target', 'used', 'locked', 'unconfigured']) for (const id of ['oil', 'kite', 'bridge', 'echo']) {
       const h = dialogHarness(metrics, kind, scenario !== 'unconfigured'), game = h.game;
-      game.level = { id: scenario === 'locked' ? 3 : 20, title: '道具小屏', chapter: 0,
+      game.level = { id: scenario === 'locked' ? 3 : id === 'echo' ? 31 : 20, title: '道具小屏', chapter: 0,
         width: 5, height: 5, start: 12, exit: 24, budget: 20, par: 12,
         walls: [], letters: [13], seals: [17], lights: [], bridges: [11], winds: {} };
       game.state = createState(game.level);
+      if (id === 'echo') { game.state.turn = 2; game.state.history = [12, 17, 12]; }
       game.state.inventory = { oil: 0, kite: 0, bridge: 0 };
       if (scenario === 'held') game.state.inventory[id] = 1;
       if (scenario === 'used') game.state.itemsUsed = 1;
-      if (scenario === 'no-target') game.state.letters = [];
+      if (scenario === 'no-target') { game.state.letters = []; if (id === 'echo') game.state.seals = []; }
       else game.state.bridges = [];
       game.selectItem(id);
       assert.equal(game.modal.kind, 'item');

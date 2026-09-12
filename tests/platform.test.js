@@ -29,6 +29,33 @@ function browser(reducedMotion = false) {
   return { canvas, doc, win, saved, rect, motion, platform: createPlatform({ window: win, document: doc }) };
 }
 
+test('Tab navigates canvas controls without trapping focus or taking over other page elements', () => {
+  const { platform, canvas, win } = browser();
+  const keys = []; let handled = true, prevented = 0;
+  platform.onKey(key => { keys.push(key); return handled; });
+  const event = { key: 'Tab', target: canvas, preventDefault() { prevented++; } };
+  win.emit('keydown', event);
+  win.emit('keydown', { ...event, shiftKey: true });
+  assert.deepEqual(keys, ['Tab', 'Shift+Tab']);
+  assert.equal(prevented, 2);
+  handled = false; win.emit('keydown', event);
+  assert.equal(prevented, 2, 'the browser can leave the last or first canvas control');
+  win.emit('keydown', { ...event, target: { tagName: 'A' } });
+  assert.equal(keys.length, 3, 'normal document tab order stays intact');
+});
+
+test('a browser pointer press focuses the canvas for subsequent keyboard navigation', () => {
+  const { platform, canvas } = browser(); platform.resize();
+  const focused = [];
+  canvas.focus = options => focused.push(options);
+  platform.onPointer(() => {});
+  const event = { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100, preventDefault() {} };
+  canvas.emit('pointerdown', event);
+  canvas.emit('pointerup', event);
+  canvas.emit('pointerdown', { ...event, button: 2 });
+  assert.deepEqual(focused, [{ preventScroll: true }]);
+});
+
 test('wheel events route to collection scrolling before board zoom and preserve line/page units', () => {
   const { platform, canvas } = browser(); platform.resize();
   const scrolled = [], zoomed = [];

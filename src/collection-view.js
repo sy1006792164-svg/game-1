@@ -82,15 +82,17 @@ function drawStamp(r, game, stamp, rect, viewport, now) {
     if (age >= 0 && age < 1800) drawLocatedCorners(r, { x, y, w, h }, quiet(r) ? .85 : clamp((1800 - age) / 550));
   }
   c.restore();
-  r.hit(x, y, w, h, () => {
+  const action = () => {
     scroll.tapped = { index: stamp.index, at: game.platform.now() };
     openStampDetail(game, stamp.id);
-  }, (px, py) => insideRect(viewport, px, py));
+  };
+  action.focusId = 'stamp:' + stamp.id;
+  r.hit(x, y, w, h, action, (px, py) => insideRect(viewport, px, py));
 }
 
 function collectionLayout(height, count = STAMPS.length) {
   if (!Number.isInteger(count) || count < 0) count = STAMPS.length;
-  const viewport = { x: 18, y: 302, w: 354, h: Math.max(160, height - 330) };
+  const viewport = { x: 18, y: 312, w: 354, h: Math.max(160, height - 340) };
   const rows = Math.ceil(count / 3), contentHeight = rows * 160 + 44;
   return { viewport, contentHeight, maxScroll: Math.max(0, contentHeight - viewport.h) };
 }
@@ -127,8 +129,12 @@ function drawCollection(r, game) {
   r.header('沿途邮票册', '把每一次抵达，慢慢收集起来', () => game.home());
   drawSummary(r, game, album);
   drawFilters(r, game, album);
-  r.text('旅程纪念', 24, 282, 14, C.ink, 'left', '600');
-  r.text('轻触邮票 · 读纪念短笺', 365, 282, 10, C.muted, 'right');
+  r.text('旅程纪念', 24, 287, 14, C.ink, 'left', '600');
+  if (typeof game.journey === 'function') {
+    const journey = game.journey();
+    r.button('日邮戳 ' + journey.earnedDays + ' · 今日邮程', 190, 265, 176, CONTROL.compactHeight,
+      () => game.openJourney(), { style: 'quiet', size: 11 });
+  } else r.text('轻触邮票 · 读纪念短笺', 365, 287, 10, C.muted, 'right');
   const c = r.ctx;
   c.save(); c.beginPath(); c.rect(viewport.x, viewport.y, viewport.w, viewport.h); c.clip();
   stamps.forEach((stamp, index) => {

@@ -148,3 +148,121 @@ test('hidden and busy games cannot confirm a modal from the keyboard', t => {
     h.game[flag] = false;
   }
 });
+
+test('Tab starts a route from home and Shift+Tab leaves the canvas at its boundary', t => {
+  const h = harness(); t.after(() => h.destroy()); h.draw(1000);
+  const { focusedTarget } = require('../src/keyboard-focus');
+  assert.equal(h.key('Tab'), true);
+  assert.ok(focusedTarget(h.game), 'a visible control is selected');
+  assert.equal(h.key('Shift+Tab'), false, 'the browser can move focus out of the game');
+  assert.equal(h.game.keyboardFocus, null);
+  for (let i = 0; i < 20; i++) {
+    h.key('Tab');
+    const target = focusedTarget(h.game);
+    if (target && /送信/.test(target.label)) break;
+  }
+  assert.match(focusedTarget(h.game).label, /送信/);
+  h.draw();
+  h.key('Enter');
+  assert.equal(h.game.page, 'game');
+  assert.equal(h.game.level.id, 1);
+  assert.deepEqual(h.game.actions, []);
+});
+
+test('keyboard focus selects a secondary pause action and never activates stale page controls', t => {
+  const h = harness(); t.after(() => h.destroy()); h.start(); h.act('right');
+  h.game.pause(); h.draw();
+  const { focusedTarget } = require('../src/keyboard-focus');
+  for (let i = 0; i < 12; i++) {
+    h.key('Tab');
+    if (focusedTarget(h.game).label === '玩法说明') break;
+  }
+  assert.equal(focusedTarget(h.game).label, '玩法说明');
+  h.draw(); h.key('Enter');
+  assert.equal(h.game.modal.kind, 'help');
+  assert.equal(h.game.actions.length, 1);
+  h.draw(); h.key('Tab');
+  h.game.home();
+  h.key('Enter');
+  assert.equal(h.game.page, 'home');
+  assert.equal(h.game.modal, null);
+});
+
+test('Tab selects only legal item cells once and Enter uses the selected target', t => {
+  const h = harness(); t.after(() => h.destroy());
+  const { focusTargets, focusedTarget } = require('../src/keyboard-focus');
+  const { createState } = require('../src/engine');
+  const { itemOffer } = require('../src/items');
+  h.game.start(CAMPAIGN[6]);
+  h.game.itemRewards = { kite: 1 };
+  h.game.state = createState(h.game.level, h.game.itemRewards);
+  for (const action of h.game.level.solution.slice(0, 6)) h.act(action);
+  h.draw(1000); h.game.selectedItem = 'kite'; h.draw();
+  const cells = focusTargets(h.game).filter(hit => Number.isInteger(hit.cell));
+  const offered = itemOffer(h.game.level, h.game.state, 'kite').targets;
+  assert.ok(cells.length > 0);
+  assert.equal(new Set(cells.map(hit => hit.cell)).size, cells.length);
+  assert.ok(cells.every(hit => offered.includes(hit.cell)));
+  for (let i = 0; i < 40; i++) {
+    h.key('Tab');
+    if (Number.isInteger(focusedTarget(h.game).cell)) break;
+  }
+  const target = focusedTarget(h.game).cell;
+  assert.ok(Number.isInteger(target));
+  const player = h.game.state.player, turn = h.game.state.turn;
+  h.draw(); h.key('Enter');
+  assert.equal(h.game.state.player, player);
+  assert.equal(h.game.state.letters.includes(target), false);
+  assert.equal(h.game.selectedItem, null);
+  assert.equal(h.game.state.inventory.kite, 0);
+  assert.equal(h.game.state.turn, turn, 'aiming and using a tool do not spend a turn');
+});
+
+test('pointer input cancels keyboard focus before changing controls', t => {
+  const h = harness(); t.after(() => h.destroy()); h.draw(1000);
+  h.key('Tab'); assert.ok(h.game.keyboardFocus);
+  h.game.pointerEvent(5, 5, 'start');
+  assert.equal(h.game.keyboardFocus, null);
+  h.game.pointerEvent(5, 5, 'cancel');
+});
+
+test('Tab ends a held list gesture and stops scrolling before retaining a row focus', t => {
+  const h = harness(); t.after(() => h.destroy()); h.game.openPage('collection'); h.draw(1000);
+  const rect = h.game.renderer.collectionRect;
+  h.game.pointerEvent(rect.x + 30, rect.y + 30, 'start');
+  assert.equal(h.game.collectionScroll.touching, true);
+  h.key('Tab'); h.game.pointerEvent(rect.x + 30, rect.y + 30, 'end');
+  assert.equal(h.game.collectionScroll.touching, false);
+  h.key('PageDown'); h.draw(40);
+  assert.notEqual(h.game.collectionScroll.wheelTarget, null);
+  const { focusedTarget } = require('../src/keyboard-focus');
+  for (let i = 0; i < 30; i++) {
+    h.key('Tab');
+    const target = focusedTarget(h.game);
+    if (target && target.y > rect.y && target.h > 80) break;
+  }
+  const selected = focusedTarget(h.game);
+  assert.ok(selected && selected.h > 80, 'a visible stamp card can be reached');
+  h.draw(100);
+  assert.equal(h.game.collectionScroll.wheelTarget, null);
+  assert.equal(focusedTarget(h.game).key, selected.key, 'the selected card stays in place');
+});
+
+test('a stamp keeps keyboard focus through its first entrance frames', t => {
+  const h = harness(); t.after(() => h.destroy());
+  const { focusedTarget } = require('../src/keyboard-focus');
+  h.game.openPage('collection'); h.draw();
+  for (let i = 0; i < 30; i++) {
+    h.key('Tab');
+    const target = focusedTarget(h.game);
+    if (target && target.key.startsWith('stamp:')) break;
+  }
+  const selected = focusedTarget(h.game);
+  assert.ok(selected && selected.key.startsWith('stamp:'));
+  h.draw(16);
+  assert.equal(focusedTarget(h.game).key, selected.key);
+  h.draw(300);
+  assert.equal(focusedTarget(h.game).key, selected.key);
+  h.key('Enter');
+  assert.equal(h.game.modal.kind, 'stamp-detail');
+});

@@ -57,7 +57,7 @@ test('supplies retain the existing tile size and clear all controls on short and
       game.selectItem = selectItem; r.hits = []; ellipses.length = 0;
       drawGame(r, game, 1000);
       const layout = controlLayout(r, game), cards = r.hits.filter(hit => hit.action.itemId);
-      assert.equal(cards.length, 3);
+      assert.equal(cards.length, id >= 31 ? 4 : 3);
       assert.equal(r.boardProjection.halfW, previousHalfW, `level ${id}: retain tile size at ${width}x${height}`);
       assert.equal(r.boardRect.y + r.boardRect.h + 4, layout.tray.y);
       assert.ok(cards.every(card => card.w >= 44 && card.h >= 44 && card.y + card.h < layout.hintY));
@@ -76,7 +76,7 @@ test('first lessons and mechanic guides leave the satchel hidden', () => {
 });
 
 test('supply labels fit their paper cards and unavailable supplies explain themselves when tapped', () => {
-  for (const id of [4, 7, 16, 20]) {
+  for (const id of [4, 7, 16, 20, 31, 53, 301, 999]) {
     const game = gameFor(CAMPAIGN[id - 1]), { r, texts } = renderer();
     const layout = itemTrayLayout(game, null, 590);
     drawItemTray(r, game, layout);
@@ -88,7 +88,7 @@ test('supply labels fit their paper cards and unavailable supplies explain thems
       assert.ok(text.y >= card.y + 10 && text.y <= card.y + card.h - 10);
     }
     r.hits.forEach(hit => hit.action());
-    assert.deepEqual(game.selected, ['oil', 'kite', 'bridge'], 'locked and targetless supplies retain explanation taps');
+    assert.deepEqual(game.selected, id >= 31 ? ['oil', 'kite', 'bridge', 'echo'] : ['oil', 'kite', 'bridge'], 'locked and targetless supplies retain explanation taps');
     assert.equal(game.state.turn, 0);
     assert.equal(game.state.itemsUsed, 0);
   }
@@ -191,10 +191,10 @@ test('the satchel distinguishes intact bridges, distant broken bridges and dista
     drawItemTray(r, game, itemTrayLayout(game, null, 590));
     return texts.map(text => text.value);
   };
-  assert.ok(draw().includes('纸桥完好，无需修复'));
-  assert.ok(draw().includes('两格内没有待收的信'));
+  assert.ok(draw().includes('纸桥完好'));
+  assert.ok(draw().includes('信笺不在范围'));
   game.state.bridges = [];
-  assert.ok(draw().includes('请先走到断桥相邻格'));
+  assert.ok(draw().includes('靠近断桥再修'));
   assert.equal(draw().filter(text => text === '看视频获取').length, 1, 'only oil has a valid target here');
   game.state.player = 22;
   assert.equal(draw().filter(text => text === '看视频获取').length, 3, 'nearby torn bridge and mail remain independent offers');

@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { ACTIONS, createState, step, replay, normalizeReviveHistory, revive, stars, STAR_TWO_MARGIN } = require('../src/engine');
 const { CAMPAIGN, chapterNames, CONTENT_VERSION, PER_CHAPTER, reserveFor, undoFor } = require('../src/levels');
+const { additionsFor } = require('../src/difficulty');
 const { solve } = require('../tools/solve');
 const { tier, bridgesRequired, HAND_MADE } = require('../tools/generate');
 const { playHint } = require('../src/play-guide');
@@ -67,10 +68,10 @@ test('all 999 campaign witnesses win without revival across 167 chapters', () =>
 });
 
 test('the campaign has independently optimal targets and a tight, sustained light budget', () => {
-  assert.equal(CONTENT_VERSION, '5');
+  assert.equal(CONTENT_VERSION, '6');
   assert.equal(STAR_TWO_MARGIN, 2);
   assert.deepEqual(CAMPAIGN.slice(0, 3).map(level => level.par), [4, 6, 9]);
-  assert.deepEqual([reserveFor(0), reserveFor(3), reserveFor(6), reserveFor(17), reserveFor(18), reserveFor(119), reserveFor(299), reserveFor(300), reserveFor(998)], [null, 3, 2, 2, 1, 1, 1, 0, 0]);
+  assert.deepEqual([reserveFor(0), reserveFor(3), reserveFor(6), reserveFor(17), reserveFor(18), reserveFor(119), reserveFor(299), reserveFor(300), reserveFor(998)], [2, 1, 1, 1, 0, 0, 0, 0, 0]);
   for (const level of CAMPAIGN) {
     if (independentlySolved(level)) {
       const shortest = solve(level, 8000000);
@@ -81,15 +82,15 @@ test('the campaign has independently optimal targets and a tight, sustained ligh
     const reserve = reserveFor(level.id - 1);
     // A late lamp can force one extra starting unit so the route survives until the lamp; never more.
     if (level.id >= 4) assert.ok(final.energy >= reserve && final.energy <= reserve + 1, `${level.id}: reserve ${final.energy} must be the chapter margin ${reserve} after collected lamps`);
-    if (level.id >= 19 && level.id <= 300) assert.equal(final.energy, 1, `${level.id}: from route 19 exactly one spare turn remains`);
-    if (level.id >= 301) assert.ok(final.energy <= 1, `${level.id}: from route 301 the budget equals the shortest route`);
+    if (level.id >= 19) assert.equal(final.energy, 0, `${level.id}: from route 19 the budget equals the shortest route`);
     if (level.id >= 7 && level.id <= 30) assert.ok(level.par >= 23, `${level.id}: chapter 2+ should require a planned route`);
     if (level.id >= 19 && level.id <= 30) assert.ok(level.par >= 30, `${level.id}: later maps should sustain difficulty`);
     if (level.id >= 31) {
       const t = tier(level.id - 1);
       assert.ok(level.par >= t.minPar - 4, `${level.id}: generated ${level.width}x${level.width} route too short (${level.par} < ${t.minPar - 4})`);
-      assert.equal(level.letters.length, t.targets, `${level.id}: letters follow the tier`);
-      assert.equal(level.seals.length, t.targets, `${level.id}: stamps follow the tier`);
+      const added = additionsFor(level.id - 1);
+      assert.equal(level.letters.length, t.targets + added.letters, `${level.id}: letters follow the strengthened tier`);
+      assert.equal(level.seals.length, t.targets + added.seals, `${level.id}: stamps follow the strengthened tier`);
       assert.equal(level.bridges.length, t.bridges, `${level.id}: paper bridges follow the tier`);
       assert.equal(level.lights.length, t.lights, `${level.id}: lamps follow the tier`);
       assert.ok(Object.keys(level.winds).length >= t.winds - 1 && Object.keys(level.winds).length <= t.winds, `${level.id}: winds follow the tier`);
@@ -214,7 +215,7 @@ test('post office hints recommend only enough waiting to finish the real queued 
   assert.match(playHint({ level, state, mode: 'campaign' }, 0), /已到邮局，再等 2 拍/);
   assert.equal(replay(level, actions.concat('wait', 'wait')).status, 'won');
 
-  const short = replay(level, ['wait', 'wait'].concat(actions));
+  const short = replay(level, ['wait'].concat(actions));
   assert.equal(short.status, 'playing');
   assert.equal(short.energy, 1);
   assert.match(playHint({ level, state: short, mode: 'campaign' }, 0), /回声还需 2 拍.*拍数不够原地等齐/);

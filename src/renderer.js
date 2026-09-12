@@ -21,6 +21,7 @@ const { chapterNames } = require('./levels');
 const { chapterMood } = require('./chapter-atmosphere');
 const { AmbientClock } = require('./ambient-clock');
 const { pageFrame } = require('./ui-motion');
+const { drawKeyboardFocus } = require('./keyboard-focus');
 const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑': 'arrow-up', '↓': 'arrow-down', '↗': 'arrow-ne', '↘': 'arrow-se', '↙': 'arrow-sw', '↖': 'arrow-nw', '✓': 'check' });
 const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2, ne: -Math.PI / 4, se: Math.PI / 4, sw: Math.PI * .75, nw: -Math.PI * .75 });
 
@@ -100,7 +101,7 @@ class Renderer {
     points.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.stroke(); c.setLineDash([]);
   }
   circle(x, y, r, fill, stroke) { const c = this.ctx; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.lineWidth = 1.3; c.strokeStyle = stroke; c.stroke(); } }
-  hit(x, y, w, h, action, contains) { this.hits.push({ x, y, w, h, action, contains }); }
+  hit(x, y, w, h, action, contains, label) { this.hits.push({ x, y, w, h, action, contains, ...(label === undefined ? {} : { label }) }); }
   button(text, x, y, w, h, action, style) {
     drawButton(this, text, x, y, w, h, action, style);
   }
@@ -278,6 +279,7 @@ class Renderer {
       else if (resultAge === null || resultAge >= 0) modalBounds = this.modal(game.modal, now, resultAge);
       else this.modalAt = now;
     }
+    drawKeyboardFocus(this, game);
     if (game.toastUntil > now) {
       const toastEnter = this.reducedMotion || !Number.isFinite(game.toastAt) ? 1 : Math.min(1, Math.max(0, (now - game.toastAt) / 130));
       const toastExit = this.reducedMotion ? 1 : Math.min(1, (game.toastUntil - now) / 180);

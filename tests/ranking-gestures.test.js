@@ -120,6 +120,19 @@ test('ranking gestures use logical shared-canvas coordinates and never turn drag
   assert.equal(h.messages.length, 0, 'a gesture beginning outside cannot acquire the child surface');
 });
 
+test('Tab takes over a held ranking gesture without leaving a stale child release', async t => {
+  const h = harness(t); await h.enter();
+  const box = leaderboardRect(h.game.renderer.H);
+  h.pointer(box.x + 40, box.y + 100, 'start');
+  assert.ok(h.game.pointer && h.game.pointer.ranking);
+  h.messages.length = 0;
+  h.callbacks.key('Tab');
+  assert.equal(h.game.pointer, null);
+  assert.deepEqual(h.messages.filter(message => message.action === 'pointer').map(message => message.phase), ['cancel']);
+  h.pointer(box.x + 40, box.y + 100, 'end');
+  assert.equal(h.messages.some(message => message.phase === 'end'), false);
+});
+
 test('ranking wheel and keyboard scroll use the isolated bridge and leave the game camera unchanged', async t => {
   const h = harness(t); await h.enter(); const box = leaderboardRect(h.game.renderer.H);
   const before = JSON.stringify(h.game.camera); h.messages.length = 0;

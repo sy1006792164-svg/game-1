@@ -251,6 +251,9 @@ function createPlatform(environment) {
         }
         if (type === 'cancel') { if (finitePoint(point)) last = point; cancel(); return; }
         if (!finitePoint(point)) return;
+        if (type === 'start' && typeof canvas.focus === 'function') {
+          try { canvas.focus({ preventScroll: true }); } catch (_) { /* Focus is optional on embedded canvases. */ }
+        }
         last = point;
         if (type === 'end') { activeId = null; last = null; source = null; }
         listener(point.x, point.y, type);
@@ -271,6 +274,11 @@ function createPlatform(environment) {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
       const tag = event.target && event.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (event.target && event.target.isContentEditable)) return;
+      if (event.key === 'Tab') {
+        if (event.target !== canvas) return;
+        if (listener(event.shiftKey ? 'Shift+Tab' : 'Tab') === true) event.preventDefault();
+        return;
+      }
       if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].indexOf(event.key) !== -1) event.preventDefault();
       listener(event.key);
     };

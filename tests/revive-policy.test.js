@@ -110,7 +110,8 @@ test('the real level 16 intact-bridge failure explains further videos and has a 
   assert.equal(state.status, 'failed');
   assert.equal(state.player, 7);
   assert.deepEqual(state.bridges, [7], 'the courier is still standing on the intact bridge');
-  assert.deepEqual(state.letters, [1, 5, 35]);
+  assert.deepEqual(state.letters, [1, 5, 35, ...level.difficultyAdditions.letters],
+    'the rescue must also collect every newly added letter');
   assert.deepEqual(state.seals, [9, 17, 24]);
   assert.equal(isReviveRouteBlocked(level, state), true,
     'every departure strands either the post office or the remaining targets');

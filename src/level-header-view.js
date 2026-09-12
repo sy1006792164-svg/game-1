@@ -5,7 +5,8 @@ const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 
 function drawLevelHeader(r, game, progress, mode) {
-  r.header('选一封来信', game.development ? '开发试玩 · 独立存档' : '不必赶路，想好了再出发',
+  const journey = typeof game.journey === 'function' ? game.journey() : null;
+  r.header('选一封来信', game.development ? '开发试玩 · 独立存档' : journey ? '今日邮程 ' + Math.min(journey.points, journey.target) + '/' + journey.target + ' · 难关贡献更多' : '不必赶路，想好了再出发',
     () => game.home());
 
   const developerPicker = game.development && mode === 'chapters';

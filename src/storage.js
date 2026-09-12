@@ -1,12 +1,13 @@
 'use strict';
 
 const { normalizeReviveHistory, normalizeItemRewards, normalizeSupplyPolicy, isAction } = require('./engine');
+const { journeyDate, normalizeJourney, addJourneyWin } = require('./journey');
 
 const PROFILE_KEY = 'minigame.local.profile.v1';
 const RUN_KEY = 'minigame.local.run.v1';
 const DEV_PROFILE_KEY = 'minigame.development.profile.v1';
 const DEV_RUN_KEY = 'minigame.development.run.v1';
-const MAX_BYTES = 192 * 1024;
+const MAX_BYTES = 384 * 1024;
 const BAD_KEYS = ['__proto__', 'prototype', 'constructor'];
 const SETTING_KEYS = Object.freeze(['sound', 'music', 'haptics', 'reducedMotion']);
 const NATIVE_OBJECT_SOURCE = Function.prototype.toString.call(Object);
@@ -79,6 +80,7 @@ function profileFrom(value) {
     });
   });
   next.totalWins = Object.keys(next.completed).length + Object.keys(next.daily).length;
+  if (plain(value.journey)) next.journey = normalizeJourney(value.journey, next.completed);
   return next;
 }
 
@@ -87,7 +89,7 @@ function cleanJson(value) {
   const seen = new Set();
   let nodes = 0;
   function visit(item, depth) {
-    if (++nodes > 20000 || depth > 24) throw new Error('Save data is too large.');
+    if (++nodes > 50000 || depth > 24) throw new Error('Save data is too large.');
     if (item === null || typeof item === 'boolean') return item;
     if (typeof item === 'number' && Number.isFinite(item)) return item;
     if (typeof item === 'string' && item.length <= 8192) return item;
@@ -154,6 +156,9 @@ function createStore(adapter, options = {}) {
   const dirty = new Set();
   const unread = new Set();
   const settingsChanged = new Set();
+  // Keep actual local wins until a failed profile read recovers. Replaying these
+  // operations merges same-day partial progress without counting a stamp twice.
+  let pendingJourneyWins = [];
   let guideDismissedChanged = false, runChanged = false, runRejected = false;
   let runWaitsForProfile = false;
   function failure(message) { status = { persisted: false, message }; }
@@ -178,6 +183,9 @@ function createStore(adapter, options = {}) {
         recovered[name][id] = bestScore(own(recovered[name], id) ? recovered[name][id] : null, record.stars, record.bestTurns);
       }));
       if (profile.mechanicGuides) recovered.mechanicGuides = { ...recovered.mechanicGuides, ...profile.mechanicGuides };
+      pendingJourneyWins.forEach(win => {
+        recovered.journey = addJourneyWin(recovered.journey, win.levelId, win.date).journey;
+      });
       if (guideDismissedChanged) {
         if (profile.guideDismissed) recovered.guideDismissed = true;
         else delete recovered.guideDismissed;
@@ -186,6 +194,7 @@ function createStore(adapter, options = {}) {
       // Overlay only those choices; untouched settings should still come from disk.
       settingsChanged.forEach(key => { recovered.settings[key] = profile.settings[key]; });
       profile = profileFrom(recovered);
+      pendingJourneyWins = [];
     } else if (!runChanged) run = runFrom(stored);
     unread.delete(key); revision += 1;
   }
@@ -248,13 +257,25 @@ function createStore(adapter, options = {}) {
         (!own(profile.completed, id) && Object.keys(profile.completed).length >= 1000)) return null;
     return id;
   }
-  function recordWin(levelId, stars, turns, mode = 'campaign') {
-    const id = winId(levelId, stars, turns, mode);
-    if (id === null) return snapshot();
+  function applyWin(id, stars, turns) {
     const map = profile.completed;
     const before = own(map, id) ? map[id] : null;
     map[id] = bestScore(before, stars, turns);
     if (!before) profile.totalWins += 1;
+  }
+  function applyJourneyWin(levelId, when) {
+    const id = typeof levelId === 'number' ? String(levelId) : levelId;
+    if (!safeId(id) || !own(profile.completed, id)) return false;
+    const result = addJourneyWin(profile.journey, id, when);
+    if (!result.changed) return false;
+    profile.journey = result.journey;
+    if (unread.has(profileKey)) pendingJourneyWins.push({ levelId: id, date: journeyDate(when) });
+    return true;
+  }
+  function recordWin(levelId, stars, turns, mode = 'campaign') {
+    const id = winId(levelId, stars, turns, mode);
+    if (id === null) return snapshot();
+    applyWin(id, stars, turns);
     save(profileKey);
     return snapshot();
   }
@@ -290,9 +311,18 @@ function createStore(adapter, options = {}) {
       return save(profileKey);
     },
     recordWin,
-    settleWin: function (levelId, stars, turns, mode = 'campaign') {
-      if (winId(levelId, stars, turns, mode) === null) return false;
-      recordWin(levelId, stars, turns, mode);
+    recordJourneyWin: function (levelId, when) {
+      if (applyJourneyWin(levelId, when)) save(profileKey);
+      return snapshot();
+    },
+    settleWin: function (levelId, stars, turns, mode = 'campaign', options) {
+      const id = winId(levelId, stars, turns, mode);
+      if (id === null || (options !== undefined && !plain(options))) return false;
+      const dateOption = options && Object.getOwnPropertyDescriptor(options, 'date');
+      if (dateOption && (!own(dateOption, 'value') || !journeyDate(dateOption.value))) return false;
+      applyWin(id, stars, turns);
+      if (dateOption) applyJourneyWin(id, dateOption.value);
+      save(profileKey);
       run = null; runRejected = false; unread.delete(runKey);
       runWaitsForProfile = dirty.has(profileKey);
       return save(runKey);
@@ -314,6 +344,7 @@ function createStore(adapter, options = {}) {
     clearRun: function () { run = null; runRejected = false; runWaitsForProfile = false; unread.delete(runKey); return save(runKey); },
     reset: function () {
       profile = defaults(); run = null;
+      pendingJourneyWins = [];
       unread.clear(); settingsChanged.clear(); guideDismissedChanged = false; runChanged = false; runRejected = false; runWaitsForProfile = false;
       save(runKey);
       save(profileKey);

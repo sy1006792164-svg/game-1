@@ -11,6 +11,7 @@ const { drawObjectives } = require('./game-objectives');
 const { drawCollectionFlights } = require('./collection-flight');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
 const { itemTrayLayout, drawItemTray, itemAimHint, drawItemAimHint } = require('./item-view');
+const { difficultyProfile } = require('./difficulty');
 
 // One- and two-line play hints share one slot, avoiding small board jumps as
 // the contextual copy changes between turns.
@@ -95,7 +96,10 @@ function drawGame(r, game, now) {
   const feedback = gameFeedback(r, game, now);
   const atmosphereNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   const showGuideEntry = !layout.guide && game.canShowGuide() && game.state.status === 'playing' && !game.reviewing;
-  r.label(game.level.title, 24, 32, showGuideEntry ? 138 : 254, 24, C.ink, 'left', '600');
+  const showChallenge = !showGuideEntry && !layout.guide && !game.reviewing && game.level.id >= 4 && typeof game.openRoutePlan === 'function';
+  r.label(game.level.title, 24, 32, showGuideEntry ? 138 : showChallenge ? 184 : 254, 24, C.ink, 'left', '600');
+  if (showChallenge) r.button(difficultyProfile(game.level).name, 216, 18, 66, CONTROL.compactHeight,
+    () => game.openRoutePlan(), { style: 'quiet', size: 11, disabled: !!game.modal || game.busy || game.state.status !== 'playing' });
   // The subtitle sits below the complete 44px guide/pause targets. Its former
   // baseline crossed the guide button on the first level.
   if (game.reviewing) r.text('路线回顾', 24, 69, 11, C.muted);

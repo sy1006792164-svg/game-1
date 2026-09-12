@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
-const { CAMPAIGN, undoFor } = require('../src/levels');
+const { CAMPAIGN, undoFor, getLegacyLevel } = require('../src/levels');
 const { MOVE_MS } = require('../src/motion');
 const { drawResultHeader, drawResultStars } = require('../src/result-effects');
 const { C } = require('../src/theme');
@@ -14,6 +14,8 @@ const { RUN_KEY, PROFILE_KEY, DEV_RUN_KEY, DEV_PROFILE_KEY } = require('../src/s
 const { StartupLoader } = require('../src/startup');
 const { replay: replayItems } = require('../src/engine');
 const { SUPPLY_ENERGY, RELIGHT_ACTION } = require('../src/supply-rules');
+const { campaignScore } = require('../src/friend-score');
+const { STAMPS } = require('../src/stamp-album');
 
 const mainPath = path.join(__dirname, '../src/main.js');
 const source = fs.readFileSync(mainPath, 'utf8');
@@ -122,6 +124,172 @@ const settleItemVideo = async () => { for (let i = 0; i < 16; i++) await Promise
 async function completeItemVideo(h, ended = true) {
   await settleItemVideo(); h.closeAd(ended); await settleItemVideo();
 }
+
+test('journey real victories settle campaign scores, daily stamps, collection and ranking from the same wins', t => {
+  const h = harness(); t.after(() => h.destroy());
+  finishCampaign(h, 6);
+  const profile = h.game.profile(), journey = h.game.journey(), album = h.game.album();
+  assert.equal(h.game.state.status, 'won');
+  assert.equal(profile.totalWins, 6);
+  assert.equal(journey.points, 6);
+  assert.equal(journey.done, true);
+  assert.equal(journey.earnedDays, 1);
+  assert.deepEqual(journey.creditedLevelIds, [1, 2, 3, 4, 5, 6]);
+  assert.equal(journey.nextLevelId, 7);
+  assert.equal(album.stars, 18);
+  assert.equal(album.progress.completedCount, 6);
+  assert.equal(album.ownedCount, STAMPS.filter(stamp => stamp.target <= 18).length);
+  assert.deepEqual(campaignScore(profile), {
+    stars: 18, completed: 6, turns: CAMPAIGN.slice(0, 6).reduce((sum, level) => sum + level.par, 0), name: '我', avatarUrl: ''
+  });
+  assert.match(h.game.modal.progressLine, /今日邮程 6\/6.*获得日邮戳/);
+  assert.equal(h.game.store.loadRun(), null);
+  assert.deepEqual(h.data.get(PROFILE_KEY), profile, 'the same durable profile owns all progression');
+  h.game.victory();
+  assert.equal(h.game.journey().earnedDays, 1, 'redisplaying a result cannot award another daily stamp');
+  assert.equal(h.game.profile().totalWins, 6);
+  assert.match(h.game.modal.progressLine, /本关今日已记/);
+});
+
+test('journey video-assisted delivery credits the daily task once while a clean replay improves collection and rank stars', async t => {
+  const h = harness(); t.after(() => h.destroy()); finishCampaign(h, 3);
+  const level = CAMPAIGN[3]; h.start(level);
+  const before = h.game.journey().points;
+  h.game.selectItem('oil'); h.callbacks.key('Enter'); await completeItemVideo(h);
+  assert.equal(h.showCount, 1);
+  assert.equal(h.game.state.itemsUsed, 1);
+  assert.equal(h.game.state.inventory.oil, 0);
+  assert.equal(h.game.itemRewards.oil, 1);
+  assert.equal(h.game.journey().points, before, 'watching a video alone is not a completed delivery');
+  level.solution.forEach(action => h.act(action));
+  assert.equal(h.game.state.status, 'won');
+  assert.equal(h.game.modal.stars, 2);
+  assert.equal(h.game.profile().completed[level.id].stars, 2);
+  assert.equal(h.game.journey().points, before + level.difficulty.journeyPoints);
+  const credited = clone(h.game.journey().creditedLevelIds), assistedScore = campaignScore(h.game.profile());
+  assert.equal(h.game.album().stars, assistedScore.stars);
+  h.start(level); level.solution.forEach(action => h.act(action));
+  assert.equal(h.game.modal.stars, 3);
+  assert.equal(h.game.journey().points, before + level.difficulty.journeyPoints);
+  assert.deepEqual(h.game.journey().creditedLevelIds, credited);
+  assert.equal(h.game.profile().totalWins, 4);
+  assert.equal(campaignScore(h.game.profile()).stars, assistedScore.stars + 1);
+  assert.equal(h.game.album().stars, assistedScore.stars + 1);
+  assert.equal(h.game.profile().completed[level.id].bestTurns, level.par);
+  assert.equal(h.showCount, 1, 'a fresh attempt never requires another video');
+});
+
+test('journey cache rolls over with the local date without clearing cumulative stamps or campaign progress', t => {
+  const h = harness(); t.after(() => h.destroy()); finishCampaign(h, 6);
+  const yesterday = h.game.journey(), revision = h.game.store.revision(), score = campaignScore(h.game.profile());
+  assert.equal(h.game.journey(), yesterday, 'ordinary renders reuse the cached daily snapshot');
+  h.clock.date = '2026-09-08';
+  const today = h.game.journey();
+  assert.notEqual(today, yesterday);
+  assert.equal(today.date, h.clock.date);
+  assert.equal(today.points, 0);
+  assert.equal(today.earnedDays, 1);
+  assert.equal(h.game.store.revision(), revision, 'calendar rollover does not manufacture a storage write');
+  assert.deepEqual(campaignScore(h.game.profile()), score);
+  h.start(); CAMPAIGN[0].solution.forEach(action => h.act(action));
+  assert.equal(h.game.journey().points, 1);
+  assert.equal(h.game.journey().earnedDays, 1);
+  assert.equal(h.game.profile().totalWins, 6);
+  assert.deepEqual(campaignScore(h.game.profile()), score);
+});
+
+test('journey modal and route planning keyboard actions return to their prior views and enter the actual recommended campaign', t => {
+  const h = harness(); t.after(() => h.destroy());
+  assert.equal(h.game.openJourney(), true);
+  const itinerary = h.game.modal;
+  assert.equal(itinerary.kind, 'journey');
+  h.callbacks.key('Enter');
+  assert.equal(h.game.modal.kind, 'route-plan');
+  assert.match(h.game.modal.title, /第 1 封/);
+  assert.equal(h.game.page, 'home');
+  assert.equal(h.game.state, null, 'reviewing the challenge does not spend a turn or start its route');
+  h.callbacks.key('Escape');
+  assert.equal(h.game.modal, itinerary);
+  h.callbacks.key('Escape');
+  assert.equal(h.game.modal, null);
+  assert.equal(h.game.page, 'home');
+  h.game.openJourney(); h.callbacks.key('Enter'); h.callbacks.key('Enter');
+  assert.equal(h.game.page, 'game');
+  assert.equal(h.game.level, CAMPAIGN[0]);
+  assert.equal(h.game.modal, null);
+  assert.equal(h.game.state.turn, 0);
+  h.act(CAMPAIGN[0].solution[0]);
+  const before = clone(h.game.state), saved = clone(h.game.store.loadRun());
+  h.game.openJourney(); h.callbacks.key('Enter'); h.callbacks.key('Escape'); h.callbacks.key('Escape');
+  assert.equal(h.game.modal, null);
+  assert.deepEqual(h.game.state, before);
+  assert.deepEqual(h.game.store.loadRun(), saved);
+});
+
+test('journey challenge entry preserves unread scores and saved routes until storage recovers', t => {
+  for (const unreadKey of [PROFILE_KEY, RUN_KEY]) {
+    const profile = { version: 1, completed: { 1: { stars: 3, bestTurns: 4 } }, daily: {},
+      settings: { sound: true, music: true, haptics: true, reducedMotion: false }, totalWins: 1 };
+    const progress = { mode: 'campaign', levelId: 2, revision: CAMPAIGN[1].revision,
+      actions: ['right'], reviveHistory: [], undosUsed: 0 };
+    const data = new Map([[PROFILE_KEY, clone(profile)], [RUN_KEY, clone(progress)]]), get = data.get.bind(data);
+    let unavailable = true;
+    data.get = key => { if (key === unreadKey && unavailable) throw new Error('temporarily unreadable'); return get(key); };
+    const h = harness({ data }); t.after(() => h.destroy());
+    h.game.openJourney(); h.callbacks.key('Enter');
+    assert.equal(h.game.page, 'home');
+    assert.equal(h.game.state, null);
+    assert.equal(h.game.store.hasPendingReads(), true);
+    assert.deepEqual(get(PROFILE_KEY), profile);
+    assert.deepEqual(get(RUN_KEY), progress);
+    unavailable = false; h.game.store.flush();
+    h.callbacks.key('Escape'); h.game.openJourney(); h.callbacks.key('Enter'); h.callbacks.key('Enter');
+    assert.equal(h.game.page, 'game');
+    assert.equal(h.game.level.id, 2);
+    assert.deepEqual(h.game.state, replayed(CAMPAIGN[1], progress.actions));
+    assert.equal(h.game.store.hasPendingReads(), false);
+    assert.deepEqual(h.game.profile().completed, profile.completed);
+    assert.deepEqual(h.game.actions, progress.actions);
+  }
+});
+
+test('journey route planning restores v5 geometry, original light and earned supplies before an explicit restart upgrades the route', t => {
+  const first = harness(); t.after(() => first.destroy()); finishCampaign(first, 3);
+  const legacy = getLegacyLevel(4, '5'), current = CAMPAIGN[3];
+  const actions = ['item:oil', ...legacy.solution.slice(0, 3)], rewards = { oil: 2, kite: 0, bridge: 0 };
+  const supplyPolicy = { version: 2, legacyActionCount: 0, legacyReviveCount: 0 };
+  const progress = { mode: 'campaign', levelId: legacy.id, revision: '5', actions,
+    reviveHistory: [], itemRewards: rewards, supplyPolicy, undosUsed: 0 };
+  first.data.set(RUN_KEY, clone(progress));
+  const expected = replayItems(legacy, actions, [], rewards, supplyPolicy);
+  assert.equal(expected.status, 'playing');
+  assert.equal(expected.inventory.oil, 1, 'one prior earned supply remains unused');
+  const h = harness({ data: first.data }); t.after(() => h.destroy());
+  const earned = clone(h.game.profile());
+  assert.equal(h.game.openRoutePlan(current), true);
+  const details = h.game.modal.sections.map(section => section.text).join('\n');
+  assert.match(details, new RegExp('灯火 ' + legacy.budget + ' 拍'));
+  assert.ok(details.includes(legacy.letters.length + '信' + legacy.seals.length + '票'), 'planning displays the original objective counts');
+  assert.notEqual(legacy.budget, current.budget, 'this fixture distinguishes old and strengthened light budgets');
+  h.callbacks.key('Enter');
+  assert.equal(h.game.page, 'game');
+  assert.equal(h.game.level.revision, '5');
+  assert.deepEqual(h.game.state, expected);
+  assert.deepEqual(h.game.actions, actions);
+  assert.deepEqual(h.game.itemRewards, rewards);
+  assert.deepEqual(h.game.profile(), earned);
+  assert.equal(h.game.store.loadRun().revision, '5');
+  h.game.start(h.game.level);
+  assert.equal(h.game.level, current);
+  assert.equal(h.game.state.turn, 0);
+  assert.equal(h.game.state.energy, current.budget);
+  assert.deepEqual(h.game.state.letters, current.letters);
+  assert.deepEqual(h.game.state.seals, current.seals);
+  assert.deepEqual(h.game.itemRewards, { oil: 0, kite: 0, bridge: 0 });
+  assert.deepEqual(h.game.state.inventory, { oil: 0, kite: 0, bridge: 0 });
+  assert.deepEqual(h.game.profile(), earned);
+  assert.equal(h.game.store.loadRun().revision, '6');
+});
 
 test('tool confirmation, cancellation, save/restore and undo preserve paid rewards without free refills', async t => {
   const h = harness({ development: true }); t.after(() => h.destroy()); h.start(CAMPAIGN[22]);
@@ -311,6 +479,209 @@ test('completed item playback saves exactly once in background and cannot reward
   await completeItemVideo(h);
   assert.deepEqual(h.game.state, restored);
   assert.equal(h.game.itemRewards.oil, 1, 'stale completion cannot apply to a different session');
+});
+
+test('echo flute real level 53 videos preserve a two-star delivery and share journey, collection and ranking settlement', async t => {
+  const h = harness(); t.after(() => h.destroy()); finishCampaign(h, 52);
+  const level = CAMPAIGN[52]; h.start(level);
+  const beforeJourney = clone(h.game.journey()), beforeScore = campaignScore(h.game.profile());
+  const ownedBefore = h.game.album().stamps.filter(stamp => stamp.owned).map(stamp => stamp.id);
+  h.game.selectItem('oil'); h.callbacks.key('Enter'); await completeItemVideo(h);
+  for (let index = 0; index < 3; index++) h.act('wait');
+  level.solution.slice(0, 29).forEach(action => h.act(action)); h.advance(300);
+  const before = clone(h.game.state);
+  assert.equal(before.player, level.exit);
+  assert.equal(before.turn, 32);
+  assert.equal(level.par, 31);
+  assert.deepEqual(before.letters, []);
+  assert.deepEqual(before.seals, [30]);
+  assert.deepEqual(before.history.slice(-3), [24, 30, 24]);
+  const waiting = replayItems(level, [...h.game.actions, 'wait', 'wait'], h.game.reviveHistory, h.game.itemRewards, h.game.supplyPolicy);
+  assert.equal(waiting.status, 'won');
+  assert.equal(waiting.turn, level.par + 3, 'ordinary waiting would miss the two-star margin');
+  h.game.selectItem('echo');
+  assert.equal(h.game.modal.itemId, 'echo');
+  assert.ok(h.game.modal.lines.some(line => /最多二星/.test(line)));
+  h.callbacks.key('Enter'); h.game.itemTarget(30);
+  await settleItemVideo();
+  assert.deepEqual(h.game.state, before, 'selecting the stamp cannot reward before video completion');
+  assert.deepEqual(h.game.journey(), beforeJourney);
+  await completeItemVideo(h);
+  assert.equal(h.showCount, 2, 'oil and echo flute require their own completed videos');
+  assert.equal(h.game.state.status, 'won');
+  assert.equal(h.game.state.turn, before.turn);
+  assert.equal(h.game.state.energy, before.energy);
+  assert.equal(h.game.state.player, before.player);
+  assert.equal(h.game.state.echo, before.echo);
+  assert.deepEqual(h.game.state.history, before.history);
+  assert.deepEqual(h.game.state.bridges, before.bridges);
+  assert.deepEqual(h.game.state.seals, []);
+  assert.equal(h.game.state.itemsUsed, 2);
+  assert.deepEqual(h.game.state.inventory, { oil: 0, kite: 0, bridge: 0, echo: 0 });
+  assert.deepEqual(h.game.itemRewards, { oil: 1, kite: 0, bridge: 0, echo: 1 });
+  assert.equal(h.game.actions.at(-1), 'item:echo:30');
+  assert.ok(h.game.moveEvents.some(event => event.type === 'seal' && event.cell === 30));
+  assert.equal(h.game.modal.stars, 2);
+  assert.deepEqual(h.game.profile().completed[level.id], { stars: 2, bestTurns: 32 });
+  assert.equal(h.game.journey().points, beforeJourney.points + level.difficulty.journeyPoints);
+  assert.equal(h.game.profile().totalWins, 53);
+  assert.equal(h.game.unlocked(53), true, 'the same assisted delivery opens level 54');
+  assert.equal(h.game.store.loadRun(), null);
+  const credited = clone(h.game.journey()), assistedScore = campaignScore(h.game.profile());
+  assert.equal(assistedScore.stars, beforeScore.stars + 2);
+  assert.equal(assistedScore.completed, beforeScore.completed + 1);
+  assert.equal(h.game.album().stars, assistedScore.stars);
+  assert.ok(ownedBefore.every(id => h.game.album().stamps.some(stamp => stamp.id === id && stamp.owned)));
+  assert.deepEqual(h.data.get(PROFILE_KEY), h.game.profile());
+  h.game.victory();
+  assert.deepEqual(h.game.journey(), credited, 'redisplaying an echo-assisted win cannot credit the day twice');
+  h.start(level); level.solution.forEach(action => h.act(action));
+  assert.equal(h.game.modal.stars, 3);
+  assert.equal(h.game.journey().points, credited.points);
+  assert.deepEqual(h.game.journey().creditedLevelIds, credited.creditedLevelIds);
+  assert.equal(h.game.profile().totalWins, 53);
+  assert.deepEqual(h.game.profile().completed[level.id], { stars: 3, bestTurns: level.par });
+  assert.equal(campaignScore(h.game.profile()).stars, assistedScore.stars + 1);
+  assert.equal(h.game.album().stars, assistedScore.stars + 1);
+  assert.equal(h.showCount, 2, 'the clean replay improves the record without a new video');
+  assert.deepEqual(h.data.get(PROFILE_KEY), h.game.profile());
+});
+
+test('echo flute keyboard 4 respects level 31 unlock and only targets pending echo stamps', async t => {
+  const h = harness({ development: true }); t.after(() => h.destroy());
+  const locked = CAMPAIGN[29]; h.start(locked);
+  locked.solution.slice(0, 20).forEach(action => h.act(action)); h.advance(300);
+  const lockedState = clone(h.game.state);
+  assert.ok(lockedState.seals.includes(23));
+  assert.ok(lockedState.history.slice(-3).includes(23));
+  h.callbacks.key('4');
+  assert.equal(h.game.modal.itemId, 'echo');
+  assert.ok(h.game.modal.lines.some(line => /31.*解锁/.test(line)));
+  assert.equal(h.game.modal.buttons.some(button => button.primary), false);
+  h.callbacks.key('Escape');
+  await h.game.requestItemReward('echo', 23);
+  assert.deepEqual(h.game.state, lockedState);
+  assert.equal(h.showCount, 0);
+  h.start(CAMPAIGN[30]); h.act('down'); h.advance(300);
+  const before = clone(h.game.state), saved = clone(h.game.store.loadRun());
+  assert.ok(before.seals.includes(7));
+  assert.equal(Object.hasOwn(before.inventory, 'echo'), false, 'new routes keep the existing sparse inventory format');
+  h.callbacks.key('4');
+  assert.equal(h.game.modal.itemId, 'echo');
+  h.callbacks.key('Enter');
+  assert.equal(h.game.selectedItem, 'echo');
+  h.callbacks.key('ArrowRight'); h.callbacks.key(' '); h.game.itemTarget(5);
+  assert.ok(before.seals.includes(5), 'an unvisited blue stamp is still an invalid flute target');
+  assert.deepEqual(h.game.state, before);
+  assert.deepEqual(h.game.store.loadRun(), saved);
+  assert.equal(h.showCount, 0);
+  assert.equal(h.game.selectedItem, 'echo');
+  h.callbacks.key('Escape');
+  assert.equal(h.game.selectedItem, null);
+  await h.game.requestItemReward('echo', 5);
+  assert.equal(h.showCount, 0, 'invalid targets are rejected before the ad request');
+  assert.deepEqual(h.game.state, before);
+});
+
+test('echo flute cancelled video grants nothing and retry or duplicate callbacks consume exactly one charge', async t => {
+  const h = harness({ development: true }); t.after(() => h.destroy());
+  h.start(CAMPAIGN[30]); h.act('down'); h.advance(300);
+  const before = clone(h.game.state), saved = clone(h.game.store.loadRun());
+  h.callbacks.key('4'); h.callbacks.key('Enter'); h.game.itemTarget(7); h.game.itemTarget(7);
+  await completeItemVideo(h, false);
+  assert.equal(h.showCount, 1);
+  assert.deepEqual(h.game.state, before);
+  assert.deepEqual(h.game.store.loadRun(), saved);
+  assert.equal(Object.hasOwn(h.game.itemRewards, 'echo'), false);
+  assert.match(h.game.toastText, /未发放/);
+  h.callbacks.key('4'); h.callbacks.key('Enter'); h.game.itemTarget(7);
+  await completeItemVideo(h); h.closeAd(true); await settleItemVideo();
+  assert.equal(h.showCount, 2);
+  assert.equal(h.game.itemRewards.echo, 1);
+  assert.equal(h.game.state.inventory.echo, 0);
+  assert.equal(h.game.state.itemsUsed, 1);
+  assert.equal(h.game.state.turn, before.turn);
+  assert.equal(h.game.state.energy, before.energy);
+  assert.equal(h.game.state.player, before.player);
+  assert.equal(h.game.state.echo, before.echo);
+  assert.deepEqual(h.game.state.history, before.history);
+  assert.deepEqual(h.game.state.seals, before.seals.filter(cell => cell !== 7));
+  assert.deepEqual(h.game.actions, ['down', 'item:echo:7']);
+  assert.equal(h.game.store.loadRun().itemRewards.echo, 1);
+});
+
+test('echo flute save replay and relaunch undo return the earned charge without a second video', async t => {
+  const first = harness({ development: true }); t.after(() => first.destroy());
+  const level = CAMPAIGN[30]; first.start(level); first.act('down'); first.advance(300);
+  const before = clone(first.game.state);
+  first.game.selectItem('echo'); first.callbacks.key('Enter'); first.game.itemTarget(7);
+  await completeItemVideo(first);
+  const supplied = clone(first.game.state), run = clone(first.game.store.loadRun());
+  assert.deepEqual(supplied, replayItems(level, run.actions, run.reviveHistory, run.itemRewards, run.supplyPolicy));
+  assert.equal(run.itemRewards.echo, 1);
+  first.game.home(); assert.equal(first.game.restore(), true);
+  assert.deepEqual(first.game.state, supplied);
+  const resumed = harness({ development: true, data: first.data }); t.after(() => resumed.destroy());
+  assert.equal(resumed.game.restore(), true);
+  assert.deepEqual(resumed.game.state, supplied, 'a new application session rebuilds the flute action from its save');
+  resumed.advance(300); resumed.game.undo();
+  assert.deepEqual(resumed.game.state, { ...before, inventory: { ...before.inventory, echo: 1 } });
+  assert.equal(resumed.game.itemRewards.echo, 1);
+  assert.deepEqual(resumed.game.actions, ['down']);
+  assert.equal(resumed.game.undosUsed, 1);
+  resumed.advance(300); resumed.callbacks.key('4');
+  assert.ok(resumed.game.modal.lines.some(line => /无需再看视频/.test(line)));
+  resumed.callbacks.key('Enter'); resumed.game.itemTarget(7);
+  assert.deepEqual(resumed.game.state, supplied);
+  assert.equal(first.showCount, 1);
+  assert.equal(resumed.showCount, 0);
+  resumed.start(level);
+  assert.deepEqual(resumed.game.itemRewards, { oil: 0, kite: 0, bridge: 0 });
+  assert.deepEqual(resumed.game.state.inventory, { oil: 0, kite: 0, bridge: 0 });
+});
+
+test('echo flute completed in background saves the reward and waits for explicit resume', async t => {
+  const h = harness({ development: true }); t.after(() => h.destroy());
+  h.start(CAMPAIGN[30]); h.act('down'); h.advance(300);
+  const before = clone(h.game.state);
+  h.game.selectItem('echo'); h.callbacks.key('Enter'); h.game.itemTarget(7);
+  await settleItemVideo(); h.callbacks.hide(); await completeItemVideo(h);
+  assert.equal(h.game.hidden, true);
+  assert.equal(h.game.itemRewards.echo, 1);
+  assert.equal(h.game.state.inventory.echo, 0);
+  assert.equal(h.game.state.turn, before.turn);
+  assert.deepEqual(h.game.state.history, before.history);
+  assert.deepEqual(h.game.state.seals, before.seals.filter(cell => cell !== 7));
+  assert.equal(h.game.modal.kind, 'pause');
+  assert.deepEqual(h.game.store.loadRun().actions, ['down', 'item:echo:7']);
+  assert.equal(h.game.store.loadRun().itemRewards.echo, 1);
+  const supplied = clone(h.game.state);
+  h.callbacks.show(); h.act('right');
+  assert.equal(h.game.modal.kind, 'pause', 'foregrounding cannot resume movement automatically');
+  assert.deepEqual(h.game.state, supplied);
+  h.callbacks.key('Enter');
+  assert.equal(h.game.modal, null);
+  assert.deepEqual(h.game.state, supplied);
+  assert.equal(h.showCount, 1);
+});
+
+test('echo flute late completed video cannot grant into a different restored session', async t => {
+  const h = harness({ development: true }); t.after(() => h.destroy());
+  h.start(CAMPAIGN[30]); h.act('down'); h.advance(300);
+  const session = h.game.session;
+  h.game.selectItem('echo'); h.callbacks.key('Enter'); h.game.itemTarget(7);
+  await settleItemVideo();
+  assert.equal(h.showCount, 1);
+  assert.equal(h.game.restore(), true);
+  assert.notEqual(h.game.session, session);
+  const restored = clone(h.game.state), saved = clone(h.game.store.loadRun());
+  await completeItemVideo(h);
+  assert.deepEqual(h.game.state, restored);
+  assert.deepEqual(h.game.store.loadRun(), saved);
+  assert.deepEqual(h.game.actions, ['down']);
+  assert.equal(Object.hasOwn(h.game.itemRewards, 'echo'), false);
+  assert.equal(Object.hasOwn(h.game.state.inventory, 'echo'), false);
+  assert.equal(h.game.busy, false);
 });
 
 test('proactive oil and a failed-route video give the same six energy without double rewards', async t => {
@@ -1266,7 +1637,10 @@ test('real turn events select distinct sounds without replaying outcomes after u
 test('result effects preserve earned stars and saves, fit small screens and allow immediate next-level taps', t => {
   for (const [waits, earned] of [[0, 3], [1, 2], [3, 1]]) {
     const h = harness({ guide: waits === 0, metrics: { width: 320, height: 568, pixelRatio: 2, safeTop: 70, safeBottom: 20 } });
-    t.after(() => h.destroy()); h.start();
+    t.after(() => h.destroy());
+    // This rendering fixture deliberately reaches every rating, including the
+    // three extra turns needed for one star. Production budgets stay strict.
+    h.start({ ...CAMPAIGN[0], budget: CAMPAIGN[0].par + 4 });
     for (let i = 0; i < waits; i++) h.act('wait');
     CAMPAIGN[0].solution.forEach(action => h.act(action));
     assert.equal(h.game.modal.stars, earned);
@@ -2026,7 +2400,7 @@ test('an unsolvable detour offers undo or an explicit fresh guide instead of spe
     if (!remainingUndos) {
       for (let index = 0; index < CAMPAIGN[0].undo; index++) { h.act('wait'); h.game.undo(); }
     }
-    for (let index = 0; index < 5; index++) h.act('wait');
+    for (let index = 0; index < CAMPAIGN[0].budget - 3; index++) h.act('wait');
     assert.equal(h.game.state.status, 'playing');
     assert.equal(h.game.state.energy, 3, 'four moves are still needed from the start');
     h.game.showGuide();
@@ -2351,7 +2725,9 @@ test('the game screen keeps one route target, undo and wait without duplicate bo
 
 function readyPostOffice(view = {}) {
   const h = harness({ metrics: { width: 780, height: 1688, pixelRatio: 2, safeTop: 100, safeBottom: 68 } });
-  h.start(CAMPAIGN[3]);
+  // The screenshot fixture has fixed positions and two deliberate extra waits.
+  // Preserve its original geometry/budget while testing current input handling.
+  h.start({ ...getLegacyLevel(4, '5'), revision: CAMPAIGN[3].revision });
   h.game.level.solution.slice(0, -1).forEach(action => h.act(action));
   h.act('wait'); h.act('wait');
   Object.assign(h.game.camera, view);
@@ -2560,7 +2936,7 @@ test('a save from an older content version restarts its route with notice and pr
   assert.equal(reloaded.game.level.id, 4);
   assert.equal(reloaded.game.state.turn, 0);
   assert.deepEqual(reloaded.game.actions, []);
-  assert.equal(reloaded.game.store.loadRun().revision, '5');
+  assert.equal(reloaded.game.store.loadRun().revision, '6');
   assert.match(reloaded.game.toastText, /路线已升级/);
   assert.deepEqual(reloaded.game.profile(), earned);
   h.destroy(); reloaded.destroy();
@@ -2571,7 +2947,7 @@ test('a current-version save resumes its exact actions without an upgrade notice
   h.start(CAMPAIGN[2]);
   CAMPAIGN[2].solution.slice(0, 3).forEach(action => h.act(action));
   const before = clone(h.game.state), actions = clone(h.game.actions), earned = clone(h.game.profile());
-  assert.equal(h.game.store.loadRun().revision, '5');
+  assert.equal(h.game.store.loadRun().revision, '6');
   const reloaded = harness({ data: h.data });
   assert.equal(reloaded.game.restore(), true);
   assert.equal(reloaded.game.level.id, 3);
@@ -2590,11 +2966,14 @@ test('the fresh home separates its settings shortcut from the three primary link
   assert.equal(texts.includes('圈子'), false);
   assert.equal(texts.some(text => /每日|成长|LV\.|已走 0 拍|本周|下一小步/.test(text)), false);
   const hits = h.game.renderer.hits;
-  assert.equal(hits.length, 5, 'delivery, three primary links and settings are available');
+  assert.equal(hits.length, 6, 'delivery, today’s itinerary, three primary links and settings are available');
+  assert.ok(texts.some(text => text.includes('今日邮程')), 'the itinerary has a visible home entry');
   const settings = hits.find(hit => hit.x === 330 && hit.y === 10 && hit.w === 44 && hit.h === 44);
   assert.ok(settings, 'settings uses a top-right touch target below the platform safe area');
-  const bottomY = Math.max(...hits.map(hit => hit.y));
-  assert.equal(hits.filter(hit => hit.y === bottomY).length, 3, 'settings is not grouped with bottom navigation');
+  const links = hits.filter(hit => hit.w === 104);
+  assert.equal(links.length, 3, 'settings is not grouped with primary navigation');
+  assert.equal(new Set(links.map(hit => hit.y)).size, 1, 'the three destinations remain a single row');
+  assert.ok(links.every(hit => hit.y > settings.y));
   settings.action(); h.draw();
   assert.equal(h.game.page, 'settings');
   assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '体验设置'));
@@ -2602,7 +2981,7 @@ test('the fresh home separates its settings shortcut from the three primary link
   h.destroy();
 });
 
-test('home keeps five accessible actions across browser and WeChat versions', () => {
+test('home keeps six accessible actions across browser and WeChat versions', () => {
   for (const kind of ['wechat', 'browser']) {
     for (const envVersion of ['develop', 'trial', 'release', undefined]) {
       const h = harness({ kind, wx: {
@@ -2613,10 +2992,10 @@ test('home keeps five accessible actions across browser and WeChat versions', ()
         const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
         assert.equal(texts.includes('圈子'), false, kind + '/' + envVersion);
         const hits = h.game.renderer.hits;
-        assert.equal(hits.length, 5, 'delivery, three primary links and settings are available');
-        const bottomY = Math.max(...hits.map(hit => hit.y));
-        const links = hits.filter(hit => hit.y === bottomY);
-        assert.equal(links.length, 3, 'bottom navigation contains only primary destinations');
+        assert.equal(hits.length, 6, 'delivery, today’s itinerary, three primary links and settings are available');
+        const links = hits.filter(hit => hit.w === 104);
+        assert.equal(links.length, 3, 'primary navigation contains its three destinations');
+        assert.equal(new Set(links.map(hit => hit.y)).size, 1, 'the destination row remains aligned');
         assert.equal(links[0].x + links.at(-1).x + links.at(-1).w, 390, 'navigation stays centered');
         assert.ok(hits.every(hit => hit.x >= 0 && hit.x + hit.w <= 390 && hit.w >= 44 && hit.h >= 44),
           'all home actions remain visible and touch accessible');
@@ -2735,7 +3114,7 @@ test('retired daily runs return to the campaign without losing existing campaign
   assert.deepEqual(h.game.profile().completed, completed);
   assert.deepEqual(h.game.profile().daily, daily);
   assert.equal(h.game.album().stars, 3);
-  assert.equal(h.game.album().stamps.length, 23);
+  assert.equal(h.game.album().stamps.length, STAMPS.length);
   h.game.primary();
   assert.equal(h.game.mode, 'campaign');
   assert.equal(h.game.level.id, 2);

@@ -104,7 +104,7 @@ function isReviveRouteBlocked(level, state, options = {}) {
   if (options.canAcquireItems === true) {
     const inventory = { ...state.inventory };
     for (const item of ITEMS) {
-      if (level.id >= item.unlock && item.id !== 'oil') inventory[item.id] = Math.max(inventory[item.id] || 0,
+      if (level.id >= item.unlock && ['kite', 'bridge'].includes(item.id)) inventory[item.id] = Math.max(inventory[item.id] || 0,
         item.id === 'kite' ? state.letters.length : (level.bridges || []).length);
     }
     // This only allows the offer of a relight. The player must still complete

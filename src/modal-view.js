@@ -32,12 +32,22 @@ function measureModal(r, modal, navigation = null, helpHeight = 0) {
     paragraphs.push({ lines, y: cursor + lineHeight / 2 });
     cursor += lines.length * lineHeight;
   });
+  let progress = null;
+  if (modal.progressLine) {
+    const style = { style: 'quiet', icon: 'stamp', trailing: 'chevron', size: 12,
+      disabled: typeof modal.progressAction !== 'function' };
+    const layout = buttonLayout(r, modal.progressLine, width, style);
+    cursor += 12;
+    progress = { text: modal.progressLine, action: modal.progressAction, x: x + inset,
+      y: cursor, w: width, h: Math.max(CONTROL.compactHeight, layout.lines.length * layout.lineHeight + 16), style };
+    cursor += progress.h;
+  }
   if (navigation) {
     cursor += 20;
     navigation = { ...navigation, y: cursor };
     cursor += CONTROL.compactHeight;
   }
-  if (modal.buttons.length) cursor += navigation ? 14 : 24;
+  if (modal.buttons.length) cursor += navigation ? 14 : progress ? 12 : 24;
   const styles = modal.buttons.map(button => button.primary ? 'primary' : button.textOnly ? 'quiet' : 'secondary');
   const buttonHeight = Math.max(CONTROL.height, ...modal.buttons.map((button, index) => {
     const layout = buttonLayout(r, button.text, width, { style: styles[index], icon: button.icon });
@@ -50,7 +60,7 @@ function measureModal(r, modal, navigation = null, helpHeight = 0) {
     return result;
   });
   const h = cursor + 24;
-  return { x, y: Math.max(24, (r.H - h) / 2), w, h, width, kickerY, title, titleY, titleSize, titleHeight, starsY, help, helpY, paragraphs, lineHeight, buttons, navigation };
+  return { x, y: Math.max(24, (r.H - h) / 2), w, h, width, kickerY, title, titleY, titleSize, titleHeight, starsY, help, helpY, paragraphs, lineHeight, progress, buttons, navigation };
 }
 
 function modalLayout(r, modal) {
@@ -106,9 +116,9 @@ function drawModal(r, modal, now, resultAge = null) {
   const help = modal.kind === 'help';
   if (result) drawResultHeader(r, modal.kind, ui, resultAge);
   else if (modal.kind === 'item') {
-    const itemAccent = modal.itemId === 'kite' ? '#719f89' : modal.itemId === 'bridge' ? '#ab8860' : C.gold;
+    const itemAccent = modal.itemId === 'echo' ? '#72aabb' : modal.itemId === 'kite' ? '#719f89' : modal.itemId === 'bridge' ? '#ab8860' : C.gold;
     r.circle(195, ui.y + 41.5, 26, '#8b997524');
-    r.circle(195, ui.y + 40, 24, modal.itemId === 'kite' ? '#e8efdd' : '#f5ecd5', '#d6c5a5');
+    r.circle(195, ui.y + 40, 24, modal.itemId === 'echo' ? '#e0eff1' : modal.itemId === 'kite' ? '#e8efdd' : '#f5ecd5', '#d6c5a5');
     r.circle(195, ui.y + 40, 20, null, '#fff9e9');
     drawItemArt(r, modal.itemId, 195, ui.y + 40, 29);
     drawEmblemLight(r, 195, ui.y + 40, 24, age, itemAccent);
@@ -125,11 +135,15 @@ function drawModal(r, modal, now, resultAge = null) {
   ui.paragraphs.forEach(paragraph => paragraph.lines.forEach((line, i) => {
     r.text(line, help ? ui.x + 24 : 195, ui.y + paragraph.y + i * ui.lineHeight, 13, C.muted, help ? 'left' : 'center');
   }));
-  if (ui.buttons.length || ui.navigation) {
-    const separatorY = ui.y + (ui.navigation ? ui.navigation.y : ui.buttons[0].y) - 12;
+  if (ui.progress || ui.buttons.length || ui.navigation) {
+    const separatorY = ui.y + (ui.progress ? ui.progress.y - 6 : (ui.navigation ? ui.navigation.y : ui.buttons[0].y) - 12);
     r.line([[ui.x + 24, separatorY], [ui.x + ui.w - 24, separatorY]], '#d1d8c3', 1, [2, 5]);
     r.circle(ui.x + 8, separatorY, 3, '#e0e6d3');
     r.circle(ui.x + ui.w - 8, separatorY, 3, '#e0e6d3');
+  }
+  if (ui.progress) {
+    const progress = ui.progress;
+    r.button(progress.text, progress.x, ui.y + progress.y, progress.w, progress.h, progress.action, progress.style);
   }
   if (ui.navigation) {
     const nav = ui.navigation, y = ui.y + nav.y;

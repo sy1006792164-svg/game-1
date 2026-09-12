@@ -20,7 +20,8 @@ function browserAudit(Game, levels, helpers) {
     ['settings', '体验设置'], ['leaderboard', '好友排行 · 浏览器状态'], ['game', '真实投递'],
     ['guide', '首次操作引导'], ['low-light', '最后三拍'], ['fail', '灯灭后的重试'], ['help', '当前路线说明'],
     ['pause', '对局暂停'], ['stamp', '已收藏邮票详情'], ['next-stamp', '下一枚邮票详情'],
-    ['win', '送达结算'], ['save-warning', '通关保存失败']
+    ['win', '送达结算'], ['save-warning', '通关保存失败'],
+    ['echo-ready', '回声笛 · 第53关末段补救'], ['echo-target', '回声笛 · 选取蓝票'], ['echo-finish', '回声笛 · 二星送达']
   ];
   const baseTime = 10000, noop = () => {};
   let game = null, now = baseTime, sampleAge = 900, metrics, playing = false, playbackAt = 0, frameId = null, interactionAt = null;
@@ -60,7 +61,13 @@ function browserAudit(Game, levels, helpers) {
       resize: () => metrics, now: () => now, raf: () => 1, cancelRaf: noop,
       onResize: noop, onPointer: noop, onKey: listener => { canvas.onkeydown = event => {
         if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
-        event.preventDefault(); guard(() => { stop(); listener(event.key); animateInteraction(); });
+        if (event.key !== 'Tab') event.preventDefault();
+        guard(() => {
+          stop();
+          const handled = listener(event.key === 'Tab' && event.shiftKey ? 'Shift+Tab' : event.key);
+          if (event.key === 'Tab' && handled) event.preventDefault();
+          animateInteraction();
+        });
       }; }, onHide: noop, onShow: noop,
       vibrate: noop, setFrameRate: noop,
       effectsQuality: qualityInput.value, reducedMotion: quietInput.checked
@@ -75,7 +82,24 @@ function browserAudit(Game, levels, helpers) {
     game.renderer.draw(game, now, metrics);
     now = baseTime;
     const scene = sceneInput.value;
-    if (['game', 'guide', 'low-light', 'fail', 'help', 'pause', 'win', 'save-warning'].includes(scene)) {
+    if (scene.startsWith('echo-')) {
+      const level = levels[52];
+      for (const earlier of levels.slice(14, 52)) game.store.recordWin(earlier.id, 3, earlier.par);
+      game.start(level); game.guideEnabled = false; game.mechanicGuide = null; game.camera.reset();
+      // These grants exist only in the QA memory store and model two already
+      // completed videos. Production continues to require the real SDK callback.
+      game.itemRewards = { oil: 1, kite: 0, bridge: 0, echo: 1 };
+      game.actions = ['item:oil', 'wait', 'wait', 'wait', ...level.solution.slice(0, 29)];
+      game.state = helpers.replay(level, game.actions, [], game.itemRewards);
+      game.transitionAt = baseTime - 2000; game.previousState = null; game.moveEvents = [];
+      if (scene === 'echo-target') game.selectedItem = 'echo';
+      else if (scene === 'echo-finish') {
+        const result = helpers.step(level, game.state, 'item:echo:30');
+        if (!result.moved || result.state.status !== 'won') throw new Error('回声笛样本必须合法完成');
+        game.previousState = game.state; game.state = result.state; game.actions.push('item:echo:30');
+        game.moveEvents = result.events; game.transitionAt = baseTime - helpers.resultDelay; game.victory();
+      }
+    } else if (['game', 'guide', 'low-light', 'fail', 'help', 'pause', 'win', 'save-warning'].includes(scene)) {
       const winning = scene === 'win' || scene === 'save-warning';
       const level = winning ? levels[14] : scene === 'guide' ? levels[0] : levels.find(entry => entry.title === '逆风回廊') || levels[19];
       game.start(level); game.guideEnabled = scene === 'guide'; game.mechanicGuide = null; game.camera.reset();
@@ -237,7 +261,7 @@ function bundle() {
     if (id === 'src/main.js') {
       assert.ok(source.includes('new Game(createPlatform());'));
       source = source.replace('new Game(createPlatform());', '(' + browserAudit.toString() +
-        ')(Game, CAMPAIGN, { step, openStampDetail: require("./stamp-detail-view").openStampDetail, resultDelay: require("./feedback-timing").RESULT_DELAY_MS });');
+        ')(Game, CAMPAIGN, { step, replay, openStampDetail: require("./stamp-detail-view").openStampDetail, resultDelay: require("./feedback-timing").RESULT_DELAY_MS });');
     }
     source = source.replace(/require\(['"](\.[^'"]+)['"]\)/g, (_, relative) => {
       const dependency = path.resolve(path.dirname(filename), relative + (path.extname(relative) ? '' : '.js'));
@@ -270,7 +294,7 @@ a{color:inherit}@media(max-width:800px){main{grid-template-columns:1fr;padding:1
 <label for="quality">效果质量</label><select id="quality"><option value="high">完整特效</option><option value="low">低画质</option></select><label><input id="quiet" type="checkbox"> 减少动态效果</label>
 <div class="row"><button id="play">播放入场与环境动作</button><button id="export">导出当前帧</button><button id="contact-sheet">生成全页面对照</button></div><output id="report" aria-live="polite"></output>
 <h2>操作音效试听</h2><div id="audio" class="row"></div><p class="muted">试听只在点击后播放，使用游戏当前 WAV 音源。</p>
-<p class="muted">独立内存中的正式版界面测试：前 14 封来信已送达，第 7 封为两星。结算通过第 15 关真实解生成。此预览不会读取或写入浏览器及微信存档。</p>
+<p class="muted">独立内存中的正式版界面测试：基础样本前 14 封已送达，第 7 封为两星；回声笛样本使用第 53 关真实末段，模拟已完成的视频补给。此预览不会读取或写入浏览器及微信存档。</p>
 <p class="muted">点击画面后也可用方向键操作、空格等待、Z 撤回、Esc 暂停、Enter 继续。</p>
 <p class="muted"><a href="/">打开正常游戏</a> · <a href="/work/effects-preview.html">查看对局特效</a></p></aside><canvas id="game" tabindex="0" aria-label="真实游戏页面采样"></canvas></main><section id="frames" hidden aria-label="各页面对照图"></section>
 <script>window.addEventListener('error',function(event){var box=document.getElementById('errors');box.hidden=false;box.textContent=event.message;document.documentElement.dataset.auditError='true';});</script>
@@ -293,7 +317,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(output, 'experience-preview.html'), html);
   fs.writeFileSync(path.join(output, 'experience-preview.js'), source);
   console.log('Experience QA: http://127.0.0.1:8765/work/experience-preview.html');
-  console.log('16 real page/modal specimens, 2 screen sizes, 4 entry samples; legal result from level ' + result.levelId + ' in ' + result.turns + ' turns.');
+  console.log('19 real page/modal specimens, 2 screen sizes, 4 entry samples; legal result from level ' + result.levelId + ' in ' + result.turns + ' turns.');
 }
 
 module.exports = { bundle, verifyResultSample };

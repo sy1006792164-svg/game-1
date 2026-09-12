@@ -7,6 +7,7 @@ const { insideRect } = require('./board-projection');
 const { campaignRecord } = require('./campaign-progress');
 const { drawChapterDirectory } = require('./chapter-view');
 const { drawLevelHeader } = require('./level-header-view');
+const { difficultyProfile } = require('./difficulty');
 const { drawScrollEdges } = require('./page-feedback');
 const { CARD_HEIGHT, ROW_HEIGHT, CHAPTER_HEADER, CHAPTER_HEIGHT, levelBrowserMode, replayLevels,
   levelBrowserLayout, levelListLayout, levelProgressOffset, levelChapterAtOffset, levelBrowserChapter,
@@ -44,7 +45,10 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   drawLetterCard(r, x, y, w, h, unlocked, highlighted, held);
   r.text(String(level.id).padStart(3, '0'), x + 17, y + 26, 22, unlocked ? C.green : '#74897a', 'left', '600');
   if (inProgress) r.text('进行中', x + 77, y + 26, 10, C.goldText);
-  else if (next && !record) r.text('待送达', x + 77, y + 26, 10, C.goldText);
+  else {
+    const difficulty = difficultyProfile(level);
+    r.label(difficulty.name, x + 74, y + 26, 48, 9, unlocked && difficulty.tier >= 4 ? C.goldText : C.muted);
+  }
   const idle = unlocked && !record && highlighted && !held && !scroll.touching &&
     Math.abs(scroll.velocity) < 4 && scroll.wheelTarget === null && progress === 1 &&
     now - scroll.enteredAt > 800 && now - scroll.activeAt > 800 && !r.reducedMotion && r.effectsQuality !== 'low';
@@ -71,7 +75,9 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   } else r.text(inProgress ? '继续投递' : unlocked ? '开始投递' : '先送达上一封', x + 17, y + h - 23, 11, highlighted ? C.goldText : unlocked ? C.green : C.muted);
   if (unlocked) r.actionIcon('arrow-right', x + 145, y + h - 24, highlighted ? C.gold : C.green);
   c.restore();
-  r.hit(x, y, w, h, () => unlocked ? game.selectLevel(level.id) : game.toast('送达上一封信后开启'),
+  const action = () => unlocked ? game.selectLevel(level.id) : game.toast('送达上一封信后开启');
+  action.focusId = 'level:' + level.id;
+  r.hit(x, y, w, h, action,
     (px, py) => insideRect(viewport, px, py));
 }
 

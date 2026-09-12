@@ -26,7 +26,9 @@ function drawChapterDirectory(r, game, chapters, viewport, current, saved) {
     if (!game.levelScroll.touching && Math.abs(game.levelScroll.velocity) < 4 && game.levelScroll.wheelTarget === null) {
       drawProgressGlint(r, x + 16, y + 65, w - 61, chapter.stars, chapter.maxStars, index * 419);
     }
-    r.hit(x, y, w, h, () => navigateLevelBrowser(game, 'all', chapter.firstId),
+    const action = () => navigateLevelBrowser(game, 'all', chapter.firstId);
+    action.focusId = 'chapter:' + index;
+    r.hit(x, y, w, h, action,
       (px, py) => insideRect(viewport, px, py));
   }
 }

@@ -13,7 +13,10 @@ const { requestItemReward } = require('./item-reward-flow');
 const { SUPPLY_ENERGY, RELIGHT_ACTION, normalizeSupplyPolicy } = require('./supply-rules');
 const { deliveryResultLines } = require('./delivery-result');
 const reviveFlow = require('./revive-flow');
-const { CAMPAIGN } = require('./levels');
+const { CAMPAIGN, getLegacyLevel } = require('./levels');
+const { getJourney, localDate } = require('./journey');
+const { openJourney, openRoutePlan } = require('./journey-view');
+const { supplyAdvice } = require('./supply-advice');
 const { getAlbum } = require('./stamp-album');
 const { handleGameKey } = require('./keyboard-input');
 const { ListScroll } = require('./list-scroll');
@@ -96,6 +99,7 @@ class Game {
       if (page !== this.page || modal !== this.modal || session !== this.session) {
         this.pointer = null; this.renderer.hits = []; this.lastFrame = -Infinity;
       }
+      return handled;
     });
     platform.onHide(() => {
       this.renderer.pauseAmbient(platform.now());
@@ -192,6 +196,20 @@ class Game {
     const revision = this.store.revision();
     if (!this.albumCache || this.albumCache.revision !== revision) this.albumCache = { revision, value: getAlbum(this.profile()) };
     return this.albumCache.value;
+  }
+  journey() {
+    const revision = this.store.revision(), date = localDate(new Date());
+    if (!this.journeyCache || this.journeyCache.revision !== revision || this.journeyCache.date !== date)
+      this.journeyCache = { revision, date, value: getJourney(this.profile(), date) };
+    return this.journeyCache.value;
+  }
+  openJourney() { return openJourney(this); }
+  openRoutePlan(level = this.level) { return openRoutePlan(this, level); }
+  supplyAdvice() {
+    if (!this.state) return null;
+    if (!this.supplyAdviceCache || this.supplyAdviceCache.level !== this.level || this.supplyAdviceCache.state !== this.state)
+      this.supplyAdviceCache = { level: this.level, state: this.state, value: supplyAdvice(this.level, this.state) };
+    return this.supplyAdviceCache.value;
   }
   playHint() { return playHint(this, this.platform.now()); }
   guideStep() { return mechanicStep(this) || guideStep(this, this.platform.now()); }
@@ -390,8 +408,9 @@ class Game {
     try {
       if (!Array.isArray(run.actions) || run.actions.length > 4096) throw new Error('invalid history');
       if (run.mode !== 'campaign') throw new Error('invalid mode');
-      const level = CAMPAIGN.find(l => l.id === run.levelId);
-      if (!level || (run.mode === 'campaign' && !this.unlocked(CAMPAIGN.indexOf(level)))) throw new Error('invalid level');
+      const currentLevel = CAMPAIGN.find(l => l.id === run.levelId);
+      if (!currentLevel || (run.mode === 'campaign' && !this.unlocked(CAMPAIGN.indexOf(currentLevel)))) throw new Error('invalid level');
+      const level = getLegacyLevel(run.levelId, run.revision || '1') || currentLevel;
       if ((run.revision || '1') !== (level.revision || '1')) {
         this.store.clearRun();
         this.start(level, run.mode);
@@ -430,6 +449,9 @@ class Game {
   }
   start(level, mode = 'campaign') {
     if (this.busy || this.startupActive() || mode !== 'campaign') return;
+    // An in-progress v5 route can finish with its original geometry and earned
+    // supplies; an explicit new attempt always uses the strengthened campaign.
+    if (level && level.revision === '5' && CAMPAIGN[level.id - 1]) level = CAMPAIGN[level.id - 1];
     this.cancelRankingPointer();
     const keepGuide = this.guideEnabled && this.level === level && this.state && this.state.status !== 'won';
     this.stopListScrolling(); this.pointer = null;
@@ -472,7 +494,7 @@ class Game {
     this.modal = {
       kind: 'item', itemId: id, title: item.name,
       lines: [item.description, needsVideo ? '完整看完视频，获得 1 份并使用。\n仅本次路线有效，重开后清空。' : '使用已领取的道具，无需再看视频。',
-        '使用不耗拍，回声保持原位；本次最多二星。',
+        '使用不耗拍，回声保持原位；本次最多二星。\n送达计邮程，星光进入邮票册与排行。',
         ...(!offer.eligible ? [offer.reason] : needsVideo && !canWatch ? [this.platform.kind === 'browser' ? '请在微信小游戏内观看视频获取。' : '广告暂时不可用，请稍后再试。'] :
           [id === 'oil' ? '当前 ' + state.energy + ' 拍 → 使用后 ' + (state.energy + SUPPLY_ENERGY) + ' 拍' : needsVideo ? '先选目标，再看视频；未看完不发放。' : '点棋盘上亮起的目标使用。'])],
       buttons: [
@@ -573,7 +595,8 @@ class Game {
     this.pendingAction = null; this.toastUntil = 0;
     const albumBefore = this.album();
     const rating = stars(this.level, this.state), before = this.record(this.level, this.mode);
-    this.store.settleWin(this.level.id, rating, scoredTurns(this.level, this.state), this.mode);
+    const journeyBefore = this.journey();
+    this.store.settleWin(this.level.id, rating, scoredTurns(this.level, this.state), this.mode, { date: localDate(new Date()) });
     this.syncFriendScore();
     const index = CAMPAIGN.findIndex(l => l.id === this.level.id);
     const candidate = index >= 0 ? CAMPAIGN[index + 1] : null;
@@ -587,6 +610,9 @@ class Game {
     if (rewards.length) lines.push(rewards.length > 1 ? '收到 ' + rewards.length + ' 枚新邮票' : '收到新邮票「' + rewards[0].name + '」');
     this.modal = {
       kind: 'win', title: '信已送达', stars: rating,
+      progressLine: '今日邮程 ' + Math.min(this.journey().points, this.journey().target) + '/' + this.journey().target +
+        (this.journey().earnedDays > journeyBefore.earnedDays ? ' · 获得日邮戳' : this.journey().points > journeyBefore.points ? ' · +' + (this.journey().points - journeyBefore.points) : ' · 本关今日已记'),
+      progressAction: () => this.openJourney(),
       lines,
       buttons: [
         { text: next ? '下一封信' : '返回邮局', primary: true, action: () => next ? this.start(next, this.mode) : this.home() },
@@ -747,6 +773,7 @@ class Game {
     scroll.activeAt = now;
   }
   scrollList(x, y, delta) {
+    this.keyboardFocus = null;
     if (this.rankingInteractive()) {
       const p = this.renderer.toLogical(x, y), rect = leaderboardRect(this.renderer.H);
       if (!insideRect(rect, p.x, p.y)) return false;
@@ -761,6 +788,7 @@ class Game {
     return true;
   }
   zoomScene(x, y, factor) {
+    this.keyboardFocus = null;
     this.cancelRankingPointer();
     if (this.page !== 'game' || this.modal || this.busy || this.hidden) return;
     const p = this.renderer.toLogical(x, y), b = this.renderer.boardRect;
@@ -773,6 +801,7 @@ class Game {
   }
   pointerEvent(x, y, type) {
     if (this.hidden) { this.cancelRankingPointer(); return; }
+    if (type === 'start' || type === 'cancel') this.keyboardFocus = null;
     const p = this.renderer.toLogical(x, y);
     if (type === 'cancel') { this.cancelRankingPointer(); this.pointer = null; this.pendingAction = null; this.stopListScrolling(); return; }
     if (type !== 'start' && this.pointer && !this.pointer.ranking &&

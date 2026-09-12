@@ -5,6 +5,7 @@ const { STAR_TWO_MARGIN } = require('./engine');
 const { SUPPLY_ENERGY } = require('./supply-rules');
 
 function helpContent(level, reviveCount, platformKind, options = {}) {
+  const videoAvailable = platformKind === 'wechat' && options.canRevive === true;
   const sections = [
     { title: '移动与等待', icon: 'arrow-right', color: C.green,
       text: '点相邻亮格移动；点脚下格或「等一拍」等待。\n每次消耗 1 拍，思考时不扣拍。\n撤回会退回上一步，剩余次数见按钮。' },
@@ -20,11 +21,22 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
     if (level.lights.length) mechanics.push('风灯：首次踩上补 3 拍，每盏仅一次。');
     if (mechanics.length) sections.push({ title: '本关机关', icon: 'lamp', color: C.green, text: mechanics.join('\n') });
     if (level.id >= 4) sections.push({ title: '随身道具', icon: 'lamp', color: C.goldText,
-      text: '第4封：灯未灭时，灯油原地补' + SUPPLY_ENERGY + '拍。\n第7封：纸鸢取横竖合计2格内一封信，可隔墙。\n第16封：修桥包修相邻断桥，离开仍会碎。\n道具不耗拍，也不推进回声；最高二星。\n点道具看说明，再选亮起的目标。' });
+      text: '灯未灭时，灯油原地补' + SUPPLY_ENERGY + '拍。' +
+        (level.id >= 7 ? '\n纸鸢取横竖合计2格内一封信，可隔墙。' : '') +
+        (level.id >= 16 ? '\n修桥包修相邻断桥，离开仍会碎。' : '') +
+        '\n道具不耗拍，也不推进回声；最高二星。\n点道具看说明，再选亮起的目标。' });
     if (level.id >= 4) sections.push({ title: '灯油与续灯', icon: 'oil', color: C.goldText,
-      text: '灯灭后已有灯油，优先用油补' + SUPPLY_ENERGY + '拍。\n没有灯油时，可完整看视频续灯' + SUPPLY_ENERGY + '拍。\n续灯消耗同一份补给，不额外送库存。\n每份只补一次，已有灯油无需另看视频。' });
-    if (level.id >= 4) sections.push({ title: '按需看视频获取', icon: 'play', color: C.goldText,
-      text: '在微信内，自愿完整看1个视频获1份道具。\n未看完、加载失败或取消，都不会发放。\n仅本次路线有效，重试或切关会清空。\n撤回道具会退回效果、返还已领取的1份，\n再次使用这份无需看视频。\n不会自动弹广告，也不影响无道具通关。' });
+      text: '灯灭后已有灯油，优先用油补' + SUPPLY_ENERGY + '拍。' +
+        (videoAvailable ? '\n没有灯油时，可完整看视频续灯' + SUPPLY_ENERGY + '拍。' : '\n无法续灯时，可免费重新挑战。') +
+        '\n续灯消耗同一份补给，不额外送库存。\n每份只补一次，已有灯油无需另看视频。' });
+    if (level.id >= 31) sections.push({ title: '回声笛 · 提前盖票', icon: 'echo', color: C.blueText,
+      text: '第31封解锁。先走过蓝票，再用回声笛。\n可提前盖好未来1至3拍将被回声盖到的一票。\n不耗拍、不加灯火、不移动人物或回声。\n未经过的蓝票不能选；每份只盖一枚。\n用后最高二星；送达照常计邮程。' });
+    if (level.id >= 4) sections.push({ title: videoAvailable ? '按需看视频获取' : '道具获取与保留', icon: 'play', color: C.goldText,
+      text: (videoAvailable ? '在微信内，自愿完整看1个视频获1份道具。\n未看完、加载失败或取消，都不会发放。' :
+        '当前环境没有可用的视频补给。\n已有道具仍可使用，无道具也能通关。') +
+        '\n仅本次路线有效，重试或切关会清空。\n撤回道具会退回效果、返还已领取的1份，\n再次使用这份无需看视频。\n不会自动弹广告，也不影响无道具通关。' });
+    sections.push({ title: '一程关联所有成长', icon: 'stamp', color: C.green,
+      text: '主线送达解锁下一封，星光推进邮票收藏与好友排行。\n每日同一关首次送达获1至3邮程，满6记日邮戳。\n日邮戳累计保留，道具通关同样计邮程。\n首页「今日邮程」会推荐新关与待摘星邮路。' });
     const two = level.par + STAR_TWO_MARGIN, assisted = reviveCount > 0 || options.itemsUsed > 0;
     // A paper kite can finish a delivery without advancing the turn, even
     // immediately after relighting at the two-star boundary.
@@ -37,9 +49,9 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
     if (level.id >= 4) sections[sections.length - 1].text += (assisted ? '' : '\n使用道具或续灯，本次最高二星。') +
       '\n道具局纪录至少按三星目标 +1 拍计，\n已获得的三星与更短纪录会保留。';
     if (platformKind === 'browser') sections.push({ title: '电脑操作', icon: 'grid', color: C.green,
-      text: '方向键 / WASD：移动\n空格：等一拍 · Z / 退格：撤回\n1 / 2 / 3：查看道具 · Enter：确认\n鼠标点亮起的目标使用道具\nEsc：取消选择、暂停或返回\n滚轮缩放，放大后可拖动棋盘。\n暂停里的「恢复视角」可还原棋盘。' });
+      text: '方向键 / WASD：移动\n空格：等一拍 · Z / 退格：撤回\nTab / Shift+Tab：切换按钮或道具目标\nEnter：选择 · 1 / 2 / 3 / 4：查看道具\n鼠标点亮起的目标使用道具\nEsc：取消选择、暂停或返回\n滚轮缩放，放大后可拖动棋盘。\n暂停里的「恢复视角」可还原棋盘。' });
   }
-  return { sections, lines: level && platformKind === 'wechat' && options.canRevive
+  return { sections, lines: level && videoAvailable
     ? ['可用时看视频续灯 +' + SUPPLY_ENERGY + ' 拍，不另送灯油；已有油优先使用。', '续灯封顶二星，并按总拍数结算。'] : [] };
 }
 

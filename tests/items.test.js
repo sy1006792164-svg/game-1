@@ -34,7 +34,7 @@ function assertUnchanged(level, state, action) {
 }
 
 test('new routes always start empty; completed-video rewards are scoped to unlocked relevant items', () => {
-  assert.deepEqual(ITEMS.map(item => [item.id, item.unlock]), [['oil', 4], ['kite', 7], ['bridge', 16]]);
+  assert.deepEqual(ITEMS.map(item => [item.id, item.unlock]), [['oil', 4], ['kite', 7], ['bridge', 16], ['echo', 31]]);
   assert.ok(ITEMS.every(item => item.description.includes('不耗拍')));
   assert.deepEqual(initialInventory(board({ id: 3, bridges: [7] })), { oil: 0, kite: 0, bridge: 0 });
   for (const id of [4, 7, 15, 16, 999]) assert.deepEqual(initialInventory(board({ id, bridges: [7] })), { oil: 0, kite: 0, bridge: 0 });

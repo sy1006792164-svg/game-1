@@ -88,7 +88,11 @@ function drawHome(r, game, now) {
   r.button(route.title, 42, ui.buttonY, 306, CONTROL.height, () => game.primary(), { style: 'primary' });
   drawLinks(r, game, ui.linksY);
   const footerY = ui.linksY + CONTROL.compactHeight + 32;
-  r.text(completed ? '已送达 ' + completed + ' 封信 · 每一程都算数' : '不必赶路，想好了再出发', 195, footerY, 10, C.muted, 'center');
+  if (typeof game.journey === 'function') {
+    const journey = game.journey();
+    r.button(journey.done ? '今日已盖章 · 累计 ' + journey.earnedDays + ' 枚日邮戳' : '今日邮程 ' + journey.points + ' / ' + journey.target + ' · 查看目标',
+      42, footerY - 22, 306, CONTROL.compactHeight, () => game.openJourney(), { style: 'quiet', icon: 'stamp', size: 12 });
+  } else r.text(completed ? '已送达 ' + completed + ' 封信 · 每一程都算数' : '不必赶路，想好了再出发', 195, footerY, 10, C.muted, 'center');
   drawSettingsShortcut(r, game);
 }
 

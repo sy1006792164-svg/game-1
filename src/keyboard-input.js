@@ -2,6 +2,7 @@
 
 const { DIRECTIONS } = require('./engine');
 const { stampDetailKey } = require('./stamp-detail-view');
+const { handleFocusKey } = require('./keyboard-focus');
 
 const SCROLL_DELTA = Object.freeze({ ArrowUp: -100, ArrowDown: 100, PageUp: -340, PageDown: 340, ' ': 340 });
 const MOVES = Object.freeze({ ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
@@ -24,6 +25,8 @@ function handleGameKey(game, key) {
   if (game.development && game.modal && game.modal.kind === 'developer-level') {
     game.developmentKey(key); return true;
   }
+  const focused = handleFocusKey(game, key);
+  if (focused !== null) return focused;
   if (stampDetailKey(game, key)) return true;
   if (game.modal) {
     const buttons = game.modal.buttons || [];
@@ -37,7 +40,7 @@ function handleGameKey(game, key) {
       }
       return true;
     }
-    if (key === 'Enter' && ['help', 'pause', 'win', 'fail', 'reset-confirm'].includes(game.modal.kind)) {
+    if (key === 'Enter' && ['help', 'pause', 'win', 'fail', 'reset-confirm', 'journey', 'route-plan'].includes(game.modal.kind)) {
       // Result actions become available after the final move is presented.
       // Use the actual painted control so reduced motion and restored results
       // keep exactly the same activation timing as pointer input.
@@ -47,7 +50,7 @@ function handleGameKey(game, key) {
       return true;
     }
     const navigation = game.renderer.helpNavigation;
-    if (game.modal.kind === 'help' && navigation && navigation.modal === game.modal) {
+    if (game.modal.sections && navigation && navigation.modal === game.modal) {
       const page = Number.isInteger(game.modal.helpPage) ? Math.max(0, Math.min(navigation.count - 1, game.modal.helpPage)) : navigation.page;
       const turn = (key === 'ArrowLeft' || key === 'PageUp') && page > 0 ? navigation.previous :
         (key === 'ArrowRight' || key === 'PageDown') && page + 1 < navigation.count ? navigation.next : null;
@@ -58,7 +61,9 @@ function handleGameKey(game, key) {
       }
     }
     if (key === 'Escape') {
-      if (game.modal.kind === 'help') {
+      if (game.modal.kind === 'journey' || game.modal.kind === 'route-plan') {
+        activateModalButton(game, buttons[buttons.length - 1]);
+      } else if (game.modal.kind === 'help') {
         activateModalButton(game, buttons[0]);
       } else if (game.modal.kind === 'pause' && game.page === 'game') game.pause();
       // This dialog deliberately makes "keep local data" its primary action.
@@ -87,8 +92,8 @@ function handleGameKey(game, key) {
     return true;
   }
   if (game.page !== 'game') return false;
-  if (['1', '2', '3'].includes(key) && typeof game.selectItem === 'function') {
-    game.selectItem(['oil', 'kite', 'bridge'][Number(key) - 1]); return true;
+  if (['1', '2', '3', '4'].includes(key) && typeof game.selectItem === 'function') {
+    game.selectItem(['oil', 'kite', 'bridge', 'echo'][Number(key) - 1]); return true;
   }
   if (game.selectedItem) return true;
   const normalized = key.length === 1 ? key.toLowerCase() : key;

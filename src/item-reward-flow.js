@@ -5,7 +5,7 @@ const { ITEMS, itemOffer, itemAvailability, itemAction } = require('./items');
 const { MOVE_MS } = require('./motion');
 
 // A video is tied to the selected tool, target and exact route that requested it.
-// Grant and consumption share one saved action record; undo keeps the earned grant.
+// The reward ledger survives undo; consumption is recorded in the route actions.
 async function requestItemReward(game, id, cell) {
   if (game.page !== 'game' || game.hidden || game.busy || game.modal || game.reviewing || game.ads.isActive() ||
       !game.state || game.state.status !== 'playing' || game.guideStep() || game.platform.now() - game.transitionAt < MOVE_MS) return;
@@ -33,6 +33,10 @@ async function requestItemReward(game, id, cell) {
       game.itemRewards = earned;
       earnedReward = true;
       if (used.moved) {
+        // A winning action does not save its terminal route. Preserve the newly
+        // earned supply on the playable fallback before score settlement, so a
+        // failed profile write cannot make the player watch the video again.
+        if (used.state.status === 'won') game.persist();
         game.blockedAt = null;
         game.commitAction(used, action, game.platform.now());
         if (game.state.status === 'playing') game.toast(item.name + '已使用，观看奖励已保存');

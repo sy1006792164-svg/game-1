@@ -1,6 +1,6 @@
 {
   "name": "wind-letter-corridor",
-  "version": "1.9.1",
+  "version": "1.11.0",
   "private": true,
   "description": "风笺回廊：离线回声路径微信小游戏",
   "scripts": {

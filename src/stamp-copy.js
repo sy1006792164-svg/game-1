@@ -24,7 +24,13 @@ const STAMP_NOTES = Object.freeze({
   'frost-night': '霜停在窗外，问候留在信里；夜色再深，也各有归处。',
   'old-town': '旧城的门牌褪了色，风仍认得每一个转角的名字。',
   'lamp-river': '桥上的灯映进水里，一条邮路便有了明亮的倒影。',
-  'final-letter': '信写到最后一行，窗外的风还在等一张新的纸。'
+  'final-letter': '信写到最后一行，窗外的风还在等一张新的纸。',
+  'star-river': '星河翻过新的一页，未写完的问候仍沿着灯火向远处延伸。',
+  'ridge-wind': '风越过山岭，把另一侧的花香轻轻夹进信封。',
+  'thousand-lamps': '万家灯火陆续亮起，每一扇窗都替归来的信留着位置。',
+  'echo-poem': '回声把散落的脚步连成诗，最后一拍落在邮局门前。',
+  'star-corridor': '群星垂在回廊尽头，弯折的邮路也有了完整的轮廓。',
+  'thousand-starlights': '九百九十九条邮路连起星光，远处的第一缕风仍轻轻翻动信纸。'
 });
 
 module.exports = { STAMP_NOTES };

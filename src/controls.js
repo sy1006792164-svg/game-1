@@ -120,7 +120,7 @@ function drawButton(r, text, x, y, w, h, action, style) {
   ui.lines.forEach((line, index) => r.text(line, textX, textY + index * ui.lineHeight, ui.size, ink, 'center', ui.weight));
   if (options.trailing) drawUiIcon(r, options.trailing, x + w - ui.inset - CONTROL.icon / 2, middle, tone.icon);
   c.restore();
-  if (!disabled) r.hit(x, y, w, h, action);
+  if (!disabled) r.hit(x, y, w, h, action, undefined, String(text) || options.icon);
 }
 
 module.exports = { CONTROL, drawButton, buttonLayout, drawPaperPlaque: plaque };

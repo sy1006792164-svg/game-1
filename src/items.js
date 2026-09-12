@@ -9,7 +9,9 @@ const ITEMS = Object.freeze([
   Object.freeze({ id: 'kite', name: '纸鸢', icon: 'kite', unlock: 7,
     description: '取回横竖合计 2 格内的一封信。\n可隔墙，不踩桥、不收蓝票、不耗拍。', short: '隔空收信' }),
   Object.freeze({ id: 'bridge', name: '修桥包', icon: 'bridge', unlock: 16,
-    description: '修复上下左右相邻的一座断纸桥。\n不耗拍；修好后再离开仍会碎。', short: '修复断桥' })
+    description: '修复上下左右相邻的一座断纸桥。\n不耗拍；修好后再离开仍会碎。', short: '修复断桥' }),
+  Object.freeze({ id: 'echo', name: '回声笛', icon: 'echo', unlock: 31,
+    description: '提前盖好未来 1—3 拍回声将经过的一枚蓝票。\n只选最近走过的落点，不耗拍。', short: '提前盖蓝票' })
 ]);
 
 function itemDefinition(id) { return ITEMS.find(item => item.id === id); }
@@ -35,7 +37,7 @@ function initialInventory(level, rewards) { return normalizeItemRewards(level, r
 function parseItemAction(action) {
   if (action === 'item:oil') return { id: 'oil', cell: null };
   if (typeof action !== 'string') return null;
-  const match = /^item:(kite|bridge):(0|[1-9]\d*)$/.exec(action);
+  const match = /^item:(kite|bridge|echo):(0|[1-9]\d*)$/.exec(action);
   if (!match || match[0] !== action) return null;
   const cell = Number(match[2]);
   return Number.isSafeInteger(cell) ? { id: match[1], cell } : null;
@@ -43,7 +45,7 @@ function parseItemAction(action) {
 
 function itemAction(id, cell) {
   if (id === 'oil') return 'item:oil';
-  if ((id !== 'kite' && id !== 'bridge') || !Number.isSafeInteger(cell) || cell < 0) return null;
+  if ((id !== 'kite' && id !== 'bridge' && id !== 'echo') || !Number.isSafeInteger(cell) || cell < 0) return null;
   return 'item:' + id + ':' + cell;
 }
 
@@ -63,6 +65,14 @@ function candidateTargets(level, state, id) {
   if (id === 'kite') return (state.letters || []).filter(cell => validCell(level, cell) && distance(level, state.player, cell) <= 2);
   if (id === 'bridge') return (level.bridges || []).filter(cell => validCell(level, cell) &&
     !(state.bridges || []).includes(cell) && distance(level, state.player, cell) === 1);
+  if (id === 'echo') {
+    if (!Array.isArray(state.history) || !Number.isSafeInteger(state.turn) || state.turn < 0 ||
+        state.history.length !== state.turn + 1) return [];
+    // These landings reach the unmodified three-turn echo on actions 1–3.
+    // Wind crossings never enter history, and repeated waits offer one stamp.
+    const queued = state.history.slice(Math.max(0, state.turn - 2), state.turn + 1);
+    return [...new Set(queued)].filter(cell => validCell(level, cell) && (state.seals || []).includes(cell));
+  }
   return [];
 }
 
@@ -76,6 +86,7 @@ function itemOffer(level, state, id) {
   const targets = candidateTargets(level, state, id);
   if (!targets.length) {
     if (id === 'kite') return unavailable((state.letters || []).length ? '两格内没有待收的信' : '信笺已全部收齐');
+    if (id === 'echo') return unavailable((state.seals || []).length ? '最近三拍落点没有待盖蓝票' : '蓝票已全部盖好');
     const torn = (level.bridges || []).some(cell => !(state.bridges || []).includes(cell));
     return unavailable(torn ? '请先走到断桥相邻格' : '纸桥完好，无需修复');
   }
@@ -110,6 +121,9 @@ function applyItemAction(level, state, action, version = 2) {
   } else if (parsed.id === 'kite') {
     next.letters = state.letters.filter(letter => letter !== cell);
     events.push({ type: 'letter', cell });
+  } else if (parsed.id === 'echo') {
+    next.seals = state.seals.filter(seal => seal !== cell);
+    events.push({ type: 'seal', cell, source: 'echo-item' });
   } else {
     next.bridges = (state.bridges || []).concat(cell);
     events.push({ type: 'repair', cell });

@@ -40,6 +40,26 @@ test('help only offers rewarded relighting when the active platform can show it'
   assert.ok(helpContent(level, 0, 'browser').sections.some(section => section.title === '电脑操作' && /WASD/.test(section.text)));
 });
 
+test('help keeps unavailable videos and locked tools out of the current route instructions', () => {
+  for (const [kind, canRevive] of [['browser', true], ['wechat', false]]) {
+    const content = helpContent(CAMPAIGN[30], 0, kind, { canRevive });
+    const text = content.sections.map(section => section.text).join('\n');
+    assert.match(text, /当前环境没有可用的视频补给/);
+    assert.doesNotMatch(text, /可完整看视频续灯|完整看视频得1份|自愿完整看1个视频获1份/);
+    assert.match(text, /每份只补一次/);
+    assert.match(text, /已有道具仍可使用/);
+  }
+  const available = helpContent(CAMPAIGN[30], 0, 'wechat', { canRevive: true });
+  assert.match(available.sections.map(section => section.text).join('\n'), /自愿完整看1个视频获1份/);
+  for (const id of [4, 7, 16]) {
+    const items = helpContent(CAMPAIGN[id - 1], 0, 'browser').sections.find(section => section.title === '随身道具').text;
+    assert.match(items, /灯油/);
+    assert.equal(items.includes('纸鸢'), id >= 7);
+    assert.equal(items.includes('修桥包'), id >= 16);
+    assert.match(items, /最高二星/);
+  }
+});
+
 test('every campaign help topic and close action stays visible at the minimum safe height', () => {
   for (const height of [700, 844]) {
     const { r, text } = renderer(height);

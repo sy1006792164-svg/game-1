@@ -1,7 +1,7 @@
 'use strict';
 module.exports = Object.freeze({
   APP_ID: 'wxee6289f904a5d625',
-  VERSION: '1.9.1',
+  VERSION: '1.11.0',
   GAME_NAME: '风笺回廊',
   // 微信公众平台排行榜的唯一标识；修改后会生成一张新的托管榜单。
   FRIEND_LEADERBOARD_KEY: 'stars',

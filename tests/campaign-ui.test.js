@@ -195,21 +195,22 @@ test('the home page names the next route with three digits', () => {
   assert.ok(texts.some(text => text.startsWith('第 001 封 · ')));
 });
 
-test('the album is one continuous collection, reaches the final stamp and has no daily or paging controls', () => {
+test('the album stays continuous and links daily journey back to the same campaign', () => {
   const h = harness();
   h.game.openPage('collection'); h.draw(); h.advance(700);
   let texts = h.draw();
-  assert.equal(STAMPS.length, 23);
+  assert.equal(STAMPS.length, 29);
   assert.ok(texts.includes('第一缕风'));
-  assert.equal(texts.some(text => /每日|今日|[12] \/ 2 页/.test(text)), false);
+  assert.equal(texts.some(text => /[12] \/ 2 页/.test(text)), false);
+  assert.ok(texts.some(text => text.includes('今日邮程')));
   assert.ok(h.game.collectionScroll.max > 0);
   h.callbacks.key('End'); texts = h.draw();
-  assert.ok(texts.includes('寄往终章'));
+  assert.ok(texts.includes('千封星光'));
   assert.equal(texts.includes('01'), false, 'first card is offscreen; the fixed next-stamp summary stays visible');
   h.callbacks.key('Home'); h.draw();
   assert.equal(h.game.collectionScroll.offset, 0);
   h.game.openPage('levels'); texts = h.draw();
-  assert.equal(texts.some(text => /每日|今日/.test(text)), false);
+  assert.ok(texts.some(text => text.includes('今日邮程')));
   assert.equal(typeof h.game.daily, 'undefined');
   assert.equal(require('../src/levels').getDaily, undefined);
 });

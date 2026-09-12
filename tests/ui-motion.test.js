@@ -96,7 +96,7 @@ test('button release light is clipped to its face and never changes the action t
   recordTouch(r, g, hit, { x: 45, y: 91 }, 1000);
   r.button('继续投递', 24, 80, 342, 52, action, { style: 'primary' });
   assert.ok(calls.some(call => call[0] === 'clip'), 'release wash is bounded by the paper silhouette');
-  assert.deepEqual(r.hits[0], { ...hit, action, contains: undefined });
+  assert.deepEqual(r.hits[0], { ...hit, action, contains: undefined, label: '继续投递' });
   assert.equal(stack.length, 0);
   calls.length = 0; r.reducedMotion = true;
   r.button('继续投递', 24, 80, 342, 52, action, { style: 'primary' });
