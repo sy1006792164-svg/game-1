@@ -2,6 +2,7 @@
 
 const { C } = require('./theme');
 const { UI_ICON, drawUiIcon } = require('./ui-icons');
+const { buttonTouch, TOUCH_MS } = require('./ui-motion');
 
 const CONTROL = Object.freeze({ height: 52, compactHeight: 44, icon: UI_ICON.size, gap: 8, depth: 3, lineHeight: 20 });
 const TONES = Object.freeze({
@@ -79,6 +80,21 @@ function drawButton(r, text, x, y, w, h, action, style) {
     plaque(r, x, y + depth, w, faceH, cut, notch, tone.base);
     plaque(r, x, top, w, faceH, cut, notch, pressed ? tone.held : tone.face, tone.edge);
     bevel(r, x, top, w, faceH, cut, tone);
+  }
+  const touch = !disabled && !r.reducedMotion && buttonTouch(r, x, y, w, h);
+  const touchAge = touch ? r.now - touch.at : -1;
+  if (touchAge >= 0 && touchAge < TOUCH_MS) {
+    const t = touchAge / TOUCH_MS;
+    c.save();
+    plaque(r, x + 1, top + 1, w - 2, Math.max(1, faceH - 2), cut, notch);
+    c.clip(); c.globalAlpha *= (1 - t) * (primary ? .19 : .12);
+    r.circle(touch.touchX, touch.touchY, Math.max(2, Math.hypot(w, h) * (1 - (1 - t) ** 3)), primary ? '#f8ecc6' : '#39796b');
+    c.restore();
+  }
+  if (pressed && !r.reducedMotion && r.effectsQuality !== 'low') {
+    c.save(); c.globalAlpha *= .45;
+    r.line([[x + cut + 2, top + 2], [x + w - cut - 2, top + 2]], primary ? '#e0e8bd' : '#ffffff', 1.2);
+    c.restore();
   }
   const middle = top + faceH / 2;
   const feedbackAge = Number.isFinite(options.feedbackAt) ? r.now - options.feedbackAt : -1;

@@ -190,7 +190,13 @@ test('each real ranking entry opens automatically once and shares every native f
   for (const ms of [8, 16, 17, 10]) h.frame(ms);
   assert.equal(draws, 4); assert.equal(h.frameRates.at(-1), 60);
   assert.equal(h.messages.filter(value => value.action === 'open').length, 1, 'rendering does not reopen or reread rankings');
-  h.game.home(); h.frame(); assert.equal(h.frameRates.at(-1), 30);
+  h.game.home(); h.frame();
+  assert.equal(h.game.rankingInteractive(), false, 'leaving stops the friend gesture bridge immediately');
+  assert.equal(h.frameRates.at(-1), 60, 'home gets its own short entrance');
+  h.frame(300); assert.equal(h.frameRates.at(-1), 30);
   await h.enter(); assert.equal(h.messages.filter(value => value.action === 'open').length, 2);
-  h.game.help(); h.frame(); assert.equal(h.frameRates.at(-1), 30);
+  h.game.help(); h.frame();
+  assert.equal(h.game.rankingInteractive(), false, 'a dialog owns input while its entrance animates');
+  assert.equal(h.frameRates.at(-1), 60);
+  h.frame(300); assert.equal(h.frameRates.at(-1), 30);
 });

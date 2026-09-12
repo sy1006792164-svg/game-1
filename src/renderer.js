@@ -20,6 +20,7 @@ const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects')
 const { chapterNames } = require('./levels');
 const { chapterMood } = require('./chapter-atmosphere');
 const { AmbientClock } = require('./ambient-clock');
+const { pageFrame } = require('./ui-motion');
 const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑': 'arrow-up', '↓': 'arrow-down', '↗': 'arrow-ne', '↘': 'arrow-se', '↙': 'arrow-sw', '↖': 'arrow-nw', '✓': 'check' });
 const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2, ne: -Math.PI / 4, se: Math.PI / 4, sw: Math.PI * .75, nw: -Math.PI * .75 });
 
@@ -50,6 +51,7 @@ class Renderer {
   clearCaches() {
     if (this.wrapCache) this.wrapCache.clear();
     this.boardGeometry = null; this.motionEffects = null; this.routePreview = null;
+    this.uiFeedback = null;
     this.hits = []; this.boardProjection = null; this.boardRect = null; this.collectionRect = null; this.levelRect = null;
   }
   toLogical(x, y) { return { x: (x - this.ox) / this.scale, y: (y - this.oy) / this.scale }; }
@@ -216,6 +218,7 @@ class Renderer {
     this.reducedMotion = typeof game.reducedMotion === 'function' ? game.reducedMotion() :
       !!(game.platform && game.platform.reducedMotion);
     this.effectsQuality = game.platform && game.platform.effectsQuality === 'low' ? 'low' : 'high';
+    const pageProgress = pageFrame(this, game, now);
     if (!game.modal) this.ambientFreezeAt = null;
     else if (!Number.isFinite(this.ambientFreezeAt)) this.ambientFreezeAt = now;
     const backgroundNow = this.ambientClock.sample(now,
@@ -241,6 +244,7 @@ class Renderer {
     // its decorative layers read ambientNow and remain frozen behind a modal.
     const pageNow = game.modal && game.page !== 'game' ? this.ambientFreezeAt : now;
     this.pageNow = pageNow;
+    c.save(); c.globalAlpha *= .76 + pageProgress * .24;
     if (game.page === 'startup') drawStartup(this, game, pageNow);
     else if (game.page === 'publication') drawPublication(this, game);
     else if (game.page === 'game') this.game(game, pageNow);
@@ -249,6 +253,13 @@ class Renderer {
     else if (game.page === 'leaderboard') drawLeaderboard(this, game);
     else if (game.page === 'settings') drawSettings(this, game);
     else this.home(game, pageNow);
+    if (pageProgress < 1 && !['startup', 'publication', 'home', 'game'].includes(game.page)) {
+      c.save(); c.globalAlpha *= Math.sin(pageProgress * Math.PI) * .6;
+      const sweep = 24 + pageProgress * 342;
+      this.line([[Math.max(24, sweep - 66), 77], [sweep, 77]], C.gold, 1.4);
+      c.restore();
+    }
+    c.restore();
     if (game.modal !== this.currentModal) { this.currentModal = game.modal; this.modalAt = now; }
     let modalBounds = null;
     if (game.modal) {
@@ -268,12 +279,16 @@ class Renderer {
       else this.modalAt = now;
     }
     if (game.toastUntil > now) {
+      const toastEnter = this.reducedMotion || !Number.isFinite(game.toastAt) ? 1 : Math.min(1, Math.max(0, (now - game.toastAt) / 130));
+      const toastExit = this.reducedMotion ? 1 : Math.min(1, (game.toastUntil - now) / 180);
+      c.save(); c.globalAlpha *= (.5 + toastEnter * .5) * toastExit;
       const lines = this.wrapLines(game.toastText, 326, 13);
       const w = Math.min(358, Math.max(...lines.map(line => c.measureText(line).width), 0) + 32), h = 20 + Math.max(1, lines.length) * 18;
       const preferred = game.page === 'game' ? Math.max(151, 231 - h) : this.H - 12 - h;
       const y = modalBounds ? Math.max(8, modalBounds.y - h - 12) : preferred;
       this.panel((390 - w) / 2, y, w, h, { radius: 12, fill: C.panel, stroke: C.line, accent: C.green });
       lines.forEach((line, i) => this.text(line, 195, y + 19 + i * 18, 13, C.ink, 'center'));
+      c.restore();
     }
     const status = game.store.getStatus();
     const footerToast = game.toastUntil > now && game.page !== 'game' && !game.modal;

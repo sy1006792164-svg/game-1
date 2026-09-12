@@ -153,7 +153,7 @@ test('zero stock offers a voluntary video while returned stock and targetless it
     texts.length = 0; game.state.inventory.kite = 1; game.state.letters = [];
     drawItemTray(r, game, itemTrayLayout(game, null, 590));
     assert.ok(texts.some(text => text.value === '×1'));
-    assert.equal(texts.filter(text => text.value === '暂无可用目标').length, 1);
+    assert.equal(texts.filter(text => text.value === '信笺已全部收齐').length, 1);
     assert.equal(texts.filter(text => text.value === label).length, 2, 'an unavailable target never advertises a reward action');
     texts.length = 0; game.state.letters = [13];
     drawItemTray(r, game, itemTrayLayout(game, null, 590));
@@ -179,6 +179,26 @@ test('target hints stop pulsing in quiet modes and repair feedback expires clean
   ellipses.length = 0;
   drawItemEffects(r, game, 2000, projection);
   assert.equal(ellipses.length, 0);
+});
+
+test('the satchel distinguishes intact bridges, distant broken bridges and distant mail', () => {
+  const level = { id: 44, width: 6, height: 6, start: 5, exit: 32, budget: 26,
+    walls: [], letters: [13, 29], seals: [0, 11], lights: [], bridges: [16], winds: {} };
+  const game = gameFor(level), { r, texts } = renderer();
+  game.platform.kind = 'wechat';
+  const draw = () => {
+    texts.length = 0; r.hits = [];
+    drawItemTray(r, game, itemTrayLayout(game, null, 590));
+    return texts.map(text => text.value);
+  };
+  assert.ok(draw().includes('纸桥完好，无需修复'));
+  assert.ok(draw().includes('两格内没有待收的信'));
+  game.state.bridges = [];
+  assert.ok(draw().includes('请先走到断桥相邻格'));
+  assert.equal(draw().filter(text => text === '看视频获取').length, 1, 'only oil has a valid target here');
+  game.state.player = 22;
+  assert.equal(draw().filter(text => text === '看视频获取').length, 3, 'nearby torn bridge and mail remain independent offers');
+  assert.equal(game.state.itemsUsed, 0);
 });
 
 test('energy pickup text sums actual oil gains, map lamps and legacy oil without counting frames twice', () => {

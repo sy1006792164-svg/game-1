@@ -7,6 +7,7 @@ const { insideRect } = require('./board-projection');
 const { campaignRecord } = require('./campaign-progress');
 const { drawChapterDirectory } = require('./chapter-view');
 const { drawLevelHeader } = require('./level-header-view');
+const { drawScrollEdges } = require('./page-feedback');
 const { CARD_HEIGHT, ROW_HEIGHT, CHAPTER_HEADER, CHAPTER_HEIGHT, levelBrowserMode, replayLevels,
   levelBrowserLayout, levelListLayout, levelProgressOffset, levelChapterAtOffset, levelBrowserChapter,
   navigateLevelBrowser } = require('./level-navigation');
@@ -50,12 +51,20 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   const time = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   const phase = (time + index * 719) % 6200 / 820;
   const lift = idle && phase < 1 ? Math.sin(phase * Math.PI) ** 2 : 0;
+  if (highlighted && unlocked && !record) {
+    // A traveling dash on the envelope fold leads toward its opening action.
+    // Keep every highlight inside the card, so adjacent locked routes stay clear.
+    const routePhase = idle ? (time % 4200) / 4200 : .5;
+    const length = 12, start = x + 18 + routePhase * (w - 48);
+    const alpha = Math.round((idle ? Math.sin(routePhase * Math.PI) : .8) * 220).toString(16).padStart(2, '0');
+    r.line([[start, y + h - 42], [Math.min(x + w - 17, start + length), y + h - 42]], C.gold + alpha, 1.6);
+  }
   c.save(); c.translate(x + 136, y + 25 - lift * 2);
   c.rotate(lift * Math.sin(phase * Math.PI * 2) * .12);
   r.actionIcon(unlocked ? record ? 'check' : 'letter' : 'lock', 0, 0, unlocked ? C.gold : '#74897a');
   c.restore();
   r.label(level.title, x + 17, y + 53, 132, 14, unlocked ? C.ink : C.muted, 'left', '500');
-  r.label('三星 ' + level.par + ' 拍内 · 不续灯', x + 17, y + 72, 132, 10, C.muted);
+  r.label('三星 ' + level.par + '拍内·无道具/续灯', x + 17, y + 72, 132, 10, C.muted);
   if (record) {
     for (let star = 0; star < 3; star++) r.icon('star', x + 23 + star * 21, y + h - 24, 14, star < record.stars ? C.gold : C.line);
     r.text(record.bestTurns + ' 拍', x + 125, y + h - 24, 10, C.muted, 'right');
@@ -101,7 +110,7 @@ function drawReplayLevels(r, game, profile, progress, current, saved, viewport) 
     r.button('回到主线进度', 98, y + 96, 194, CONTROL.height, () => game.scrollToProgress(), { style: 'primary', icon: 'route' });
     return;
   }
-  r.text(levels.length + ' 封待摘星 · 目标拍数内送达，且不续灯', 25, viewport.y + 18 - offset, 11, C.muted);
+  r.text(levels.length + ' 封待摘星 · 目标拍内送达，不用道具或续灯', 25, viewport.y + 18 - offset, 11, C.muted);
   const firstRow = Math.max(0, Math.floor((offset - CHAPTER_HEADER) / ROW_HEIGHT));
   const lastRow = Math.min(Math.ceil(levels.length / 2) - 1, Math.floor((offset + viewport.h - CHAPTER_HEADER) / ROW_HEIGHT));
   for (let row = firstRow; row <= lastRow; row++) {
@@ -142,6 +151,7 @@ function drawLevels(r, game) {
   else if (mode === 'replay') drawReplayLevels(r, game, profile, progress, current, saved, viewport);
   else drawAllLevels(r, game, profile, current, saved, viewport, contentHeight);
   c.restore();
+  drawScrollEdges(r, viewport, scroll);
   const alpha = scroll.touching || Math.abs(scroll.velocity) > 4 ? .65 : clamp(1 - (now - scroll.activeAt - 600) / 450) * .65;
   if (maxScroll > 0 && alpha > 0) {
     const thumb = Math.max(34, viewport.h * viewport.h / contentHeight);

@@ -2,9 +2,9 @@
 
 const { DIRECTIONS, ACTIONS } = require('./engine');
 const { MOVE_MS, EVENT_TIMINGS, EFFECT_BATCH_MS } = require('./feedback-timing');
+const { drawEventArt } = require('./event-art');
 
 const TAU = Math.PI * 2;
-const COLORS = { gold: '#ffdc8c', cyan: '#94ece7', paper: '#f4ddb5' };
 const clamp = value => Math.max(0, Math.min(1, value));
 const validCell = value => Number.isInteger(value) && value >= 0;
 const finite = value => typeof value === 'number' && Number.isFinite(value);
@@ -55,18 +55,31 @@ function actorFrame(game, now, point, ghost = false, options = {}) {
   const progress = reduced ? 1 : clamp(age / MOVE_MS), eased = smooth(progress);
   const target = state && state[key], from = previous && previous[key];
   const disappearing = ghost && !validCell(target) && validCell(from) && progress < 1;
-  if (!validCell(target) && !disappearing) return { x: 0, y: 0, lift: 0, stride: 0, alpha: 0, moving: false, facing: 1 };
+  if (!validCell(target) && !disappearing) return { x: 0, y: 0, lift: 0, stride: 0, alpha: 0, moving: false, facing: 1,
+    lean: 0, stretch: 1, squash: 1, cloak: 0 };
   const path = disappearing ? [from] : movementPath(game, from, target, ghost);
   const segment = Math.min(Math.max(0, path.length - 2), Math.floor(eased * (path.length - 1)));
   const fraction = path.length > 1 ? eased * (path.length - 1) - segment : 0;
   const [x0, y0] = position(point, path[segment]);
   const [x1, y1] = position(point, path[Math.min(segment + 1, path.length - 1)]);
   const moving = path.length > 1 && progress < 1;
-  const breathing = reduced ? 0 : Math.sin(time / (ghost ? 390 : 610) + (ghost ? 1.7 : 0));
+  const quiet = reduced || options.quality === 'low';
+  const ambient = finite(options.ambientNow) ? options.ambientNow : time;
+  const breathing = quiet ? 0 : Math.sin(ambient / (ghost ? 540 : 790) + (ghost ? 1.7 : 0));
   const stride = moving ? Math.sin(progress * TAU) : 0;
   const lift = ghost ? 4 + breathing * 1.7 + (moving ? Math.sin(progress * Math.PI) * 3 : 0) : .6 + breathing * .6 + (moving ? Math.sin(progress * Math.PI) * 4 : 0);
   const alpha = !ghost ? 1 : disappearing ? 1 - eased : !validCell(from) ? eased : 1;
-  return { x: x0 + (x1 - x0) * fraction, y: y0 + (y1 - y0) * fraction, lift, stride, alpha, moving, facing: x1 < x0 ? -1 : 1 };
+  // Pose settles after the existing move; it never delays a step or changes its path.
+  const airborne = !quiet && moving ? Math.sin(progress * Math.PI) : 0;
+  const landingProgress = clamp((age - MOVE_MS) / 140);
+  const landing = !quiet && !ghost && path.length > 1 && age >= MOVE_MS && landingProgress < 1
+    ? Math.sin(landingProgress * Math.PI) * (1 - landingProgress) : 0;
+  const lean = quiet ? 0 : ghost ? breathing * .025 + airborne * .035 : airborne * .075 - landing * .035;
+  const stretch = 1 + airborne * (ghost ? .035 : .075) - landing * .13;
+  const squash = 1 - airborne * (ghost ? .02 : .045) + landing * .11;
+  const cloak = quiet ? 0 : moving ? Math.sin(progress * Math.PI) * 1.8 : ghost ? breathing * .65 : breathing * .16;
+  return { x: x0 + (x1 - x0) * fraction, y: y0 + (y1 - y0) * fraction, lift, stride, alpha, moving,
+    facing: x1 < x0 ? -1 : 1, lean, stretch, squash, cloak };
 }
 
 // A stable seed keeps every particle on the same trajectory between animation frames.
@@ -97,59 +110,17 @@ function burst(renderer, x, y, unit, progress, color, seed, paper) {
 }
 
 function drawEffectBatch(renderer, batch, now, point, scale) {
-  const c = renderer.ctx, age = now - batch.at, events = batch.events, low = renderer.effectsQuality === 'low';
+  const c = renderer.ctx, age = now - batch.at, events = batch.events;
   events.forEach((event, index) => {
     if (!event || !validCell(event.cell)) return;
     const timing = EVENT_TIMINGS[event.type];
     if (!timing || age < timing.delay || age >= timing.delay + timing.duration) return;
     const progress = (age - timing.delay) / timing.duration;
     const [x, y] = position(point, event.cell);
-    const seed = event.cell * 193 + index * 997;
+    const entry = event.type === 'wind' ? events.slice(0, index).find(item => item && item.type === 'move') : null;
+    const origin = entry ? position(point, entry.cell) : [x, y];
     c.save();
-    if (event.type === 'move') {
-      c.globalAlpha *= (1 - progress) * .48;
-      c.beginPath(); c.ellipse(x, y + 2, scale * (.12 + progress * .23), scale * (.04 + progress * .1), 0, 0, TAU);
-      c.strokeStyle = COLORS.gold; c.lineWidth = 1.2; c.stroke();
-      if (!low) [-1, 1].forEach(side => renderer.line([[x + side * scale * .055, y], [x + side * scale * .055, y + scale * .05]], COLORS.paper, 2));
-    } else if (['letter', 'seal', 'light', 'bridge', 'repair'].includes(event.type)) {
-      const paper = event.type === 'bridge';
-      const color = event.type === 'seal' ? COLORS.cyan : paper ? COLORS.paper : COLORS.gold;
-      c.globalAlpha *= 1 - progress;
-      renderer.circle(x, y - scale * .08, scale * (.15 + progress * .48), null, color);
-      burst(renderer, x, y - scale * .18, scale, progress, color, seed, paper);
-    } else if (event.type === 'wind') {
-      const entry = events.slice(0, index).find(item => item && item.type === 'move');
-      const [sx, sy] = position(point, entry ? entry.cell : event.cell);
-      c.globalAlpha *= (1 - progress) * .7;
-      for (let ribbon = 0; ribbon < (low ? 1 : 3); ribbon++) {
-        const offset = low ? 0 : (ribbon - 1) * scale * .1;
-        const lead = clamp(progress * 1.7), tail = Math.max(0, lead - .65);
-        renderer.line([[sx + (x - sx) * tail, sy + (y - sy) * tail + offset], [sx + (x - sx) * lead, sy + (y - sy) * lead + offset - Math.sin(progress * Math.PI) * 4]], COLORS.cyan, 1.4 - ribbon * .2);
-      }
-    } else if (event.type === 'wait') {
-      c.globalAlpha *= (1 - progress) * .75;
-      renderer.circle(x, y, scale * (.13 + progress * .42), null, COLORS.cyan);
-      if (!low) renderer.circle(x, y, scale * (.07 + progress * .29), null, COLORS.gold);
-    } else if (event.type === 'echo-born') {
-      c.globalAlpha *= 1 - progress;
-      renderer.circle(x, y - scale * .2, scale * (.1 + progress * .45), null, COLORS.cyan);
-      renderer.icon('echo', x, y - scale * (.64 + progress * .15), scale * .25, COLORS.cyan);
-    } else if (event.type === 'undo') {
-      c.globalAlpha *= 1 - progress;
-      for (let ring = 0; ring < (low ? 1 : 2); ring++) {
-        const radius = scale * (.22 + (1 - progress) * (.28 + ring * .12));
-        c.beginPath(); c.ellipse(x, y, radius, radius * .47, -progress * .35, .2 + ring * Math.PI, Math.PI * 1.6 + ring * Math.PI);
-        c.strokeStyle = COLORS.cyan; c.lineWidth = 1.4; c.stroke();
-      }
-      renderer.icon('undo', x, y - scale * .65, scale * .28, COLORS.cyan);
-    } else if (['ready', 'win', 'fail'].includes(event.type)) {
-      const won = event.type === 'win', failed = event.type === 'fail';
-      const color = failed ? '#f1b189' : COLORS.gold;
-      c.globalAlpha *= 1 - progress;
-      c.beginPath(); c.ellipse(x, y, scale * (.25 + progress * .75), scale * (.1 + progress * .34), 0, 0, TAU);
-      c.strokeStyle = color; c.lineWidth = won ? 2 : 1.3; c.stroke();
-      if (!failed) burst(renderer, x, y - scale * .5, scale * (won ? 1.5 : .85), progress, color, seed, true);
-    }
+    drawEventArt(renderer, event.type, x, y, scale, progress, event.cell * 193 + index * 997, origin);
     c.restore();
   });
 }
@@ -198,4 +169,4 @@ function drawEffects(renderer, game, now, point, unit, options = {}) {
   buffer.batches.forEach(batch => drawEffectBatch(renderer, batch, now, point, scale));
 }
 
-module.exports = { MOVE_MS, actorFrame, drawEffects, drawBurst: burst };
+module.exports = { MOVE_MS, actorFrame, movementPath, drawEffects, drawBurst: burst };

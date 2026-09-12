@@ -7,6 +7,9 @@ const { drawStampArt } = require('./stamp-art');
 const { openStampDetail } = require('./stamp-detail-view');
 const { STAMPS } = require('./stamp-album');
 const { FILTERS, collectionFilter, visibleStamps, setCollectionFilter } = require('./stamp-collection');
+const { quiet, drawScrollEdges, drawProgressGlint, drawLocatedCorners } = require('./page-feedback');
+
+const locatedStamps = new WeakMap();
 
 function locateNextStamp(game) {
   const album = game.album();
@@ -16,6 +19,11 @@ function locateNextStamp(game) {
   scroll.setBounds(collectionLayout(game.renderer.H, stamps.length).maxScroll);
   scroll.offset = Math.min(scroll.max, Math.floor(index / 3) * 160);
   scroll.activeAt = game.platform.now();
+  // Locating is an immediate jump to one collectible, so don't replay the
+  // entire grid entrance and briefly hide the item the player just requested.
+  scroll.enteredAt = scroll.activeAt - 600;
+  locatedStamps.set(scroll, { index: album.next.index, enteredAt: scroll.enteredAt,
+    at: Number.isFinite(game.renderer.pageNow) ? game.renderer.pageNow : scroll.activeAt });
   return true;
 }
 
@@ -37,6 +45,7 @@ function drawSummary(r, game, album) {
     r.text('还差 ' + next.remaining + ' 星', contentX, 163, 11, C.muted);
     r.text('本段 ' + next.stageCurrent + ' / ' + next.stageGoal, contentRight, 163, 10, C.goldText, 'right');
     r.meter(contentX, 179, contentWidth, next.stageCurrent, next.stageGoal, C.gold);
+    drawProgressGlint(r, contentX, 179, contentWidth, next.stageCurrent, next.stageGoal);
     r.text('累计 ' + next.current + ' / ' + next.goal + ' 星', contentX, 194, 9, C.muted);
     r.actionIcon('arrow-right', contentRight - 10, 140, C.gold);
     r.hit(139, 100, 220, 101, () => locateNextStamp(game));
@@ -61,12 +70,17 @@ function drawStamp(r, game, stamp, rect, viewport, now) {
   const { x, w, h } = rect, y = rect.y + (1 - ease) * 14, c = r.ctx, middle = x + w / 2;
   const held = !game.modal && game.pointer && !game.pointer.dragging && insideRect(viewport, game.pointer.x, game.pointer.y) && insideRect(rect, game.pointer.x, game.pointer.y);
   const age = scroll.tapped && scroll.tapped.index === stamp.index ? (now - scroll.tapped.at) / 330 : 2;
-  const bounce = !r.reducedMotion && age >= 0 && age < 1 ? Math.sin(age * Math.PI) * .04 : 0;
+  const bounce = !quiet(r) && age >= 0 && age < 1 ? Math.sin(age * Math.PI) * .04 : 0;
   const scale = (.97 + ease * .03) * (held ? .97 : 1 + bounce);
   c.save();
   c.globalAlpha *= ease * Math.min(clamp((y + h - viewport.y) / 22), clamp((viewport.y + viewport.h - y) / 22));
   c.translate(middle, y + h / 2); c.scale(scale, scale); c.translate(-middle, -y - h / 2);
-  drawStampArt(r, stamp, { x, y, w, h }, { next, held });
+  drawStampArt(r, stamp, { x, y, w, h }, { next, held, scrolling: scroll.touching || Math.abs(scroll.velocity) > 4 || scroll.wheelTarget !== null });
+  const located = locatedStamps.get(scroll);
+  if (located && located.index === stamp.index && located.enteredAt === scroll.enteredAt && !scroll.touching && !scroll.dragged && scroll.wheelTarget === null) {
+    const age = now - located.at;
+    if (age >= 0 && age < 1800) drawLocatedCorners(r, { x, y, w, h }, quiet(r) ? .85 : clamp((1800 - age) / 550));
+  }
   c.restore();
   r.hit(x, y, w, h, () => {
     scroll.tapped = { index: stamp.index, at: game.platform.now() };
@@ -125,6 +139,7 @@ function drawCollection(r, game) {
   if (stamps.length) r.text('每一次抵达，都成为珍藏。', 195, viewport.y + contentHeight - 17 - scroll.offset, 11, C.muted, 'center');
   else drawEmpty(r, game, viewport);
   c.restore();
+  drawScrollEdges(r, viewport, scroll);
   const alpha = scroll.touching || Math.abs(scroll.velocity) > 4 ? .65 : clamp(1 - (now - scroll.activeAt - 600) / 450) * .65;
   if (maxScroll > 0 && alpha > 0) {
     const thumb = Math.max(34, viewport.h * viewport.h / contentHeight);

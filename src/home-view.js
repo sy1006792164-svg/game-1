@@ -6,6 +6,7 @@ const { CONTROL } = require('./controls');
 const { drawVignette } = require('./scene');
 const { drawTitle } = require('./brand-title');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
+const { decorativeTime } = require('./page-feedback');
 
 function layout(height) {
   const top = Math.max(0, (height - 844) / 2);
@@ -52,6 +53,19 @@ function drawSettingsShortcut(r, game) {
     { style: 'quiet', icon: 'settings' });
 }
 
+function drawDepartureTrail(r, y, quietMotion) {
+  // Three small beats connect the solid courier route to its delayed echo.
+  // The small itinerary sits above the route name, clear of all text and hits.
+  const x = 151, step = 22, time = decorativeTime(r);
+  r.line([[x, y], [x + step * 2, y]], '#9fb99e', .9);
+  r.line([[x + step * 2, y], [x + step * 4, y]], '#81aba6', .9, [2, 3]);
+  for (let i = 0; i < 5; i++) r.round(x + i * step - 1.8, y - 1.8, 3.6, 3.6, 1.8, i < 3 ? '#7da082' : '#80aaa6');
+  if (quietMotion) return;
+  const phase = (time % 5600) / 5600, travel = Math.min(1, phase / .7);
+  const alpha = Math.round(Math.sin(travel * Math.PI) * 200).toString(16).padStart(2, '0');
+  r.round(x - 2 + travel * step * 4, y - 2, 4, 4, 1, C.gold + alpha);
+}
+
 function drawHome(r, game, now) {
   const saved = game.savedRun(), completed = game.completion();
   const route = departure(game.nextLevel(), saved, completed), ui = layout(r.H), bounds = r.viewport || { x: 0, w: 390 };
@@ -62,7 +76,7 @@ function drawHome(r, game, now) {
     { reducedMotion: quietMotion, quality: r.effectsQuality, mood, treatment: atmosphereTreatment('home') });
   drawVignette(r, sceneNow, { x: 5, y: ui.heroY, w: 380, h: ui.heroH },
     { reducedMotion: quietMotion, mood, deliveryStory: r.effectsQuality !== 'low' });
-  r.line([[171, ui.routeY - 13], [219, ui.routeY - 13]], '#a6bfa6', .8);
+  drawDepartureTrail(r, ui.routeY - 13, quietMotion);
   r.label(route.detail, 195, ui.routeY + 6, 324, 12, C.ink, 'center', '600');
   r.text(saved ? '路线已留好，随时接着走' : '你拾起信笺 · 回声收集邮票', 195, ui.routeY + 28, 10, C.muted, 'center');
   if (!quietMotion) {

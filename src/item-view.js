@@ -73,7 +73,7 @@ function drawItemTray(r, game, layout) {
     const video = !selected && !locked && offer.eligible && remaining === 0;
     const detail = selected ? '请点亮起的目标' : locked ? '第 ' + item.unlock + ' 关开启' :
       item.id === 'bridge' && !(game.level.bridges || []).length ? '本关没有纸桥' :
-      !offer.eligible ? '暂无可用目标' : video ? game.platform.kind === 'browser' ? '微信内视频获取' : '看视频获取' : item.short;
+      !offer.eligible ? offer.reason : video ? game.platform.kind === 'browser' ? '微信内视频获取' : '看视频获取' : item.short;
     if (video) {
       r.round(x + 9, y + 36, 13, 10, 2, null, tone.ink);
       const c = r.ctx; c.beginPath(); c.moveTo(x + 14, y + 38); c.lineTo(x + 18, y + 41); c.lineTo(x + 14, y + 44); c.closePath();

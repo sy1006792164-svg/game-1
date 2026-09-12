@@ -6,6 +6,7 @@ const { drawResultHeader, drawResultStars } = require('./result-effects');
 const { layoutHelp, drawHelp } = require('./help-view');
 const { drawSurfaceEdges } = require('./surface-edges');
 const { drawItemArt } = require('./item-view');
+const { drawEmblemLight } = require('./keepsake-effects');
 
 // Measure each block before drawing so titles, paragraphs and actions keep
 // their own space, including when a longer label wraps onto another line.
@@ -70,7 +71,8 @@ function modalLayout(r, modal) {
   if (sections.length) pages.push(sections);
   const page = Math.min(pages.length - 1, Math.max(0, Number.isInteger(modal.helpPage) ? modal.helpPage : 0));
   const turn = direction => () => {
-    modal.helpPage = Math.min(pages.length - 1, Math.max(0, page + direction));
+    const current = Math.min(pages.length - 1, Math.max(0, Number.isInteger(modal.helpPage) ? modal.helpPage : page));
+    modal.helpPage = Math.min(pages.length - 1, Math.max(0, current + direction));
     r.hits = [];
   };
   const pageHeight = Math.max(...pages.map(topics => layoutHelp(r, topics, full.width).height));
@@ -80,11 +82,12 @@ function modalLayout(r, modal) {
 }
 
 function drawModal(r, modal, now, resultAge = null) {
-  const c = r.ctx, age = Math.max(0, now - r.modalAt), ui = modalLayout(r, modal);
+  const c = r.ctx, age = Number.isFinite(r.modalAt) ? Math.max(0, now - r.modalAt) : 1000, ui = modalLayout(r, modal);
   r.helpNavigation = ui.navigation ? { ...ui.navigation, modal } : null;
   const result = modal.kind === 'win' || modal.kind === 'fail';
   const accent = modal.kind === 'fail' ? '#a76e55' : C.gold;
-  c.save(); c.globalAlpha *= r.reducedMotion ? 1 : Math.min(1, .18 + age / 180);
+  const enter = Math.min(1, age / 220);
+  c.save(); c.globalAlpha *= r.reducedMotion ? 1 : .32 + .68 * (1 - (1 - enter) ** 3);
   r.scrim('#36554979');
   r.round(ui.x + 3, ui.y + 8, ui.w - 6, ui.h, 23, '#24473526');
   r.round(ui.x - 2, ui.y + 3, ui.w + 4, ui.h, 23, '#e6e8d7', '#c1cbb6');
@@ -103,12 +106,17 @@ function drawModal(r, modal, now, resultAge = null) {
   const help = modal.kind === 'help';
   if (result) drawResultHeader(r, modal.kind, ui, resultAge);
   else if (modal.kind === 'item') {
-    r.circle(195, ui.y + 40, 24, '#f5ecd5', '#d6c5a5');
+    const itemAccent = modal.itemId === 'kite' ? '#719f89' : modal.itemId === 'bridge' ? '#ab8860' : C.gold;
+    r.circle(195, ui.y + 41.5, 26, '#8b997524');
+    r.circle(195, ui.y + 40, 24, modal.itemId === 'kite' ? '#e8efdd' : '#f5ecd5', '#d6c5a5');
+    r.circle(195, ui.y + 40, 20, null, '#fff9e9');
     drawItemArt(r, modal.itemId, 195, ui.y + 40, 29);
+    drawEmblemLight(r, 195, ui.y + 40, 24, age, itemAccent);
   } else if (!ui.help) {
     r.circle(195, ui.y + 52, 29, '#f5ecd5', '#d6c5a5');
     r.circle(195, ui.y + 52, 23, '#fffaf0', '#e6d8bb');
     r.icon(help ? 'echo' : 'wind', 195, ui.y + 52, 28, help ? C.blue : C.gold);
+    drawEmblemLight(r, 195, ui.y + 52, 29, age, help ? C.blue : C.gold);
   }
   if (modal.kicker) r.label(modal.kicker, 195, ui.y + ui.kickerY, ui.width, 10, C.muted, 'center');
   ui.title.forEach((line, i) => r.text(line, 195, ui.y + ui.titleY + i * ui.titleHeight, ui.titleSize, C.ink, 'center', '600'));

@@ -92,6 +92,9 @@ function drawResultHeader(r, kind, ui, age) {
 function drawResultStars(r, stars, y, age) {
   for (let index = 0; index < 3; index++) {
     const x = 150 + index * 45, size = index === 1 ? 36 : 29;
+    // A shallow embossed seat separates earned gold from the empty paper stars.
+    r.circle(x, y + 1.5, size * .57, '#78906d16');
+    r.circle(x, y, size * .57, index < stars ? '#f7edd0' : '#f0f1e7', index < stars ? '#dfce9c' : '#d9dfce');
     r.icon('star', x, y, size, C.line);
     if (index >= stars) continue;
     const progress = age === null || r.reducedMotion ? 1 : clamp((age - 120 - index * 190) / 420);
@@ -103,7 +106,10 @@ function drawResultStars(r, stars, y, age) {
       r.ctx.restore();
     }
     r.ctx.save(); r.ctx.globalAlpha *= eased;
-    r.icon('star', x, y, size * (.6 + eased * .4 + pulse * .14), C.yellow);
+    const starSize = size * (.6 + eased * .4 + pulse * .14);
+    r.icon('star', x, y + 1.1, starSize, '#b99250');
+    r.icon('star', x, y, starSize, C.yellow);
+    r.line([[x - starSize * .12, y - starSize * .1], [x, y - starSize * .31], [x + starSize * .065, y - starSize * .17]], '#fff4c6', .9);
     r.ctx.restore();
     if (progress === 1 || r.effectsQuality === 'low') continue;
     r.ctx.save(); r.ctx.globalAlpha *= pulse * .8;

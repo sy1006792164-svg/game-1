@@ -3,6 +3,7 @@
 const { C } = require('./theme');
 const { insideRect } = require('./board-projection');
 const { DIRECTORY_ROW, navigateLevelBrowser } = require('./level-navigation');
+const { drawProgressGlint } = require('./page-feedback');
 
 function drawChapterDirectory(r, game, chapters, viewport, current, saved) {
   const offset = game.levelScroll.offset;
@@ -22,6 +23,9 @@ function drawChapterDirectory(r, game, chapters, viewport, current, saved) {
     r.icon('star', x + 215, y + 48, 11, C.gold);
     r.text(chapter.stars + '/' + chapter.maxStars, x + 226, y + 48, 10, C.goldText);
     r.meter(x + 16, y + 65, w - 61, chapter.stars, chapter.maxStars, chapter.stars === chapter.maxStars ? C.gold : C.green);
+    if (!game.levelScroll.touching && Math.abs(game.levelScroll.velocity) < 4 && game.levelScroll.wheelTarget === null) {
+      drawProgressGlint(r, x + 16, y + 65, w - 61, chapter.stars, chapter.maxStars, index * 419);
+    }
     r.hit(x, y, w, h, () => navigateLevelBrowser(game, 'all', chapter.firstId),
       (px, py) => insideRect(viewport, px, py));
   }

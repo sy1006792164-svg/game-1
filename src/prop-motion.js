@@ -22,6 +22,15 @@ function drawWindRune(r, x, y, vector, now, cell) {
     const ease = progress * progress * (3 - 2 * progress);
     c.globalAlpha *= Math.sin(progress * Math.PI) ** 2 * .9;
     arrow(-.13 + ease * .26, '#306f5b', 2.1);
+    // Side streamlets travel farther than the permanent rune. Their small heads
+    // keep the wind direction readable even where the courier covers the center.
+    c.save(); c.globalAlpha *= .82;
+    for (const side of [-1, 1]) {
+      const offset = -.35 + ease * .58, across = side * .25;
+      r.line([point(offset - .12, across), point(offset + .14, across)], '#f3f8d9', 1.4);
+      r.line([point(offset + .065, across + .055), point(offset + .14, across), point(offset + .065, across - .055)], '#f3f8d9', 1.05);
+    }
+    c.restore();
   }
   c.restore();
 }
@@ -40,6 +49,10 @@ function drawBridgeFlutter(r, x, y, hw, hh, now, cell) {
     c.fillStyle = side < 0 ? '#fae3b6' : '#d9b180'; c.fill();
     r.line([top, [tipX, y - lift], bottom], side < 0 ? '#fff0ce' : '#b18c61', .85);
     r.line([top, bottom], '#b9976980', .65);
+    // A paper crease catches the light as its corner rises; the deck stays fixed.
+    c.save(); c.globalAlpha *= .22 + lift / amount * .32;
+    r.line([[hingeX, y], [tipX - side * 1.3, y - lift * .78]], '#fff8dd', .8);
+    c.restore();
   }
   c.restore();
 }

@@ -82,6 +82,9 @@ async function requestRevive(game) {
       game.toast(result && result.reason === 'cancelled' ? '视频未看完，未续灯；可重试或免费重开'
         : '广告暂时不可用，可稍后再试或免费重开');
     }
+    // Native playback may finish while the app is still in the background.
+    // Preserve the same explicit resume step as normal backgrounding and tool rewards.
+    if (game.hidden && game.state.status === 'playing') game.pause();
   }
   game.pointer = null; game.renderer.hits = []; game.lastFrame = -Infinity;
   game.syncMusic();

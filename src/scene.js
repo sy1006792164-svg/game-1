@@ -5,7 +5,7 @@ const { insideRect } = require('./board-projection');
 const { getBoardGeometry } = require('./board-geometry');
 const { OFFICE, officeFlag, hitPostOffice } = require('./post-office-geometry');
 const { drawIslandSurface } = require('./island-surface');
-const { drawActorTrails, drawDestination } = require('./scene-effects');
+const { drawActorTrails, drawDestination, drawCollectibleAura } = require('./scene-effects');
 const { drawDistantAtmosphere, windState } = require('./ambient-effects');
 const { chapterMood } = require('./chapter-atmosphere');
 const { drawHomeDelivery } = require('./page-atmosphere');
@@ -206,6 +206,7 @@ function floatingMail(r, x, y, size, now, cell, seal, action) {
   const c = r.ctx, bob = Math.sin(now / 670 + cell * .7) * 2.2;
   const floatY = y - size * .5 + bob, angle = Math.sin(now / 1500 + cell) * .09;
   ellipse(r, x, y + 1, size * .38, size * .12, seal ? '#659d9a38' : '#ae824530');
+  drawCollectibleAura(r, x, y, size, now, cell, seal);
   glow(r, x, y - 10, size * .52, seal ? COLOR.teal : COLOR.gold, .055);
   c.save(); c.translate(x, floatY); c.rotate(angle);
   if (seal) {
@@ -220,15 +221,12 @@ function floatingMail(r, x, y, size, now, cell, seal, action) {
     r.circle(0, 1, size * .095, '#bd7146');
   }
   c.restore();
-  const sparkle = (now / 1800 + cell * .31) % 1;
-  c.save(); c.globalAlpha = Math.sin(sparkle * Math.PI) * .7;
-  r.circle(x + Math.sin(cell) * size * .6, y - 8 - sparkle * size, .9, seal ? '#c1f6ef' : '#fff1c6'); c.restore();
   hitProp(r, x, floatY, size * (seal ? .72 : 20 / 24), size * (seal ? .86 : 14 / 24),
     seal ? 2 : size * 3 / 24, angle, action);
 }
 
 function drawBoard(r, game, now, rect, guide) {
-  const options = { reducedMotion: !!r.reducedMotion };
+  const options = { reducedMotion: !!r.reducedMotion, quality: r.effectsQuality, ambientNow: r.ambientNow };
   // Performance mode still animates a deliberate move, but idle scenery stays still.
   const quietScenery = options.reducedMotion || r.effectsQuality === 'low';
   const time = quietScenery ? 0 : Number.isFinite(r.ambientNow) ? r.ambientNow : now;
@@ -270,7 +268,7 @@ function drawBoard(r, game, now, rect, guide) {
     if (!dx && !dy) game.act('wait');
     else if (Math.abs(dx) + Math.abs(dy) === 1) game.act(dx ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'down' : 'up');
     else if (game.guideMisstep()) return;
-    else if ((l.bridges || []).includes(cell) && !game.state.bridges.includes(cell)) game.toast('纸桥已碎，这里过不去了');
+    else if ((l.bridges || []).includes(cell) && !game.state.bridges.includes(cell)) game.toast('纸桥已断，走到相邻格后可用修桥包修复');
     else game.toast('点相邻格移动，点脚下格原地等一拍');
   };
   const cellAction = cell => Object.assign(() => selectCell(cell), { boardCell: cell });

@@ -35,7 +35,7 @@ test('help only offers rewarded relighting when the active platform can show it'
   }
   const available = helpContent(level, 0, 'wechat', { canRevive: true });
   assert.ok(available.lines.some(line => /封顶二星/.test(line)), 'the star consequence is available before a player chooses an ad');
-  const late = helpContent(CAMPAIGN[0], 1, 'wechat', { canRevive: true, turn: CAMPAIGN[0].par + STAR_TWO_MARGIN });
+  const late = helpContent(CAMPAIGN[0], 1, 'wechat', { canRevive: true, turn: CAMPAIGN[0].par + STAR_TWO_MARGIN + 1 });
   assert.ok(late.sections.some(section => /本次最多一星/.test(section.text)), 'late relights disclose the reachable rating');
   assert.ok(helpContent(level, 0, 'browser').sections.some(section => section.title === '电脑操作' && /WASD/.test(section.text)));
 });

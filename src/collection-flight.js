@@ -32,9 +32,18 @@ function drawCollectionFlights(r, game, now) {
       const [x, y] = curve(from, to, eased, side), c = r.ctx;
       const alpha = Math.min(1, progress / .12, (1 - progress) / .18);
       if (r.effectsQuality !== 'low') {
-        c.save(); c.globalAlpha *= alpha * .35;
-        const trail = Array.from({ length: 7 }, (_, i) => curve(from, to, Math.max(0, eased - (6 - i) * .018), side));
-        r.line(trail, style.color, 1.2);
+        c.save(); c.globalAlpha *= alpha;
+        const trail = Array.from({ length: 10 }, (_, i) => curve(from, to, Math.max(0, eased - (9 - i) * .023), side));
+        c.save(); c.globalAlpha *= .15; r.line(trail, style.color, 5); c.restore();
+        for (let i = 1; i < trail.length; i++) {
+          c.save(); c.globalAlpha *= i / trail.length * .7;
+          r.line([trail[i - 1], trail[i]], i % 2 ? style.color : '#fff5cf', 1.6);
+          if (i % 3 === 0) {
+            const [px, py] = trail[i], drift = Math.sin(progress * 9 + i) * (1 - i / trail.length) * 6;
+            r.circle(px + drift, py + 3, 1.1, style.color);
+          }
+          c.restore();
+        }
         c.restore();
       }
       c.save(); c.globalAlpha *= alpha;

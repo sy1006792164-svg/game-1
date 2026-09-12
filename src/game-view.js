@@ -5,7 +5,7 @@ const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { GUIDE_HEIGHT, guideCardLayout, drawGuideCard } = require('./guide-view');
 const { drawGuideOverlay, drawGuideWait } = require('./guide-effects');
-const { chapterNames } = require('./levels');
+const { STAR_TWO_MARGIN } = require('./engine');
 const { gameFeedback, drawContextFeedback } = require('./game-feedback');
 const { drawObjectives } = require('./game-objectives');
 const { drawCollectionFlights } = require('./collection-flight');
@@ -15,6 +15,16 @@ const { itemTrayLayout, drawItemTray, itemAimHint, drawItemAimHint } = require('
 // One- and two-line play hints share one slot, avoiding small board jumps as
 // the contextual copy changes between turns.
 const PLAY_HINT_HEIGHT = 50;
+
+function routeStatus(game) {
+  const { level, state } = game, turn = state.turn, two = level.par + STAR_TWO_MARGIN;
+  const assisted = state.itemsUsed > 0 || state.revived || state.reviveCount > 0;
+  const source = state.itemsUsed > 0 ? '道具' : '续灯';
+  if (turn > two) return { text: '已走 ' + turn + ' 拍 · 本次送达得一星', warning: true };
+  if (assisted) return { text: '已走 ' + turn + ' 拍 · ' + source + '封顶二星 · ' + two + ' 拍内', warning: true };
+  const target = turn > level.par ? '二星目标 ' + two : '三星目标 ' + level.par;
+  return { text: '第 ' + String(level.id).padStart(3, '0') + ' 封 · 已走 ' + turn + ' 拍 · ' + target + ' 拍', warning: false };
+}
 
 function controlLayout(r, game) {
   const ready = !game.state.letters.length && !game.state.seals.length;
@@ -86,10 +96,14 @@ function drawGame(r, game, now) {
   const atmosphereNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   const showGuideEntry = !layout.guide && game.canShowGuide() && game.state.status === 'playing' && !game.reviewing;
   r.label(game.level.title, 24, 32, showGuideEntry ? 138 : 254, 24, C.ink, 'left', '600');
-  if (game.reviewing) r.text('路线回顾', 24, 60, 11, C.muted);
-  else if (game.state.itemsUsed) r.text('已使用道具 · 本次最高二星', 24, 63, 10, '#925e37');
-  else if (game.development) r.text('开发试玩 · 独立存档', 24, 63, 10, '#925e37');
-  else r.label(game.mode === 'campaign' ? '第 ' + String(game.level.id).padStart(3, '0') + ' 封 · ' + (chapterNames[game.level.chapter] || '风笺邮路') : '今日来信 · 一次新的远行', 24, 60, 252, 10, C.muted);
+  // The subtitle sits below the complete 44px guide/pause targets. Its former
+  // baseline crossed the guide button on the first level.
+  if (game.reviewing) r.text('路线回顾', 24, 69, 11, C.muted);
+  else if (game.development && !game.state.itemsUsed && !game.state.revived) r.text('开发试玩 · 独立存档', 24, 69, 10, '#925e37');
+  else {
+    const status = routeStatus(game);
+    r.label(status.text, 24, 69, 342, 11, status.warning ? C.goldText : C.muted);
+  }
   if (showGuideEntry) r.button('操作引导', 174, 18, 104, CONTROL.compactHeight, () => game.showGuide(), {
     style: 'quiet', icon: 'route', disabled: !!game.modal || game.busy
   });
@@ -110,4 +124,4 @@ function drawGame(r, game, now) {
   drawControls(r, game, layout, now, feedback);
 }
 
-module.exports = { PLAY_HINT_HEIGHT, drawGame, gameBoardRect, controlLayout };
+module.exports = { PLAY_HINT_HEIGHT, drawGame, gameBoardRect, controlLayout, routeStatus };

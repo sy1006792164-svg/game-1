@@ -7,9 +7,9 @@ const ITEMS = Object.freeze([
   Object.freeze({ id: 'oil', name: '灯油', icon: 'oil', unlock: 4,
     description: '原地补充 ' + SUPPLY_ENERGY + ' 拍灯火。\n不耗拍，也不会移动你与回声。', short: '灯火 +' + SUPPLY_ENERGY }),
   Object.freeze({ id: 'kite', name: '纸鸢', icon: 'kite', unlock: 7,
-    description: '取回横竖合计 2 格内的一封信。\n可以越过墙壁，不移动、不耗拍。', short: '隔空收信' }),
+    description: '取回横竖合计 2 格内的一封信。\n可隔墙，不踩桥、不收蓝票、不耗拍。', short: '隔空收信' }),
   Object.freeze({ id: 'bridge', name: '修桥包', icon: 'bridge', unlock: 16,
-    description: '修复相邻的一座断纸桥，不耗拍。\n修好后可以再走，离开仍会碎。', short: '修复断桥' })
+    description: '修复上下左右相邻的一座断纸桥。\n不耗拍；修好后再离开仍会碎。', short: '修复断桥' })
 ]);
 
 function itemDefinition(id) { return ITEMS.find(item => item.id === id); }
@@ -74,7 +74,11 @@ function itemOffer(level, state, id) {
   if (id === 'bridge' && !(level.bridges || []).length) return unavailable('本关没有纸桥');
   if (!state || state.status !== 'playing') return unavailable('只能在投递中使用');
   const targets = candidateTargets(level, state, id);
-  if (!targets.length) return unavailable(id === 'kite' ? '横竖 2 格内没有待收的信' : '身边没有断纸桥');
+  if (!targets.length) {
+    if (id === 'kite') return unavailable((state.letters || []).length ? '两格内没有待收的信' : '信笺已全部收齐');
+    const torn = (level.bridges || []).some(cell => !(state.bridges || []).includes(cell));
+    return unavailable(torn ? '请先走到断桥相邻格' : '纸桥完好，无需修复');
+  }
   return { eligible: true, reason: '', targets };
 }
 

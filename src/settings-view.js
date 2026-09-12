@@ -2,6 +2,7 @@
 
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
+const { togglePosition } = require('./ui-motion');
 
 const ROWS = Object.freeze([
   Object.freeze({ key: 'sound', title: '操作音效', detail: '移动、收集与结果提示音' }),
@@ -24,12 +25,22 @@ function drawToggle(r, game, row, y) {
   r.text(settingStatus(game, row, enabled, supported), 42, y + 43, 11, C.muted);
   r.ctx.save();
   if (!supported) r.ctx.globalAlpha *= .45;
-  const active = supported && enabled, knobX = active ? 330 : 312;
+  const active = supported && enabled, change = game.settingChange;
+  const age = change && change.key === row.key ? r.now - change.at : 240;
+  const moving = supported && !r.reducedMotion && r.effectsQuality !== 'low' && age >= 0 && age < 240;
+  const t = moving ? 1 - (1 - age / 240) ** 3 : 1;
+  const position = togglePosition(change, row.key, active, r.now, r.reducedMotion || r.effectsQuality === 'low');
+  const knobX = 312 + position * 18;
   r.round(296, y + 16, 50, 30, 15, active ? '#285b52' : '#b4c6b8', C.line);
   r.round(297, y + 17, 48, 27, 13.5, active ? C.green : C.soft);
   if (r.effectsQuality !== 'low') r.round(309, y + 18, 22, 1, .5, active ? '#a6c9ad88' : '#ffffffb3');
   r.circle(knobX, y + 31, 11, '#aabfaf', C.line);
   r.circle(knobX - .3, y + 30, 10, C.white);
+  if (moving) {
+    r.ctx.save(); r.ctx.globalAlpha *= Math.sin(t * Math.PI) * .36;
+    r.circle(knobX, y + 30, 12, null, C.green);
+    r.ctx.restore();
+  }
   if (r.effectsQuality !== 'low') r.round(knobX - 5, y + 23, 7, 1.2, .6, '#ffffff');
   r.ctx.restore();
   if (supported) r.hit(24, y, 342, 62, () => game.toggle(row.key));

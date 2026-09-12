@@ -36,8 +36,16 @@ function drawObjectives(r, game, now, feedback) {
     const pulse = !r.reducedMotion && emphasized && age >= 0 && age < OBJECTIVE_PULSE_MS ? Math.sin(age / OBJECTIVE_PULSE_MS * Math.PI) : 0;
     if (index) r.line([[left, 99], [left, 125]], '#d4dccd', .8);
     if (pulse) {
-      r.ctx.save(); r.ctx.globalAlpha *= pulse * .32;
+      r.ctx.save(); r.ctx.globalAlpha *= pulse * .65;
       r.circle(anchor.x, anchor.y, 13 + pulse * 4, null, objective.color);
+      if (r.effectsQuality !== 'low' && item && item.collection) {
+        const travel = age / OBJECTIVE_PULSE_MS;
+        for (let spark = 0; spark < 5; spark++) {
+          const angle = spark * Math.PI * 2 / 5 - Math.PI / 2, distance = 12 + travel * 10;
+          const sx = anchor.x + Math.cos(angle) * distance, sy = anchor.y + Math.sin(angle) * distance;
+          r.line([[sx - Math.cos(angle) * 2, sy - Math.sin(angle) * 2], [sx, sy]], objective.color, 1.3);
+        }
+      }
       r.ctx.restore();
     }
     drawUiIcon(r, objective.complete ? 'check' : objective.icon, anchor.x, anchor.y, objective.color, 21);

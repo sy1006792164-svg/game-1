@@ -7,6 +7,7 @@ const { drawStampArt } = require('./stamp-art');
 const { FILTERS, collectionFilter, visibleStamps } = require('./stamp-collection');
 const { STAMP_NOTES } = require('./stamp-copy');
 const { replayLevels: availableReplayLevels } = require('./level-navigation');
+const { drawStampFinish } = require('./keepsake-effects');
 
 function openStampDetail(game, id) {
   if (game.page !== 'collection' || game.busy || game.hidden || game.modal && game.modal.kind !== 'stamp-detail') return false;
@@ -51,7 +52,12 @@ function drawStampDetail(r, game, now) {
   const replayLevels = availableReplayLevels(game);
   const replayLevel = replayLevels[0];
   const close = () => closeStampDetail(game), c = r.ctx, age = Math.max(0, now - r.modalAt);
-  c.save(); c.globalAlpha *= r.reducedMotion ? 1 : Math.min(1, .18 + age / 180);
+  const previous = r.stampDetailPresentation;
+  if (!previous || previous.modal !== game.modal || previous.id !== stamp.id || previous.owned !== stamp.owned) {
+    r.stampDetailPresentation = { modal: game.modal, id: stamp.id, owned: stamp.owned, at: now };
+  }
+  const artAge = Math.max(0, now - r.stampDetailPresentation.at), enter = Math.min(1, age / 220);
+  c.save(); c.globalAlpha *= r.reducedMotion ? 1 : .32 + .68 * (1 - (1 - enter) ** 3);
   r.scrim('#36554979');
   // Both ends of a dismissing tap must stay outside the paper panel.
   const viewport = r.viewport;
@@ -62,7 +68,9 @@ function drawStampDetail(r, game, now) {
   r.text(filter.label + ' · 第 ' + (index + 1) + ' / ' + stamps.length + ' 枚', left, y + 56, 10, C.muted);
   r.button('关闭', right - 54, y + 17, 54, CONTROL.compactHeight, close, { style: 'quiet', size: 12 });
 
-  drawStampArt(r, stamp, { x: 195 - artWidth / 2, y: y + 73, w: artWidth, h: artHeight }, { next: album.next === stamp });
+  const art = { x: 195 - artWidth / 2, y: y + 73, w: artWidth, h: artHeight };
+  drawStampArt(r, stamp, art, { next: album.next === stamp });
+  drawStampFinish(r, stamp, art, artAge, album.next === stamp);
   r.button('', left, y + 73 + (artHeight - CONTROL.compactHeight) / 2, 44, CONTROL.compactHeight, () => turnStamp(game, -1),
     { style: 'quiet', icon: 'back', disabled: index === 0 });
   r.button('', right - 44, y + 73 + (artHeight - CONTROL.compactHeight) / 2, 44, CONTROL.compactHeight, () => turnStamp(game, 1),
@@ -85,7 +93,7 @@ function drawStampDetail(r, game, now) {
     r.button('返回邮票册', left, contentY + 465, width, CONTROL.height, close, { style: 'primary', icon: 'stamp' });
   } else {
     r.text(replayLevel ? '已送达的来信中，还有 ' + replayLevels.length + ' 封可补星。' : '通关新关卡，星星会自动计入收藏。', 195, contentY + 402, 11, C.muted, 'center');
-    r.text('每关只计最高星级；三星需达目标拍数且不续灯。', 195, contentY + 418, 10, C.muted, 'center');
+    r.text('三星需达目标拍数，且不使用道具或续灯。', 195, contentY + 418, 10, C.muted, 'center');
     r.button('去选关 · 继续旅程', left, contentY + 436, width, CONTROL.compactHeight,
       () => game.openLevelBrowser('all'), { style: 'primary', icon: 'route', size: 13 });
     r.button(replayLevel ? '重访 ' + String(replayLevel.id).padStart(3, '0') + ' · 补星' : '暂无可补星关卡', left, contentY + 487, width, CONTROL.compactHeight,

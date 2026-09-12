@@ -2,33 +2,36 @@
 
 // The same tiny sculpted courier lives in the title scene and every real route.
 function drawCourier(r, x, y, size, ghost, pose = {}) {
-  const c = r.ctx, stride = pose.stride || 0;
+  const c = r.ctx, stride = pose.stride || 0, cloak = pose.cloak || 0;
+  const scale = size / 40, groundOffset = size > 0 ? (pose.lift || 0) / scale : 0;
   const oval = (cx, cy, rx, ry, color) => {
     c.beginPath(); c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); c.fillStyle = color; c.fill();
   };
-  c.save(); c.translate(x, y); c.scale(size / 40 * (pose.facing === -1 ? -1 : 1), size / 40);
+  c.save(); c.translate(x, y); c.scale(scale * (pose.facing === -1 ? -1 : 1), scale);
   c.globalAlpha *= pose.alpha == null ? 1 : pose.alpha;
+  // The cast shadow stays on the paper while the figure stretches above it.
+  if (ghost) oval(0, 12 + groundOffset, 13, 4, '#45949b18');
+  else oval(2, 18 + groundOffset, 14, 4, '#3c615326');
+  c.translate(0, 13); c.rotate(pose.lean || 0); c.scale(pose.squash || 1, pose.stretch || 1); c.translate(0, -13);
   if (ghost) {
-    oval(0, 12, 13, 4, '#45949b18');
     oval(0, -5, 19, 24, '#81c4c81c');
     c.beginPath(); c.moveTo(-11, 10); c.lineTo(-11, -11);
     c.bezierCurveTo(-11, -27, 12, -27, 12, -11); c.lineTo(12, 10);
-    c.quadraticCurveTo(8, 5, 5, 11); c.quadraticCurveTo(1, 5, -2, 11);
-    c.quadraticCurveTo(-6, 6, -11, 10); c.closePath();
+    c.quadraticCurveTo(8, 5 + cloak, 5, 11 - cloak); c.quadraticCurveTo(1, 5 - cloak, -2, 11 + cloak);
+    c.quadraticCurveTo(-6, 6 + cloak, -11, 10); c.closePath();
     c.fillStyle = '#8bcacecf'; c.fill(); c.strokeStyle = '#ecfffa'; c.lineWidth = 1.3; c.stroke();
     r.round(-7, -16, 14, 16, 7, '#d7f7eb88');
     r.circle(-3, -8, 1.25, '#2b727c'); r.circle(4, -8, 1.25, '#2b727c');
     oval(0, -19, 14, 3, '#68abb6'); r.round(-8, -27, 17, 8, 4, '#8ecbd0');
     r.line([[-5, -25], [5, -25]], '#e9fff4', 1);
   } else {
-    oval(2, 18, 14, 4, '#3c615326');
     r.line([[-5, 9], [-6 - stride * 3, 16 - stride * 2]], '#42645c', 4.5);
     r.line([[5, 9], [6 + stride * 3, 16 + stride * 2]], '#2e504b', 4.5);
     r.round(-9 - stride * 3, 15 - stride * 2, 8, 4, 2, '#785c46');
     r.round(3 + stride * 3, 15 + stride * 2, 9, 4, 2, '#785c46');
     // A round cape, lit from the upper left; side plane and hem give volume.
-    c.beginPath(); c.moveTo(-7, -5); c.quadraticCurveTo(-13, -1, -15, 10);
-    c.quadraticCurveTo(-1, 19, 14, 10); c.quadraticCurveTo(12, 0, 7, -5); c.closePath();
+    c.beginPath(); c.moveTo(-7, -5); c.quadraticCurveTo(-13 - cloak, -1, -15 - cloak, 10 - cloak);
+    c.quadraticCurveTo(-1 - cloak, 19 - cloak * .4, 14, 10); c.quadraticCurveTo(12, 0, 7, -5); c.closePath();
     c.fillStyle = '#dd9c68'; c.fill();
     c.beginPath(); c.moveTo(3, -4); c.quadraticCurveTo(8, 3, 9, 13);
     c.quadraticCurveTo(13, 12, 14, 10); c.quadraticCurveTo(12, 0, 7, -5); c.closePath();
@@ -37,9 +40,9 @@ function drawCourier(r, x, y, size, ghost, pose = {}) {
     c.strokeStyle = '#f9cd98b3'; c.lineWidth = .85; c.stroke();
     c.beginPath(); c.moveTo(4, -2); c.quadraticCurveTo(8, 5, 9, 12);
     c.strokeStyle = '#985f4880'; c.lineWidth = .7; c.stroke();
-    c.beginPath(); c.moveTo(-14, 10.5); c.quadraticCurveTo(-1, 18, 13, 10.5);
+    c.beginPath(); c.moveTo(-14 - cloak, 10.5 - cloak); c.quadraticCurveTo(-1 - cloak, 18 - cloak * .4, 13, 10.5);
     c.strokeStyle = '#995f4966'; c.lineWidth = .8; c.stroke();
-    r.line([[-11, 10], [-2, 13], [6, 12]], '#f7ce91', 1);
+    r.line([[-11 - cloak, 10 - cloak], [-2 - cloak * .5, 13 - cloak * .4], [6, 12]], '#f7ce91', 1);
     r.round(-8, -22, 18, 21, 9, '#d99f75');
     r.round(-8, -22, 16, 18, 8, '#ffdeaf');
     oval(-5, -11, 2.5, 1.1, '#edb997');
@@ -68,7 +71,8 @@ function drawCourier(r, x, y, size, ghost, pose = {}) {
     r.line([[15.2, 8.5], [15.2, 11.3], [13.7, 12.5], [8, 12.5]], '#60483566', .7);
     r.circle(11, 8, 1.1, '#efd6a3');
     r.line([[10, 0], [15, -3 - stride * 2]], '#e0a777', 4);
-    r.icon('letter', 18, -6 - stride * 2, 12, '#fff6dc');
+    c.save(); c.translate(18, -6 - stride * 2); c.rotate(-cloak * .045);
+    r.icon('letter', 0, 0, 12, '#fff6dc'); c.restore();
   }
   c.restore();
 }

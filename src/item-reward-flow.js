@@ -21,7 +21,7 @@ async function requestItemReward(game, id, cell) {
   game.modal = { kind: 'item-ad', title: '正在连接广告',
     lines: ['完整观看后获得并使用 1 份' + item.name + '。', '未看完不会发放，也不会消耗拍数。'], buttons: [] };
   game.sound.suspend('ad'); game.syncMusic();
-  let reward;
+  let reward, earnedReward = false;
   try { reward = await game.ads.showRewarded(); } catch (_) { reward = { rewarded: false, reason: 'error' }; }
   game.busy = false;
   if (session === game.session && game.page === 'game' && game.level === level && game.state === before) {
@@ -31,6 +31,7 @@ async function requestItemReward(game, id, cell) {
       const granted = replay(level, game.actions, game.reviveHistory, earned, game.supplyPolicy);
       const action = itemAction(id, cell), used = step(level, granted, action);
       game.itemRewards = earned;
+      earnedReward = true;
       if (used.moved) {
         game.blockedAt = null;
         game.commitAction(used, action, game.platform.now());
@@ -45,6 +46,8 @@ async function requestItemReward(game, id, cell) {
   game.pointer = null; game.renderer.hits = []; game.lastFrame = -Infinity;
   game.syncMusic();
   if (!game.ads.isActive()) game.sound.resume('ad');
+  if (earnedReward && session === game.session && game.page === 'game' && game.level === level &&
+      !game.hidden && !game.modal && !game.ads.isActive()) game.cue('reward');
 }
 
 module.exports = { requestItemReward };

@@ -215,6 +215,45 @@ test('video repair restores a broken bridge and undo returns the earned inventor
   h.advance(300); h.game.undo(); assert.deepEqual(h.game.state, { ...broken, inventory: { ...broken.inventory, bridge: 1 } });
 });
 
+test('level 44 can use a kite then repair its bridge, save, restore and undo without sharing item charges', async t => {
+  const h = harness({ development: true }); t.after(() => h.destroy());
+  const level = CAMPAIGN[43]; h.start(level);
+  while (h.game.mechanicGuide) h.game.advanceMechanicGuide(true);
+  h.advance(300);
+  h.game.selectItem('kite'); h.callbacks.key('Enter'); h.game.itemTarget(2);
+  await completeItemVideo(h);
+  assert.equal(h.game.state.player, level.start, 'a kite collects mail without walking over any tile');
+  assert.deepEqual(h.game.state.bridges, [16]);
+  assert.equal(h.game.state.itemsUsed, 1);
+  h.advance(300); h.game.selectItem('bridge');
+  assert.ok(h.game.modal.lines.includes('纸桥完好，无需修复'));
+  assert.equal(h.game.modal.buttons.some(button => button.primary), false);
+  h.callbacks.key('Escape');
+  for (const action of level.solution.slice(0, 12)) h.act(action);
+  const torn = clone(h.game.state);
+  assert.equal(torn.player, 22); assert.deepEqual(torn.bridges, []);
+  h.act('up');
+  assert.deepEqual(h.game.state, torn, 'walking into torn paper consumes no beat');
+  assert.match(h.game.toastText, /修桥包/);
+  h.advance(300); h.game.selectItem('bridge'); h.callbacks.key('Enter'); h.game.itemTarget(16);
+  await completeItemVideo(h);
+  assert.equal(h.game.state.turn, torn.turn);
+  assert.equal(h.game.state.energy, torn.energy);
+  assert.deepEqual(h.game.state.history, torn.history);
+  assert.deepEqual(h.game.state.bridges, [16]);
+  assert.deepEqual(h.game.itemRewards, { oil: 0, kite: 1, bridge: 1 });
+  assert.equal(h.showCount, 2, 'each selected tool receives its own completed-video grant');
+  const repaired = clone(h.game.state);
+  h.game.home(); assert.equal(h.game.restore(), true); assert.deepEqual(h.game.state, repaired);
+  h.advance(300); h.game.undo();
+  assert.deepEqual(h.game.state, { ...torn, inventory: { ...torn.inventory, bridge: 1 } });
+  h.advance(300); h.game.selectItem('bridge'); h.callbacks.key('Enter'); h.game.itemTarget(16);
+  assert.equal(h.showCount, 2, 'undo returns the earned repair without requesting another video');
+  assert.deepEqual(h.game.state, repaired);
+  h.act('up'); assert.equal(h.game.state.player, 16);
+  h.act('down'); assert.deepEqual(h.game.state.bridges, [], 'the repaired bridge tears only when left again');
+});
+
 test('tool selection drops a queued walk and repeated confirmation cannot reward twice', async t => {
   const h = harness(); t.after(() => h.destroy()); h.start(CAMPAIGN[3]);
   h.act(h.game.level.solution[0]); h.game.act(h.game.level.solution[1]);
@@ -906,8 +945,9 @@ test('a temporary score write failure recovers on backgrounding without losing t
   }
 });
 
-test('WeChat lists draw every RAF at 60 FPS and restore 30 FPS for modals and other pages', () => {
+test('WeChat page and dialog entrances draw at 60 FPS then restore 30 FPS when settled', () => {
   const h = harness();
+  h.advance(400);
   const draw = h.game.renderer.draw.bind(h.game.renderer), drawnAt = [];
   h.game.renderer.draw = (...args) => { drawnAt.push(h.platform.now()); draw(...args); };
   const frame = ms => { h.advance(ms, false); h.callbacks.frame(); };
@@ -923,27 +963,33 @@ test('WeChat lists draw every RAF at 60 FPS and restore 30 FPS for modals and ot
     for (const ms of [1000 / 60, 15, 17, 8]) frame(ms);
     assert.equal(h.frameRates.at(-1), 60, page);
     assert.equal(drawnAt.length, before + 4, page + ' draws every callback despite small RAF timing variation');
+    frame(700);
+    assert.equal(h.frameRates.at(-1), 30, page + ' returns to idle cadence when its entrance settles');
   }
 
   h.game.help();
   let before = drawnAt.length;
   frame(1000 / 60);
-  assert.equal(h.frameRates.at(-1), 30);
-  assert.equal(drawnAt.length, before, 'an open modal restores the scene drawing cadence');
-  frame(1000 / 60);
+  assert.equal(h.frameRates.at(-1), 60, 'a newly opened menu dialog has a short smooth entrance');
   assert.equal(drawnAt.length, before + 1);
+  frame(300);
+  assert.equal(h.frameRates.at(-1), 30, 'the dialog stops requesting smooth frames after its entrance');
   h.game.modal = null;
-  frame(15);
-  assert.equal(h.frameRates.at(-1), 60);
-  assert.equal(drawnAt.length, before + 2);
+  frame(34);
+  assert.equal(h.frameRates.at(-1), 30, 'closing a settled dialog does not restart the list entrance');
 
   h.game.home();
   before = drawnAt.length;
   frame(1000 / 60);
+  assert.equal(h.frameRates.at(-1), 60);
+  assert.equal(drawnAt.length, before + 1, 'returning home gets the same brief page entrance');
+  frame(300);
   assert.equal(h.frameRates.at(-1), 30);
-  assert.equal(drawnAt.length, before);
+  before = drawnAt.length;
   frame(1000 / 60);
-  assert.equal(drawnAt.length, before + 1, 'leaving a list restores 30 FPS rendering');
+  assert.equal(drawnAt.length, before, 'settled home skips alternate 60 Hz callbacks');
+  frame(1000 / 60);
+  assert.equal(drawnAt.length, before + 1);
   h.destroy();
 });
 
@@ -951,8 +997,10 @@ test('browser idle scenery paints at 30 FPS while input and active scrolling rem
   for (const quiet of [false, true]) {
     const h = harness({ kind: 'browser' }); t.after(() => h.destroy());
     h.platform.reducedMotion = quiet;
+    h.advance(400);
     let paints = 0;
-    h.game.renderer.draw = () => { paints++; };
+    const draw = h.game.renderer.draw.bind(h.game.renderer);
+    h.game.renderer.draw = (...args) => { paints++; draw(...args); };
     const frame = () => { h.advance(1000 / 60, false); h.callbacks.frame(); };
     h.game.lastFrame = h.platform.now();
     for (let i = 0; i < 60; i++) frame();
@@ -1028,6 +1076,11 @@ test('ads, backgrounding and system interruptions stay silent until every blocke
     if (order !== 'foreground-first') h.callbacks.show();
     if (order !== 'interruption-first') h.callbacks.audioEnd();
     h.callbacks.show(); h.callbacks.audioEnd(); h.game.unlockAudio();
+    if (order !== 'foreground-first') {
+      assert.equal(h.game.modal.kind, 'pause', 'a relight completed in the background waits for the player');
+      assert.ok(h.audio.every(voice => !voice.playing), 'returning to the pause panel remains quiet');
+      h.game.pause();
+    }
     assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1, order);
     assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 0, 'old effects are never replayed');
     h.destroy();
@@ -1121,8 +1174,11 @@ test('saved experience settings independently control music, sounds and effectiv
   assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 0);
   h.game.toggle('music');
   assert.equal(h.audio.filter(voice => voice.playing && voice.loop).length, 1);
-  h.game.toggle('sound'); h.game.cue('tap');
+  h.game.toggle('sound');
   assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 1);
+  assert.ok(h.audio.some(voice => voice.playing && /toggle\.wav$/.test(voice.src)), 'enabling sound previews the setting response');
+  h.game.cue('tap');
+  assert.equal(h.audio.filter(voice => voice.playing && !voice.loop).length, 2, 'a separate action can overlap its short confirmation');
   h.game.toggle('reducedMotion'); h.draw();
   assert.equal(h.game.renderer.reducedMotion, false);
   const reloaded = harness({ data });
@@ -2274,13 +2330,15 @@ test('a torn paper bridge uses board effects without a duplicate toast and survi
   h.destroy(); reloaded.destroy();
 });
 
-test('the game screen retains undo and wait while removing duplicate controls and numeric overlays', () => {
+test('the game screen keeps one route target, undo and wait without duplicate board overlays', () => {
   const h = harness(); h.start(CAMPAIGN[15]);
   h.draw();
   const texts = () => h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
   assert.ok(texts().includes('撤回（2）'), 'chapter three routes allow two undos');
   assert.ok(texts().includes('等一拍'));
-  assert.equal(texts().some(text => /三星|二星|回声预告|1×|^[A-F][1-6]$|^[A-F]$/.test(text)), false);
+  assert.equal(texts().filter(text => text.includes('已走 0 拍') && text.includes('三星目标')).length, 1,
+    'one compact header communicates the current route target');
+  assert.equal(texts().some(text => /回声预告|1×|^[A-F][1-6]$|^[A-F]$/.test(text)), false);
   assert.equal(h.game.renderer.hits.some(hit => hit.w === 50 && hit.h === 42), false, 'the direction pad is removed');
   h.act(CAMPAIGN[15].solution[0]);
   h.game.undo();
@@ -3242,4 +3300,59 @@ test('WeChat scene motion draws at 60 FPS and returns to 30 without accelerating
   frame(MOVE_MS + 1);
   assert.deepEqual(clone({ state: h.game.state, actions: h.game.actions, run: h.game.store.loadRun() }), paused,
     'paused frames neither consume light nor execute the cancelled input');
+});
+
+
+test('disabling operation sounds immediately silences effects while keeping music alive', t => {
+  const h = harness({ withAudio: true }); t.after(() => h.destroy());
+  h.game.openPage('settings'); h.game.cue('letter');
+  const music = h.audio.find(voice => voice.loop && voice.playing);
+  assert.ok(music);
+  assert.ok(h.audio.some(voice => !voice.loop && voice.playing));
+  h.game.toggle('sound');
+  assert.equal(h.game.profile().settings.sound, false);
+  assert.equal(h.audio.filter(voice => !voice.loop && voice.playing).length, 0);
+  assert.equal(music.playing, true);
+  assert.equal(music.destroyed, false);
+  const count = h.audio.length;
+  h.callbacks.key('Escape'); h.game.cue('letter');
+  assert.equal(h.audio.length, count, 'navigation respects the disabled operation sound setting');
+});
+
+test('page touch feedback cancels on drag and navigation emits one semantic cue', t => {
+  const h = harness(); t.after(() => h.destroy());
+  h.game.openPage('settings'); h.draw(400);
+  const r = h.game.renderer;
+  const device = (x, y) => [r.ox + x * r.scale, r.oy + y * r.scale];
+  const before = clone(h.game.profile().settings);
+  h.callbacks.pointer(...device(80, 113), 'start');
+  h.callbacks.pointer(...device(120, 113), 'move');
+  h.callbacks.pointer(...device(80, 113), 'end');
+  assert.deepEqual(h.game.profile().settings, before, 'dragging off a setting never toggles it');
+  assert.equal(r.uiFeedback, null);
+  h.soundCalls.length = 0;
+  h.callbacks.pointer(...device(38, 32), 'start');
+  h.callbacks.pointer(...device(38, 32), 'end');
+  assert.equal(h.game.page, 'home');
+  assert.deepEqual(h.soundCalls.filter(call => call[0] === 'play'), [['play', 'page']]);
+  h.draw(40); assert.equal(r.uiFeedback, null, 'the outgoing control ripple cannot bleed onto home');
+  h.soundCalls.length = 0;
+  h.game.openPage('collection'); h.callbacks.key('Escape');
+  assert.deepEqual(h.soundCalls.filter(call => call[0] === 'play'), [['play', 'page'], ['play', 'page']]);
+});
+
+
+test('supply reward chime acknowledges only a completed visible reward and never queues from the background', async t => {
+  for (const outcome of ['cancelled', 'completed', 'hidden']) {
+    const h = harness({ development: true }); t.after(() => h.destroy());
+    h.start(CAMPAIGN[22]); h.game.selectItem('oil'); h.callbacks.key('Enter');
+    if (outcome === 'hidden') h.callbacks.hide();
+    await completeItemVideo(h, outcome !== 'cancelled');
+    assert.equal(h.soundCalls.filter(call => call[0] === 'play' && call[1] === 'reward').length,
+      outcome === 'completed' ? 1 : 0, outcome);
+    if (outcome === 'hidden') {
+      h.callbacks.show(); h.advance(1000);
+      assert.equal(h.soundCalls.some(call => call[0] === 'play' && call[1] === 'reward'), false);
+    }
+  }
 });

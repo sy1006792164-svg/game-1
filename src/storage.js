@@ -155,6 +155,7 @@ function createStore(adapter, options = {}) {
   const unread = new Set();
   const settingsChanged = new Set();
   let guideDismissedChanged = false, runChanged = false, runRejected = false;
+  let runWaitsForProfile = false;
   function failure(message) { status = { persisted: false, message }; }
   function readFailed(key, error) {
     if (error instanceof SyntaxError) { save(key); return; }
@@ -190,6 +191,9 @@ function createStore(adapter, options = {}) {
   }
   function writePending(key) {
     try {
+      // A completed route remains recoverable on disk until its score is safe.
+      // A later route must wait too, since it may depend on that new unlock.
+      if (key === runKey && runWaitsForProfile && dirty.has(profileKey)) return false;
       recoverRead(key);
       // Read current memory on every attempt; never replay an older queued save.
       const value = key === profileKey ? profile : run;
@@ -199,6 +203,7 @@ function createStore(adapter, options = {}) {
       } else adapter.set(key, cleanJson(value));
       dirty.delete(key);
       if (key === profileKey) settingsChanged.clear();
+      else runWaitsForProfile = false;
       if (!dirty.size && !runRejected) status = { persisted: true, message: '' };
       return true;
     } catch (_) {
@@ -208,7 +213,8 @@ function createStore(adapter, options = {}) {
   }
   function flush() {
     // Each pending key gets one attempt, even if storage is still unavailable.
-    Array.from(dirty).forEach(writePending);
+    // Scores must commit before a completed route is deleted or replaced.
+    [profileKey, runKey].filter(key => dirty.has(key)).forEach(writePending);
     return !dirty.size && !runRejected;
   }
   function save(key) {
@@ -235,6 +241,23 @@ function createStore(adapter, options = {}) {
     }
   } catch (error) { readFailed(runKey, error); }
   function snapshot() { return cleanJson(profile); }
+  function winId(levelId, stars, turns, mode) {
+    const id = typeof levelId === 'number' ? String(levelId) : levelId;
+    if (mode !== 'campaign' || !safeId(id) || !Number.isInteger(stars) || stars < 1 || stars > 3 ||
+        !Number.isInteger(turns) || turns < 1 || turns > 100000 ||
+        (!own(profile.completed, id) && Object.keys(profile.completed).length >= 1000)) return null;
+    return id;
+  }
+  function recordWin(levelId, stars, turns, mode = 'campaign') {
+    const id = winId(levelId, stars, turns, mode);
+    if (id === null) return snapshot();
+    const map = profile.completed;
+    const before = own(map, id) ? map[id] : null;
+    map[id] = bestScore(before, stars, turns);
+    if (!before) profile.totalWins += 1;
+    save(profileKey);
+    return snapshot();
+  }
   return {
     getProfile: snapshot,
     revision: function () { return revision; },
@@ -266,17 +289,13 @@ function createStore(adapter, options = {}) {
       profile.mechanicGuides[id] = true;
       return save(profileKey);
     },
-    recordWin: function (levelId, stars, turns, mode = 'campaign') {
-      const id = typeof levelId === 'number' ? String(levelId) : levelId;
-      if (mode !== 'campaign' || !safeId(id) || !Number.isInteger(stars) || stars < 1 || stars > 3 ||
-          !Number.isInteger(turns) || turns < 1 || turns > 100000) return snapshot();
-      const map = profile.completed;
-      const before = own(map, id) ? map[id] : null;
-      if (!before && Object.keys(map).length >= 1000) return snapshot();
-      map[id] = bestScore(before, stars, turns);
-      if (!before) profile.totalWins += 1;
-      save(profileKey);
-      return snapshot();
+    recordWin,
+    settleWin: function (levelId, stars, turns, mode = 'campaign') {
+      if (winId(levelId, stars, turns, mode) === null) return false;
+      recordWin(levelId, stars, turns, mode);
+      run = null; runRejected = false; unread.delete(runKey);
+      runWaitsForProfile = dirty.has(profileKey);
+      return save(runKey);
     },
     saveRun: function (value) {
       const next = runFrom(value);
@@ -286,13 +305,16 @@ function createStore(adapter, options = {}) {
         return false;
       }
       run = next; runChanged = true; runRejected = false;
+      // Normal play saves routes directly, without a separate flush. Give the
+      // prerequisite score one retry so recovery need not wait for another win.
+      if (runWaitsForProfile && dirty.has(profileKey)) writePending(profileKey);
       return save(runKey);
     },
     loadRun: function () { return run ? cleanJson(run) : null; },
-    clearRun: function () { run = null; runRejected = false; unread.delete(runKey); return save(runKey); },
+    clearRun: function () { run = null; runRejected = false; runWaitsForProfile = false; unread.delete(runKey); return save(runKey); },
     reset: function () {
       profile = defaults(); run = null;
-      unread.clear(); settingsChanged.clear(); guideDismissedChanged = false; runChanged = false; runRejected = false;
+      unread.clear(); settingsChanged.clear(); guideDismissedChanged = false; runChanged = false; runRejected = false; runWaitsForProfile = false;
       save(runKey);
       save(profileKey);
       return !dirty.size;

@@ -2,6 +2,7 @@
 
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
+const { decorativeTime, quiet } = require('./page-feedback');
 
 const HEADER_ACTION_X = 322;
 const CONTENT_Y = 94;
@@ -44,6 +45,15 @@ function drawFooter(r, note, warning) {
   r.label(note, 195, r.H - 18, 342, 10, warning ? C.goldText : C.muted, 'center');
 }
 
+function drawSkeletonLine(r, x, y, w, h, offset = 0) {
+  r.round(x, y, w, h, h / 2, C.soft);
+  if (quiet(r)) return;
+  const phase = ((decorativeTime(r) + offset) % 2100) / 2100;
+  const length = Math.min(30, w * .35), left = x + phase * (w - length);
+  const alpha = Math.round(Math.sin(phase * Math.PI) * 195).toString(16).padStart(2, '0');
+  r.round(left, y, length, h, h / 2, '#ffffff' + alpha);
+}
+
 function drawRankPlaceholder(r, game, box) {
   r.round(box.x, box.y, box.w, 126, 19, C.green);
   r.round(box.x + 19, box.y + 1.5, box.w - 38, 1, .5, '#c6dec18a');
@@ -56,11 +66,14 @@ function drawRankPlaceholder(r, game, box) {
     r.text(label, x, box.y + 109, 10, '#dce9d8', 'center');
   });
   r.text('好友成绩', 22, box.y + 154, 14, C.ink, 'left', '600');
+  r.label('正在连接微信', box.x + box.w - 7, box.y + 154, 150, 10, C.muted, 'right');
   for (let i = 0; i < 3; i++) {
     const y = box.y + 176 + i * 76;
     r.panel(box.x, y, box.w, 64, { fill: C.panel, stroke: C.line, radius: 13 });
     r.circle(49, y + 32, 17, C.soft);
-    r.round(80, y + 20, 116, 7, 3, C.soft); r.round(80, y + 38, 73, 6, 3, '#e3ebdf');
+    drawSkeletonLine(r, 80, y + 20, 116, 7, i * 170);
+    drawSkeletonLine(r, 80, y + 38, 73, 6, i * 170 + 80);
+    drawSkeletonLine(r, box.x + box.w - 61, y + 27, 38, 8, i * 170 + 140);
   }
   drawFooter(r, '仅向微信好友展示已上传的成绩');
 }

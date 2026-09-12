@@ -7,6 +7,16 @@ const SCROLL_DELTA = Object.freeze({ ArrowUp: -100, ArrowDown: 100, PageUp: -340
 const MOVES = Object.freeze({ ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
   w: 'up', s: 'down', a: 'left', d: 'right', ' ': 'wait', Space: 'wait' });
 
+function activateModalButton(game, button) {
+  if (!button || button.disabled || typeof button.action !== 'function') return;
+  // A confirming key owns the action; a held finger must not activate the
+  // replacement dialog or the newly uncovered board when it later lifts.
+  game.pointer = null; game.renderer.pointer = null; game.renderer.hits = [];
+  button.action();
+  game.lastFrame = -Infinity;
+  game.syncMusic();
+}
+
 // A modal owns keyboard input until its own close action returns to the prior view.
 function handleGameKey(game, key) {
   if (game.hidden || game.busy || game.startupActive() || typeof key !== 'string') return false;
@@ -16,27 +26,43 @@ function handleGameKey(game, key) {
   }
   if (stampDetailKey(game, key)) return true;
   if (game.modal) {
+    const buttons = game.modal.buttons || [];
+    const primary = buttons.find(button => button.primary);
     if (game.modal.kind === 'item') {
       if (key === 'Escape') {
-        const close = game.modal.buttons[game.modal.buttons.length - 1];
-        if (close) close.action();
+        activateModalButton(game, buttons[buttons.length - 1]);
       } else if (key === 'Enter') {
-        const primary = game.modal.buttons.find(button => button.primary);
-        if (primary) primary.action();
+        // Locked or unavailable tools have a single acknowledgement action.
+        activateModalButton(game, primary || buttons.length === 1 && buttons[0]);
       }
+      return true;
+    }
+    if (key === 'Enter' && ['help', 'pause', 'win', 'fail', 'reset-confirm'].includes(game.modal.kind)) {
+      // Result actions become available after the final move is presented.
+      // Use the actual painted control so reduced motion and restored results
+      // keep exactly the same activation timing as pointer input.
+      if (['win', 'fail'].includes(game.modal.kind) && (game.renderer.currentModal !== game.modal ||
+          !primary || !game.renderer.hits.some(hit => hit.action === primary.action))) return true;
+      activateModalButton(game, primary);
       return true;
     }
     const navigation = game.renderer.helpNavigation;
     if (game.modal.kind === 'help' && navigation && navigation.modal === game.modal) {
-      if ((key === 'ArrowLeft' || key === 'PageUp') && navigation.page > 0) navigation.previous();
-      else if ((key === 'ArrowRight' || key === 'PageDown') && navigation.page + 1 < navigation.count) navigation.next();
+      const page = Number.isInteger(game.modal.helpPage) ? Math.max(0, Math.min(navigation.count - 1, game.modal.helpPage)) : navigation.page;
+      const turn = (key === 'ArrowLeft' || key === 'PageUp') && page > 0 ? navigation.previous :
+        (key === 'ArrowRight' || key === 'PageDown') && page + 1 < navigation.count ? navigation.next : null;
+      if (turn) {
+        // A keyboard page change must also end a finger held over the old page.
+        game.pointer = null; game.renderer.pointer = null;
+        turn();
+      }
     }
     if (key === 'Escape') {
       if (game.modal.kind === 'help') {
-        game.modal.buttons[0].action();
-        game.pointer = null; game.renderer.hits = [];
-        game.syncMusic();
+        activateModalButton(game, buttons[0]);
       } else if (game.modal.kind === 'pause' && game.page === 'game') game.pause();
+      // This dialog deliberately makes "keep local data" its primary action.
+      else if (game.modal.kind === 'reset-confirm') activateModalButton(game, primary);
     }
     return true;
   }

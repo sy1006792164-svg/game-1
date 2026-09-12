@@ -7,7 +7,7 @@ const { createRankingAuthorization } = require('./ranking-authorization');
 const { createSystemMessageSubscription, SYSTEM_MESSAGE_TYPES } = require('./system-message-subscription');
 const { campaignScore } = require('./friend-score');
 const { enableSharing } = require('./sharing');
-const { isAction, createState, step, replay, normalizeReviveHistory, stars, scoredTurns } = require('./engine');
+const { isAction, createState, step, replay, normalizeReviveHistory, stars, scoredTurns, neighbor } = require('./engine');
 const { ITEMS, itemAvailability, itemOffer, itemAction, parseItemAction, normalizeItemRewards } = require('./items');
 const { requestItemReward } = require('./item-reward-flow');
 const { SUPPLY_ENERGY, RELIGHT_ACTION, normalizeSupplyPolicy } = require('./supply-rules');
@@ -23,6 +23,7 @@ const { developmentLevelNumber } = require('./developer-view');
 const { Renderer } = require('./renderer');
 const { MOVE_MS } = require('./motion');
 const { hasActiveFeedback } = require('./feedback-timing');
+const { recordTouch, actionSnapshot, actionSound, togglePosition, hasActiveUiMotion } = require('./ui-motion');
 const { SceneCamera, INTRO_MS, SHAKE_MS } = require('./camera');
 const { insideRect } = require('./board-projection');
 const { BOARD_DRAG_SLOP, containsHit, captureBoardTap } = require('./board-input');
@@ -88,7 +89,10 @@ class Game {
     platform.onPointer((x, y, type) => this.pointerEvent(x, y, type), (x, y, factor) => this.zoomScene(x, y, factor), (x, y, delta) => this.scrollList(x, y, delta));
     platform.onKey(key => {
       const page = this.page, modal = this.modal, session = this.session;
-      handleGameKey(this, key);
+      const before = actionSnapshot(this), cues = this.cueCount;
+      const handled = handleGameKey(this, key);
+      const response = actionSound(before, this);
+      if (handled && response !== 'tap' && cues === this.cueCount) this.cue(response);
       if (page !== this.page || modal !== this.modal || session !== this.session) {
         this.pointer = null; this.renderer.hits = []; this.lastFrame = -Infinity;
       }
@@ -123,7 +127,7 @@ class Game {
       this.pointer = null; this.pendingAction = null;
       this.renderer.clearCaches(); this.sound.release();
       this.musicActive = false;
-      this.profileCache = null; this.runCache = null; this.albumCache = null;
+      this.profileCache = null; this.runCache = null; this.albumCache = null; this.nextLevelCache = null;
       this.metrics = platform.reduceMemory(); this.lastFrame = -Infinity;
     });
     enableSharing(platform, config);
@@ -292,10 +296,21 @@ class Game {
     return true;
   }
   nextLevel() {
-    const completed = this.profile().completed;
-    return CAMPAIGN.find((l, i) => (i === 0 || !!completed[String(CAMPAIGN[i - 1].id)]) && !completed[String(l.id)]) || CAMPAIGN[CAMPAIGN.length - 1];
+    const profile = this.profile();
+    // Home artwork and collection pages ask every frame. Only rescan the
+    // campaign when the stored snapshot changes, including reset/recovery.
+    if (!this.nextLevelCache || this.nextLevelCache.profile !== profile) {
+      const completed = profile.completed;
+      const level = CAMPAIGN.find((l, i) => (i === 0 || !!completed[String(CAMPAIGN[i - 1].id)]) && !completed[String(l.id)]) || CAMPAIGN[CAMPAIGN.length - 1];
+      this.nextLevelCache = { profile, level };
+    }
+    return this.nextLevelCache.level;
   }
-  toast(message) { this.toastText = message; this.toastUntil = this.platform.now() + 2600; }
+  toast(message) {
+    const now = this.platform.now();
+    if (message !== this.toastText || now >= this.toastUntil) this.toastAt = now;
+    this.toastText = message; this.toastUntil = now + 2600;
+  }
   cue(type) {
     this.cueCount++;
     if (!this.hidden && !this.busy && !this.startupActive() && this.profile().settings.sound) this.sound.play(type);
@@ -312,9 +327,15 @@ class Game {
   toggle(setting) {
     if (!SETTING_KEYS.includes(setting)) return false;
     const enabled = !this.profile().settings[setting];
+    const now = this.platform.now();
+    const from = togglePosition(this.settingChange, setting, !enabled, now, this.reducedMotion() || this.platform.effectsQuality === 'low');
     this.store.updateSettings({ [setting]: enabled });
+    this.settingChangedAt = now;
+    this.settingChange = { key: setting, enabled, from, at: now };
+    if (setting === 'sound' && !enabled && this.sound.stopEffects) this.sound.stopEffects();
     if (setting === 'music') this.syncMusic(true);
     if (setting === 'reducedMotion' && enabled) this.camera.stopShake();
+    this.cue('toggle');
     this.lastFrame = -Infinity;
     return enabled;
   }
@@ -491,7 +512,11 @@ class Game {
     if (!result.moved) {
       if (item) { this.toast(itemAvailability(this.level, this.state, item.id).reason || '这个目标无法使用道具'); return; }
       if (this.blockedAt === null || now - this.blockedAt >= 300) this.cue('blocked');
-      this.blockedAt = now; return;
+      this.blockedAt = now;
+      const entered = neighbor(this.level, this.state.player, action);
+      if (entered !== null && (this.level.bridges || []).includes(entered) && !this.state.bridges.includes(entered))
+        this.toast('纸桥已断，点“修桥包”查看修复方式');
+      return;
     }
     this.blockedAt = null;
     if (item) this.cancelItem();
@@ -548,9 +573,8 @@ class Game {
     this.pendingAction = null; this.toastUntil = 0;
     const albumBefore = this.album();
     const rating = stars(this.level, this.state), before = this.record(this.level, this.mode);
-    this.store.recordWin(this.level.id, rating, scoredTurns(this.level, this.state), this.mode);
+    this.store.settleWin(this.level.id, rating, scoredTurns(this.level, this.state), this.mode);
     this.syncFriendScore();
-    this.store.clearRun();
     const index = CAMPAIGN.findIndex(l => l.id === this.level.id);
     const candidate = index >= 0 ? CAMPAIGN[index + 1] : null;
     const next = this.mode === 'campaign' ? candidate : null;
@@ -609,7 +633,7 @@ class Game {
     this.pendingAction = null;
     const old = this.modal, l = this.page === 'game' ? this.level : null;
     this.modal = { kind: 'help', title: '和回声一起送信',
-      ...helpContent(l, this.state ? this.state.reviveCount : 0, this.platform.kind, {
+      ...helpContent(l, this.state ? this.state.reviveCount || (this.state.revived ? 1 : 0) : 0, this.platform.kind, {
         canRevive: this.platform.kind === 'wechat' && this.ads.isConfigured(),
         turn: this.state ? this.state.turn : 0,
         itemsUsed: this.state ? this.state.itemsUsed || 0 : 0
@@ -634,7 +658,7 @@ class Game {
       });
       this.previewRanking();
     }
-    this.cue('tap');
+    this.cue('page');
   }
   openLevelBrowser(mode = 'all', levelId) {
     if (this.hidden || this.busy || this.startupActive() || !['all', 'replay', 'chapters'].includes(mode)) return false;
@@ -780,6 +804,7 @@ class Game {
       this.pointer = { ...p, deviceX: x, deviceY: y, list, lastX: p.x, lastY: p.y, time: this.platform.now(), dragging: false,
         page: this.page, modal: this.modal, session: this.session,
         scene: this.page === 'game' && !this.modal && !this.busy && !this.hidden && b && insideRect(b, p.x, p.y) };
+      this.lastFrame = -Infinity;
       if (this.pointer.scene) {
         this.pointer.boardTap = captureBoardTap(this.renderer, p);
         this.pointer.boardState = this.state;
@@ -818,12 +843,13 @@ class Game {
     const pressed = origin.scene && origin.boardTap && insideRect(this.renderer.boardRect, p.x, p.y) ? origin.boardTap : null;
     const hit = pressed || this.renderer.hits.slice().reverse().find(h => containsHit(h, p) && containsHit(h, origin));
     if (hit) {
-      const cues = this.cueCount;
+      const cues = this.cueCount, before = actionSnapshot(this);
+      if (!origin.scene) recordTouch(this.renderer, this, hit, p, this.platform.now());
       hit.action(p, origin);
       if (origin.page !== this.page || origin.modal !== this.modal || origin.session !== this.session) {
         this.renderer.hits = []; this.lastFrame = -Infinity;
       }
-      if (!origin.scene && cues === this.cueCount) this.cue('tap');
+      if (!origin.scene && cues === this.cueCount) this.cue(actionSound(before, this));
       this.syncMusic();
     } else if (origin.scene) this.guideMisstep();
   }
@@ -851,7 +877,8 @@ class Game {
     const smoothScene = this.page === 'game' && !this.modal && (
       now - this.transitionAt < MOVE_MS || now - this.camera.enteredAt < INTRO_MS ||
       now - this.camera.shakeAt < SHAKE_MS || now - this.cameraMovedAt < 250 || !!this.pointer);
-    const smooth = !reducedMotion && (smoothList || smoothScene || hasActiveFeedback(this, now) || this.rankingInteractive());
+    const smooth = !reducedMotion && (smoothList || smoothScene || hasActiveFeedback(this, now) ||
+      hasActiveUiMotion(this, now) || this.rankingInteractive());
     if (this.platform.setFrameRate) this.platform.setFrameRate(smooth ? 60 : 30);
     // Idle scenes use 30 FPS; input and unfinished feedback use every RAF.
     const frameInterval = smooth ? 0 : 1000 / 30;

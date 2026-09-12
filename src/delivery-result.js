@@ -23,7 +23,9 @@ function deliveryResultLines(level, state, rating, before, saved) {
     lines.push(rating === 2 ? '总拍数在 ' + two + ' 拍内，续灯后本次获二星。'
       : '总拍数超过 ' + two + ' 拍，本次获一星。');
   }
-  if (before && !saved) lines.push(saveLine);
+  // Supply details can replace the default save line even on a first delivery.
+  // Keep a failed write visible independently of personal-best comparisons.
+  if (!saved && !lines.includes(saveLine)) lines.push(saveLine);
   return lines;
 }
 
