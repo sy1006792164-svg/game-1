@@ -5,13 +5,14 @@ const { CONTROL, buttonLayout } = require('./controls');
 const { drawResultHeader, drawResultStars } = require('./result-effects');
 const { layoutHelp, drawHelp } = require('./help-view');
 const { drawSurfaceEdges } = require('./surface-edges');
+const { drawItemArt } = require('./item-view');
 
 // Measure each block before drawing so titles, paragraphs and actions keep
 // their own space, including when a longer label wraps onto another line.
 function measureModal(r, modal, navigation = null, helpHeight = 0) {
   const x = 22, w = 346, inset = 24, width = w - inset * 2;
   const titleSize = 20, titleHeight = 28, lineHeight = 22;
-  let cursor = modal.sections ? 24 : 96;
+  let cursor = modal.sections ? 24 : modal.kind === 'item' ? 76 : 96;
   const kickerY = modal.kicker ? cursor + 5 : null;
   if (modal.kicker) cursor += 22;
   const title = r.wrapLines(modal.title, width, titleSize, '600');
@@ -93,7 +94,7 @@ function drawModal(r, modal, now, resultAge = null) {
   r.line([[ui.x + 42, ui.y + 2], [ui.x + ui.w - 42, ui.y + 2]], accent, 2);
   // Small cancellation marks turn the result into a paper receipt without
   // adding height or moving its text and actions on compact screens.
-  if (!ui.help) [ui.x + 48, ui.x + ui.w - 89].forEach(left => {
+  if (!ui.help && modal.kind !== 'item') [ui.x + 48, ui.x + ui.w - 89].forEach(left => {
     for (let line = 0; line < 3; line++) {
       const y = ui.y + 46 + line * 6;
       r.line([[left, y + 2], [left + 12, y], [left + 26, y + 2], [left + 40, y]], '#c7d4be', 1);
@@ -101,7 +102,10 @@ function drawModal(r, modal, now, resultAge = null) {
   });
   const help = modal.kind === 'help';
   if (result) drawResultHeader(r, modal.kind, ui, resultAge);
-  else if (!ui.help) {
+  else if (modal.kind === 'item') {
+    r.circle(195, ui.y + 40, 24, '#f5ecd5', '#d6c5a5');
+    drawItemArt(r, modal.itemId, 195, ui.y + 40, 29);
+  } else if (!ui.help) {
     r.circle(195, ui.y + 52, 29, '#f5ecd5', '#d6c5a5');
     r.circle(195, ui.y + 52, 23, '#fffaf0', '#e6d8bb');
     r.icon(help ? 'echo' : 'wind', 195, ui.y + 52, 28, help ? C.blue : C.gold);

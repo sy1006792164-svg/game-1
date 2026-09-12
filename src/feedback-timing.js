@@ -13,6 +13,7 @@ const EVENT_TIMINGS = Object.freeze({
   move: Object.freeze({ delay: MOVE_MS * .7, duration: 540 - MOVE_MS * .7 }),
   letter: PICKUP, seal: PICKUP, light: PICKUP,
   bridge: Object.freeze({ delay: 25, duration: 700 }),
+  repair: Object.freeze({ delay: 0, duration: 700 }),
   wind: Object.freeze({ delay: 0, duration: 600 }),
   wait: Object.freeze({ delay: 0, duration: 650 }),
   'echo-born': Object.freeze({ delay: 0, duration: 780 }),

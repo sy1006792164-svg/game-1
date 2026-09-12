@@ -1,6 +1,6 @@
 'use strict';
 
-const { DIRECTIONS } = require('./engine');
+const { DIRECTIONS, ACTIONS } = require('./engine');
 const { MOVE_MS, EVENT_TIMINGS, EFFECT_BATCH_MS } = require('./feedback-timing');
 
 const TAU = Math.PI * 2;
@@ -22,7 +22,8 @@ function echoPath(game, from, to) {
   const direct = from === to ? [to] : [from, to];
   if (!level || !previous || !Array.isArray(game.actions) || !level.width) return direct;
   const backwards = previous.turn > state.turn;
-  const action = game.actions[Math.max(previous.turn, state.turn) - 4];
+  const turns = game.actions.filter(action => ACTIONS.includes(action));
+  const action = turns[Math.max(previous.turn, state.turn) - 4];
   const delta = DIRECTIONS[action];
   if (!delta) return direct;
   const start = backwards ? to : from, end = backwards ? from : to;
@@ -110,7 +111,7 @@ function drawEffectBatch(renderer, batch, now, point, scale) {
       c.beginPath(); c.ellipse(x, y + 2, scale * (.12 + progress * .23), scale * (.04 + progress * .1), 0, 0, TAU);
       c.strokeStyle = COLORS.gold; c.lineWidth = 1.2; c.stroke();
       if (!low) [-1, 1].forEach(side => renderer.line([[x + side * scale * .055, y], [x + side * scale * .055, y + scale * .05]], COLORS.paper, 2));
-    } else if (['letter', 'seal', 'light', 'bridge'].includes(event.type)) {
+    } else if (['letter', 'seal', 'light', 'bridge', 'repair'].includes(event.type)) {
       const paper = event.type === 'bridge';
       const color = event.type === 'seal' ? COLORS.cyan : paper ? COLORS.paper : COLORS.gold;
       c.globalAlpha *= 1 - progress;

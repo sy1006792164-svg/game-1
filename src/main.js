@@ -7,7 +7,10 @@ const { createRankingAuthorization } = require('./ranking-authorization');
 const { createSystemMessageSubscription, SYSTEM_MESSAGE_TYPES } = require('./system-message-subscription');
 const { campaignScore } = require('./friend-score');
 const { enableSharing } = require('./sharing');
-const { ACTIONS, createState, step, replay, normalizeReviveHistory, stars } = require('./engine');
+const { isAction, createState, step, replay, normalizeReviveHistory, stars, scoredTurns } = require('./engine');
+const { ITEMS, itemAvailability, itemOffer, itemAction, parseItemAction, normalizeItemRewards } = require('./items');
+const { requestItemReward } = require('./item-reward-flow');
+const { SUPPLY_ENERGY, RELIGHT_ACTION, normalizeSupplyPolicy } = require('./supply-rules');
 const { deliveryResultLines } = require('./delivery-result');
 const reviveFlow = require('./revive-flow');
 const { CAMPAIGN } = require('./levels');
@@ -74,7 +77,9 @@ class Game {
     this.page = 'startup'; this.collectionScroll = new ListScroll(); this.levelScroll = new ListScroll(); this.modal = null; this.reviewing = false;
     this.guideEnabled = false;
     this.mechanicGuide = null;
-    this.level = null; this.state = null; this.actions = []; this.reviveHistory = []; this.undosUsed = 0;
+    this.level = null; this.state = null; this.actions = []; this.reviveHistory = []; this.undosUsed = 0; this.selectedItem = null;
+    this.itemRewards = { oil: 0, kite: 0, bridge: 0 };
+    this.supplyPolicy = normalizeSupplyPolicy(undefined, 0, 0);
     this.mode = 'campaign'; this.session = 0;
     this.toastText = ''; this.toastUntil = 0; this.transitionAt = 0; this.motionPath = null;
     this.busy = false; this.hidden = false; this.lastFrame = -Infinity; this.pointer = null; this.pendingAction = null; this.blockedAt = null;
@@ -339,6 +344,8 @@ class Game {
   }
   persist() {
     if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', actions: this.actions.slice(), reviveHistory: this.reviveHistory.slice(), undosUsed: this.undosUsed,
+      itemRewards: { ...this.itemRewards },
+      supplyPolicy: { ...this.supplyPolicy },
       ...(this.mechanicGuide ? { mechanicGuide: { id: this.mechanicGuide.ids[0], phase: this.mechanicGuide.phase } } : {}),
       ...(this.guideEnabled ? { guide: true } : {}) });
     else this.store.flush();
@@ -356,7 +363,7 @@ class Game {
   restore() {
     if (this.startupActive() || !this.ensureStoredProgressReady()) return false;
     this.cancelRankingPointer();
-    this.pendingAction = null; this.blockedAt = null;
+    this.pendingAction = null; this.blockedAt = null; this.selectedItem = null;
     const run = this.store.loadRun();
     if (!run) return false;
     try {
@@ -371,13 +378,18 @@ class Game {
         return true;
       }
       const reviveHistory = normalizeReviveHistory(run.reviveHistory === undefined ? run.reviveAt : run.reviveHistory, run.actions.length);
-      const state = replay(level, run.actions, reviveHistory);
+      const itemRewards = normalizeItemRewards(level, run.itemRewards);
+      const supplyPolicy = normalizeSupplyPolicy(run.supplyPolicy === undefined ? {
+        version: 2, legacyActionCount: run.actions.length, legacyReviveCount: reviveHistory.length
+      } : run.supplyPolicy, run.actions.length, reviveHistory.length);
+      const state = replay(level, run.actions, reviveHistory, itemRewards, supplyPolicy);
       if (state.status === 'won') throw new Error('already done');
       const undosUsed = run.undosUsed == null ? 0 : run.undosUsed;
       if (!Number.isInteger(undosUsed) || undosUsed < 0 || undosUsed > this.undoLimit(level)) throw new Error('invalid undo count');
       this.level = level; this.state = state; this.previousState = null; this.moveEvents = []; this.motionPath = null;
       this.transitionAt = this.platform.now() - MOVE_MS;
-      this.actions = run.actions.slice(); this.reviveHistory = reviveHistory; this.undosUsed = undosUsed;
+      this.actions = run.actions.slice(); this.reviveHistory = reviveHistory; this.undosUsed = undosUsed; this.itemRewards = itemRewards;
+      this.supplyPolicy = supplyPolicy;
       this.mode = run.mode; this.page = 'game'; this.session++;
       this.guideEnabled = autoGuide(this.profile(), level, this.mode) ||
         (canGuide(level, this.mode) && run.guide === true && !this.profile().guideDismissed);
@@ -389,6 +401,7 @@ class Game {
       else this.beginMechanicGuide();
       this.pointer = null; this.camera.enter(this.platform.now());
       this.modal = null; this.reviewing = false;
+      if (run.supplyPolicy === undefined) this.persist();
       if (state.status === 'failed') this.failure();
       else { this.cue('start'); this.toast('已接上上次的风，继续投递吧'); }
       return true;
@@ -399,11 +412,13 @@ class Game {
     this.cancelRankingPointer();
     const keepGuide = this.guideEnabled && this.level === level && this.state && this.state.status !== 'won';
     this.stopListScrolling(); this.pointer = null;
-    this.pendingAction = null; this.blockedAt = null;
+    this.pendingAction = null; this.blockedAt = null; this.selectedItem = null;
     this.level = level; this.mode = mode || 'campaign';
     this.guideEnabled = canGuide(level, this.mode) && (keepGuide || autoGuide(this.profile(), level, this.mode));
     this.beginMechanicGuide();
     this.state = createState(level); this.previousState = null; this.moveEvents = []; this.motionPath = null; this.actions = []; this.reviveHistory = []; this.undosUsed = 0;
+    this.itemRewards = { oil: 0, kite: 0, bridge: 0 };
+    this.supplyPolicy = normalizeSupplyPolicy(undefined, 0, 0);
     this.page = 'game'; this.modal = null; this.reviewing = false; this.session++; this.transitionAt = this.platform.now() - MOVE_MS; this.toastUntil = 0;
     this.pointer = null; this.camera.enter(this.platform.now());
     this.persist(); this.cue('start');
@@ -413,21 +428,77 @@ class Game {
     if (this.store.loadRun() && this.restore()) return;
     this.start(this.nextLevel(), 'campaign');
   }
+  cancelItem() {
+    const targeting = !!this.selectedItem;
+    this.selectedItem = null; this.pendingAction = null; this.pointer = null;
+    if (targeting) { this.renderer.hits = []; this.lastFrame = -Infinity; }
+  }
+  selectItem(id) {
+    if (this.page !== 'game' || this.modal || this.busy || this.hidden || this.reviewing || !this.state || this.state.status !== 'playing') return;
+    if (this.guideStep()) { this.guideMisstep(); return; }
+    // Never combine a queued walk with opening the toolkit.
+    this.pendingAction = null;
+    if (this.platform.now() - this.transitionAt < MOVE_MS) return;
+    const item = ITEMS.find(entry => entry.id === id);
+    if (!item) return;
+    if (this.selectedItem === id) { this.cancelItem(); return; }
+    this.cancelItem();
+    const offer = itemOffer(this.level, this.state, id);
+    const needsVideo = !(this.state.inventory && this.state.inventory[id] > 0), canWatch = this.ads.isConfigured();
+    const canUse = offer.eligible && (!needsVideo || canWatch);
+    const session = this.session, state = this.state;
+    const close = () => { this.modal = null; this.cancelItem(); this.syncMusic(); };
+    this.modal = {
+      kind: 'item', itemId: id, title: item.name,
+      lines: [item.description, needsVideo ? '完整看完视频，获得 1 份并使用。\n仅本次路线有效，重开后清空。' : '使用已领取的道具，无需再看视频。',
+        '使用不耗拍，回声保持原位；本次最多二星。',
+        ...(!offer.eligible ? [offer.reason] : needsVideo && !canWatch ? [this.platform.kind === 'browser' ? '请在微信小游戏内观看视频获取。' : '广告暂时不可用，请稍后再试。'] :
+          [id === 'oil' ? '当前 ' + state.energy + ' 拍 → 使用后 ' + (state.energy + SUPPLY_ENERGY) + ' 拍' : needsVideo ? '先选目标，再看视频；未看完不发放。' : '点棋盘上亮起的目标使用。'])],
+      buttons: [
+        ...(canUse ? [{ text: id === 'oil' ? (needsVideo ? '看视频使用灯油 · +' : '使用灯油 · +') + SUPPLY_ENERGY + ' 拍' : needsVideo ? '选择目标 · 看视频使用' : '选择目标', primary: true, action: () => {
+          if (this.session !== session || this.state !== state || this.hidden || this.busy) return;
+          close();
+          if (id === 'oil') { if (needsVideo) this.requestItemReward(id, state.player); else this.act(itemAction(id)); }
+          else { this.selectedItem = id; this.lastFrame = -Infinity; }
+        } }] : []),
+        { text: canUse ? '暂不使用' : '知道了', textOnly: canUse, action: close }
+      ]
+    };
+  }
+  itemTarget(cell) {
+    if (!this.selectedItem || this.page !== 'game' || this.modal || this.busy || this.hidden || this.reviewing || this.state.status !== 'playing') return;
+    const id = this.selectedItem, offer = itemOffer(this.level, this.state, id);
+    if (!offer.eligible || !offer.targets.includes(cell)) {
+      this.toast(offer.eligible ? '点亮起的目标；取消选择不会消耗道具' : offer.reason); return;
+    }
+    if (this.platform.now() - this.transitionAt < MOVE_MS) return;
+    if (itemAvailability(this.level, this.state, id).available) this.act(itemAction(id, cell));
+    else this.requestItemReward(id, cell);
+  }
+  requestItemReward(id, cell) { return requestItemReward(this, id, cell); }
   act(action) {
     if (this.page !== 'game' || this.modal || this.busy || this.hidden || this.reviewing || !this.state || this.state.status !== 'playing') { this.pendingAction = null; return; }
-    if (!ACTIONS.includes(action)) return;
+    if (!isAction(action)) return;
+    if (this.actions.length >= 4096) { this.pendingAction = null; this.toast('本次路线已达记录上限，请重新规划'); return; }
+    const item = parseItemAction(action);
+    if (this.selectedItem && (!item || item.id !== this.selectedItem)) return;
     const now = this.platform.now();
     const guide = this.guideStep();
     if (guide && action !== guide.action) { this.guideMisstep(); return; }
-    if (now - this.transitionAt < MOVE_MS) { this.pendingAction = guide ? null : { action, at: now }; return; }
+    if (now - this.transitionAt < MOVE_MS) { this.pendingAction = guide || item ? null : { action, at: now }; return; }
     this.pendingAction = null;
     const result = step(this.level, this.state, action);
     if (!result.moved) {
+      if (item) { this.toast(itemAvailability(this.level, this.state, item.id).reason || '这个目标无法使用道具'); return; }
       if (this.blockedAt === null || now - this.blockedAt >= 300) this.cue('blocked');
       this.blockedAt = now; return;
     }
     this.blockedAt = null;
+    if (item) this.cancelItem();
     if (guide) this.toastUntil = 0;
+    this.commitAction(result, action, now);
+  }
+  commitAction(result, action, now) {
     this.previousState = this.state; this.state = result.state;
     this.actions.push(action); this.transitionAt = now;
     this.moveEvents = result.events; this.motionPath = null;
@@ -435,14 +506,18 @@ class Game {
     feedback.sounds.forEach(type => this.cue(type));
     if (feedback.haptic) {
       this.camera.shake(now, this.state.status === 'won' ? 1 : .6);
-      if (this.profile().settings.haptics) this.platform.vibrate();
+      if (!this.hidden && this.profile().settings.haptics) this.platform.vibrate();
     }
     this.persist();
     if (this.state.status === 'won') this.victory();
     else if (this.state.status === 'failed') this.failure();
     else if (this.state.player === this.level.exit && (this.state.letters.length || this.state.seals.length)) this.toast(this.playHint());
   }
-  get reviveAt() { return this.reviveHistory.length ? this.reviveHistory[this.reviveHistory.length - 1] : null; }
+  get reviveAt() {
+    const video = this.reviveHistory.length ? this.reviveHistory[this.reviveHistory.length - 1] : null;
+    const oil = this.actions.lastIndexOf(RELIGHT_ACTION);
+    return oil < 0 ? video : Math.max(video == null ? 0 : video, oil + 1);
+  }
   undoLeft() { return Math.max(0, this.undoLimit() - this.undosUsed); }
   undoLimit(level = this.level) { return level && Number.isInteger(level.undo) ? level.undo : DEFAULT_UNDO; }
   canUndo() {
@@ -454,23 +529,26 @@ class Game {
     this.pendingAction = null; this.blockedAt = null;
     if (mechanicStep(this)) { this.guideMisstep(); return; }
     if (this.page !== 'game' || this.hidden || this.modal || this.busy || this.reviewing || !this.state || this.state.status !== 'playing') return;
+    this.cancelItem();
     if (this.undoLeft() <= 0) { this.toast('本程的 ' + this.undoLimit() + ' 次回溯已用完'); return; }
     if (!this.actions.length) { this.toast('已经在起点了'); return; }
     if (this.reviveAt != null && this.actions.length <= this.reviveAt) { this.toast('续灯之前的路，回不去了'); return; }
     const actions = this.actions.slice(0, -1);
+    const supplyPolicy = { ...this.supplyPolicy, legacyActionCount: Math.min(this.supplyPolicy.legacyActionCount, actions.length) };
     let state;
-    try { state = replay(this.level, actions, this.reviveHistory); } catch (_) { return; }
-    const undone = step(this.level, state, this.actions[this.actions.length - 1]);
+    try { state = replay(this.level, actions, this.reviveHistory, this.itemRewards, supplyPolicy); } catch (_) { return; }
+    const undone = step(this.level, state, this.actions[this.actions.length - 1], actions.length < this.supplyPolicy.legacyActionCount ? 1 : 2);
     this.motionPath = [state.player, ...undone.events.filter(event => event.type === 'move' || event.type === 'wind').map(event => event.cell)].reverse();
     this.camera.stopShake();
     this.previousState = this.state; this.state = state; this.actions = actions; this.undosUsed += 1;
+    this.supplyPolicy = supplyPolicy;
     this.moveEvents = [{ type: 'undo', cell: state.player }]; this.transitionAt = this.platform.now(); this.persist(); this.cue('undo');
   }
   victory() {
     this.pendingAction = null; this.toastUntil = 0;
     const albumBefore = this.album();
     const rating = stars(this.level, this.state), before = this.record(this.level, this.mode);
-    this.store.recordWin(this.level.id, rating, this.state.turn, this.mode);
+    this.store.recordWin(this.level.id, rating, scoredTurns(this.level, this.state), this.mode);
     this.syncFriendScore();
     this.store.clearRun();
     const index = CAMPAIGN.findIndex(l => l.id === this.level.id);
@@ -496,6 +574,7 @@ class Game {
   failureHint() { return reviveFlow.failureHint(this); }
   failure() { reviveFlow.showFailure(this); }
   requestRevive() { return reviveFlow.requestRevive(this); }
+  useStoredOil() { return reviveFlow.useStoredOil(this); }
   applyRevive() { reviveFlow.applyRevive(this); }
   resetView() {
     if (this.page !== 'game' || this.hidden || this.busy || !this.state ||
@@ -508,7 +587,7 @@ class Game {
     return true;
   }
   pause() {
-    this.pendingAction = null;
+    this.cancelItem();
     this.camera.stopShake();
     if (this.busy) return;
     if (this.reviewing) { this.failure(); return; }
@@ -532,7 +611,8 @@ class Game {
     this.modal = { kind: 'help', title: '和回声一起送信',
       ...helpContent(l, this.state ? this.state.reviveCount : 0, this.platform.kind, {
         canRevive: this.platform.kind === 'wechat' && this.ads.isConfigured(),
-        turn: this.state ? this.state.turn : 0
+        turn: this.state ? this.state.turn : 0,
+        itemsUsed: this.state ? this.state.itemsUsed || 0 : 0
       }),
       buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
   }

@@ -13,6 +13,7 @@ const { drawGuideTargets } = require('./guide-view');
 const { drawHomeArchitecture } = require('./world-art');
 const { drawRoutePreview } = require('./route-preview');
 const { drawWindRune, drawBridgeFlutter, lampFrame, drawLampFlame } = require('./prop-motion');
+const { selectedItemTargets, drawItemTarget, drawItemEffects } = require('./item-view');
 
 const COLOR = {
   sky: '#e9efe7', forest: '#b8cebf', fog: '#d6e2d7', teal: '#60b4ba',
@@ -236,7 +237,12 @@ function drawBoard(r, game, now, rect, guide) {
   const view = options.reducedMotion
     ? { scale: game.camera.zoom, panX: game.camera.panX, panY: game.camera.panY }
     : game.camera.frame(now);
+  // Target picking gets its own frame-local neighbor view. The geometry cache
+  // continues to own only movement neighbors, including when selection is cancelled.
+  if (r.boardGeometry && r.boardGeometry.itemTargetBase) r.boardGeometry = r.boardGeometry.itemTargetBase;
   const geometry = getBoardGeometry(r, l, s, rect, view);
+  const itemTargets = selectedItemTargets(game);
+  if (itemTargets) r.boardGeometry = { ...geometry, itemTargetBase: geometry, adjacent: itemTargets };
   const p = geometry.projection, { halfW: hw, halfH: hh, point, corners } = p;
   r.boardRect = rect;
   r.boardProjection = geometry.screenProjection;
@@ -255,6 +261,7 @@ function drawBoard(r, game, now, rect, guide) {
   drawIslandSurface(r, corners, 26, time, shadowBottom);
   const { walls, adjacent, ordered } = geometry;
   const selectCell = cell => {
+    if (game.selectedItem) { game.itemTarget(cell); return; }
     if (game.inspectGuideCell(cell)) return;
     const player = game.state.player, dx = cell % l.width - player % l.width, dy = Math.floor(cell / l.width) - Math.floor(player / l.width);
     // A second tap on the destination during arrival is still a move intention.
@@ -267,7 +274,7 @@ function drawBoard(r, game, now, rect, guide) {
     else game.toast('点相邻格移动，点脚下格原地等一拍');
   };
   const cellAction = cell => Object.assign(() => selectCell(cell), { boardCell: cell });
-  const enterOffice = !game.reviewing && s.status === 'playing' && (adjacent.has(l.exit) || s.player === l.exit)
+  const enterOffice = !game.reviewing && s.status === 'playing' && (game.selectedItem || adjacent.has(l.exit) || s.player === l.exit)
     ? cellAction(l.exit) : null;
   const actors = [];
   for (const cell of ordered) {
@@ -295,11 +302,12 @@ function drawBoard(r, game, now, rect, guide) {
           hitPostOffice(r, { x, y, size: hw * 1.2, now: time }, enterOffice);
         } });
       }
-      if (!game.reviewing && s.status === 'playing' && adjacent.has(cell) && (!guide || guide.visual.tapCell === cell)) {
+      if (!itemTargets && !game.reviewing && s.status === 'playing' && adjacent.has(cell) && (!guide || guide.visual.tapCell === cell)) {
         diamond(r, x, y, hw - 3, hh - 2, '#f4d49b66', null);
         floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#c69755', 1.45);
         ellipse(r, x, y + hh * .43, hw * .12, hh * .14, '#b68b52');
       }
+      if (itemTargets && itemTargets.has(cell)) drawItemTarget(r, game.selectedItem, p, cell, time);
       const selectProp = !game.reviewing && s.status === 'playing' ? cellAction(cell) : null;
       if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, time, selectProp) });
       if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false, selectProp) });
@@ -309,7 +317,7 @@ function drawBoard(r, game, now, rect, guide) {
     r.hit(x - hw, y - hh, hw * 2, hh * 2, cellAction(cell), (hx, hy) => p.contains(cell, hx, hy));
   }
   if (game.reviewing) r.line((s.history || []).map(point), '#c8874eca', 2, [3, 4]);
-  drawRoutePreview(target, game, p, guide);
+  if (!itemTargets) drawRoutePreview(target, game, p, guide);
   drawActorTrails(r, game, now, point, hw * 1.7, options);
   [true, false].forEach(ghost => {
     const frame = actorFrame(game, now, point, ghost, options), shared = ghost && s.echo === s.player;
@@ -323,8 +331,9 @@ function drawBoard(r, game, now, rect, guide) {
   });
   actors.sort((a, b) => a.y - b.y).forEach(actor => actor.draw());
   drawGuideTargets(r, guide, p, time);
-  drawDestination(r, game, time, p, options, enterOffice);
+  if (!itemTargets) drawDestination(r, game, time, p, options, enterOffice);
   drawEffects(target, game, now, point, hw * 1.7, options);
+  drawItemEffects(r, game, now, p);
   c.restore();
 }
 

@@ -82,7 +82,7 @@ test('help paging can go back and adapts safely after a taller viewport resize',
   assert.equal(ui.navigation.page, 1);
   ui.navigation.previous(); ui = drawModal(r, modal, 300);
   assert.equal(ui.navigation.page, 0);
-  modal.helpPage = 999; r.H = 1000;
+  modal.helpPage = 999; r.H = 1600;
   ui = drawModal(r, modal, 300);
   assert.deepEqual(ui.help.blocks.map(block => block.title), modal.sections.map(section => section.title));
   assert.equal(ui.navigation, null);

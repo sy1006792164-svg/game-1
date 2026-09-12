@@ -16,6 +16,16 @@ function handleGameKey(game, key) {
   }
   if (stampDetailKey(game, key)) return true;
   if (game.modal) {
+    if (game.modal.kind === 'item') {
+      if (key === 'Escape') {
+        const close = game.modal.buttons[game.modal.buttons.length - 1];
+        if (close) close.action();
+      } else if (key === 'Enter') {
+        const primary = game.modal.buttons.find(button => button.primary);
+        if (primary) primary.action();
+      }
+      return true;
+    }
     const navigation = game.renderer.helpNavigation;
     if (game.modal.kind === 'help' && navigation && navigation.modal === game.modal) {
       if ((key === 'ArrowLeft' || key === 'PageUp') && navigation.page > 0) navigation.previous();
@@ -31,7 +41,8 @@ function handleGameKey(game, key) {
     return true;
   }
   if (key === 'Escape') {
-    if (game.page === 'game') game.pause();
+    if (game.page === 'game' && game.selectedItem) game.cancelItem();
+    else if (game.page === 'game') game.pause();
     else if (['levels', 'collection', 'leaderboard', 'settings'].includes(game.page)) game.home();
     return true;
   }
@@ -50,6 +61,10 @@ function handleGameKey(game, key) {
     return true;
   }
   if (game.page !== 'game') return false;
+  if (['1', '2', '3'].includes(key) && typeof game.selectItem === 'function') {
+    game.selectItem(['oil', 'kite', 'bridge'][Number(key) - 1]); return true;
+  }
+  if (game.selectedItem) return true;
   const normalized = key.length === 1 ? key.toLowerCase() : key;
   let action = MOVES[normalized];
   if (action && action !== 'wait' && game.renderer.boardProjection) {

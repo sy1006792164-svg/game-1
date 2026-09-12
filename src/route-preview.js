@@ -1,6 +1,6 @@
 'use strict';
 
-const { DIRECTIONS, neighbor, step } = require('./engine');
+const { DIRECTIONS, ACTIONS, neighbor, step } = require('./engine');
 
 const MOVE_DIRECTIONS = Object.keys(DIRECTIONS);
 
@@ -21,10 +21,11 @@ function getRoutePreview(renderer, game) {
   }
 
   const history = state.history, first = Math.max(0, history.length - 4);
+  const turns = actions && actions.filter(action => ACTIONS.includes(action));
   const echo = [history[first]];
   for (let index = first + 1; index < history.length; index++) {
     const from = history[index - 1], to = history[index];
-    const action = actions && actions[index - 1];
+    const action = turns && turns[index - 1];
     const entry = DIRECTIONS[action] && neighbor(level, from, action);
     // Recorded actions identify the wind corner unambiguously. The echo can
     // cross paper that has since torn, so current bridge state does not apply.
@@ -56,7 +57,7 @@ function drawRoutePreview(renderer, game, projection, guide) {
   if (game.reviewing) return;
   const preview = getRoutePreview(renderer, game);
   const c = renderer.ctx, { point, halfW, halfH } = projection;
-  if (game.state.status === 'playing' && !guide && !game.modal && !game.busy && !game.hidden) {
+  if (game.state.status === 'playing' && !game.selectedItem && !guide && !game.modal && !game.busy && !game.hidden) {
     drawWindLandings(renderer, preview.winds, projection);
   }
   if (preview.echo.length > 1) {

@@ -1,6 +1,6 @@
 'use strict';
 
-const { normalizeReviveHistory } = require('./engine');
+const { normalizeReviveHistory, normalizeItemRewards, normalizeSupplyPolicy, isAction } = require('./engine');
 
 const PROFILE_KEY = 'minigame.local.profile.v1';
 const RUN_KEY = 'minigame.local.run.v1';
@@ -118,6 +118,10 @@ function cleanJson(value) {
 
 function runFrom(value) {
   try {
+    // Validate before cleanJson can strip reserved unknown keys from a ledger.
+    const rewards = value && Object.getOwnPropertyDescriptor(value, 'itemRewards');
+    if (rewards && own(rewards, 'value')) normalizeItemRewards(null, rewards.value);
+    const policy = value && Object.getOwnPropertyDescriptor(value, 'supplyPolicy');
     const run = cleanJson(value);
     if (!plain(run) || typeof run.mode !== 'string' || !safeId(run.mode) ||
         !(safeId(run.levelId) || (Number.isInteger(run.levelId) && run.levelId >= 0 && run.levelId <= 100000))) return null;
@@ -125,10 +129,14 @@ function runFrom(value) {
     if (hasRevivalHistory && !Array.isArray(run.reviveHistory)) return null;
     if (!hasRevivalHistory && run.reviveAt != null && !Number.isInteger(run.reviveAt)) return null;
     const hasHistory = Array.isArray(run.actions) && run.actions.length <= 4096 &&
-      run.actions.every(function (action) { return ['up', 'down', 'left', 'right', 'wait'].indexOf(action) !== -1; });
-    if (hasHistory) normalizeReviveHistory(hasRevivalHistory ? run.reviveHistory : run.reviveAt, run.actions.length);
+      run.actions.every(isAction);
+    if (hasHistory) {
+      const revivals = normalizeReviveHistory(hasRevivalHistory ? run.reviveHistory : run.reviveAt, run.actions.length);
+      if (own(run, 'supplyPolicy')) normalizeSupplyPolicy(policy.value, run.actions.length, revivals.length);
+    }
     // A legacy state snapshot must not bypass validation of a supplied route.
-    if ((own(run, 'actions') || hasRevivalHistory || run.reviveAt != null) && !hasHistory) return null;
+    if ((own(run, 'actions') || own(run, 'itemRewards') || own(run, 'supplyPolicy') || hasRevivalHistory || run.reviveAt != null) && !hasHistory) return null;
+    if (!hasHistory && plain(run.state) && (own(run.state, 'inventory') || own(run.state, 'itemsUsed'))) return null;
     if (run.undosUsed != null && !(Number.isInteger(run.undosUsed) && run.undosUsed >= 0 && run.undosUsed <= 99)) return null;
     if (!plain(run.state) && !hasHistory) return null;
     if (run.mode !== 'campaign') return null;

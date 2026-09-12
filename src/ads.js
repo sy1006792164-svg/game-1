@@ -168,7 +168,7 @@ function createAds(platform, config, onActiveChange) {
     activeAd = null;
   }
 
-  return { isConfigured, isActive: function () { return activeAttempt !== null; }, showRevive, destroy };
+  return { isConfigured, isActive: function () { return activeAttempt !== null; }, showRewarded: showRevive, showRevive, destroy };
 }
 
 module.exports = { createAds };

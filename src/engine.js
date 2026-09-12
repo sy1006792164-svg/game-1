@@ -1,10 +1,17 @@
 'use strict';
 
+const { initialInventory, normalizeItemRewards, parseItemAction, applyItemAction } = require('./items');
+const { SUPPLY_ENERGY, RELIGHT_ACTION, normalizeSupplyPolicy } = require('./supply-rules');
+
 const DIRECTIONS = Object.freeze({ up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] });
 const ACTIONS = Object.freeze(['up', 'down', 'left', 'right', 'wait']);
 const STAR_TWO_MARGIN = 2;
 
-/** A paper bridge that the courier has already stepped off is a wall for the rest of the route. */
+function isAction(action) {
+  return typeof action === 'string' && (ACTIONS.indexOf(action) >= 0 || action === RELIGHT_ACTION || parseItemAction(action) !== null);
+}
+
+/** A paper bridge that the courier has stepped off stays blocked until repaired. */
 function collapsed(level, state, cell) {
   return !!state && (level.bridges || []).indexOf(cell) >= 0 && (state.bridges || []).indexOf(cell) < 0;
 }
@@ -20,7 +27,7 @@ function neighbor(level, cell, direction, state) {
   return next;
 }
 
-function createState(level) {
+function createState(level, itemRewards) {
   const startsOnLight = (level.lights || []).indexOf(level.start) >= 0;
   const state = {
     levelId: level.id,
@@ -33,6 +40,8 @@ function createState(level) {
     seals: (level.seals || []).slice(),
     lights: (level.lights || []).filter(cell => cell !== level.start),
     bridges: (level.bridges || []).slice(),
+    inventory: initialInventory(level, itemRewards),
+    itemsUsed: 0,
     status: 'playing',
     revived: false,
     reviveCount: 0
@@ -43,9 +52,22 @@ function createState(level) {
 }
 
 /** A valid wait also returns moved:true: the turn, lantern and echo advance. */
-function step(level, state, action) {
-  if (!state || state.status !== 'playing' || ACTIONS.indexOf(action) < 0) {
+function step(level, state, action, version = 2) {
+  if (!state || !isAction(action)) {
     return { state, moved: false, events: [] };
+  }
+  if (action === RELIGHT_ACTION) {
+    const oil = state.inventory && state.inventory.oil;
+    if (state.status !== 'failed' || !Number.isSafeInteger(oil) || oil < 1 || oil > 4096) return { state, moved: false, events: [] };
+    const next = { ...revive(level, state), inventory: { ...state.inventory, oil: oil - 1 }, itemsUsed: (state.itemsUsed || 0) + 1 };
+    return { state: next, moved: true, events: [{ type: 'item', item: 'oil', cell: state.player },
+      { type: 'light', cell: state.player, amount: SUPPLY_ENERGY, source: 'oil' }, { type: 'relight', cell: state.player }] };
+  }
+  if (state.status !== 'playing') return { state, moved: false, events: [] };
+  if (parseItemAction(action)) {
+    const result = applyItemAction(level, state, action, version);
+    if (result.moved) finishAction(level, result.state, result.events);
+    return result;
   }
   const destination = action === 'wait' ? state.player : neighbor(level, state.player, action, state);
   if (destination === null) return { state, moved: false, events: [{ type: 'blocked', cell: state.player }] };
@@ -94,6 +116,12 @@ function step(level, state, action) {
     next.energy += 3;
     events.push({ type: 'light', cell: next.player });
   }
+  finishAction(level, next, events);
+  return { state: next, moved: true, events };
+}
+
+// Movement and supplies share the same win-first completion rule.
+function finishAction(level, next, events) {
   // Reaching the goal on the final unit of light is still a win.
   if (next.player === level.exit && !next.letters.length && !next.seals.length) {
     next.status = 'won';
@@ -102,7 +130,6 @@ function step(level, state, action) {
     next.status = 'failed';
     events.push({ type: 'fail', cell: next.player });
   }
-  return { state: next, moved: true, events };
 }
 
 /** Normalize legacy single-relight saves and ordered relight histories without trusting a saved count. */
@@ -124,37 +151,46 @@ function normalizeReviveHistory(value, actionCount) {
 }
 
 /** Rebuild every relight at its recorded failed turn; accumulated turns still determine the score. */
-function replay(level, actions, revivalHistory) {
+function replay(level, actions, revivalHistory, itemRewards, supplyPolicy) {
   if (!Array.isArray(actions)) throw new Error('invalid history');
   const history = normalizeReviveHistory(revivalHistory, actions.length);
+  const policy = normalizeSupplyPolicy(supplyPolicy, actions.length, history.length);
+  if ((policy.legacyReviveCount && history[policy.legacyReviveCount - 1] > policy.legacyActionCount) ||
+      (policy.legacyReviveCount < history.length && history[policy.legacyReviveCount] < policy.legacyActionCount) ||
+      actions.slice(0, policy.legacyActionCount).includes(RELIGHT_ACTION)) throw new Error('invalid supply policy');
   let revivalIndex = 0;
-  let state = createState(level);
+  let state = createState(level, itemRewards);
   for (let index = 0; index <= actions.length; index++) {
     if (history[revivalIndex] === index) {
       if (state.status !== 'failed') throw new Error('invalid revive');
-      state = revive(level, state);
+      state = revive(level, state, revivalIndex < policy.legacyReviveCount ? 1 : 2);
       revivalIndex++;
     }
     if (index === actions.length) break;
-    const result = step(level, state, actions[index]);
+    const result = step(level, state, actions[index], index < policy.legacyActionCount ? 1 : 2);
     if (!result.moved) throw new Error('invalid action');
     state = result.state;
   }
   return state;
 }
 
-function reviveEnergy(level) { return Math.max(8, Math.ceil(level.budget * 0.5)); }
+function reviveEnergy(level, version = 2) { return version === 1 ? Math.max(8, Math.ceil(level.budget * 0.5)) : SUPPLY_ENERGY; }
 
-function revive(level, state) {
+function revive(level, state, version = 2) {
   if (!state || state.status !== 'failed') return state;
-  return { ...state, energy: reviveEnergy(level), status: 'playing', revived: true, reviveCount: state.reviveCount + 1 };
+  return { ...state, energy: reviveEnergy(level, version), status: 'playing', revived: true, reviveCount: state.reviveCount + 1 };
 }
 
 /** Three stars at the verified minimum, two within a short margin, one for any other delivery. */
 function stars(level, state) {
   const par = Math.max(1, level.par || level.budget);
   const earned = state.turn <= par ? 3 : state.turn <= par + STAR_TWO_MARGIN ? 2 : 1;
-  return state.revived ? Math.min(2, earned) : earned;
+  return state.revived || state.itemsUsed > 0 ? Math.min(2, earned) : earned;
 }
 
-module.exports = { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, createState, step, replay, normalizeReviveHistory, reviveEnergy, revive, stars, neighbor };
+// Assisted shortcuts cannot replace a clean three-star route's best-turn record.
+function scoredTurns(level, state) {
+  return state.itemsUsed > 0 ? Math.max(state.turn, Math.max(1, level.par || level.budget) + 1) : state.turn;
+}
+
+module.exports = { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, SUPPLY_ENERGY, RELIGHT_ACTION, isAction, createState, step, replay, normalizeReviveHistory, normalizeItemRewards, normalizeSupplyPolicy, reviveEnergy, revive, stars, scoredTurns, neighbor };

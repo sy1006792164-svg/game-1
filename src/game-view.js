@@ -10,6 +10,7 @@ const { gameFeedback, drawContextFeedback } = require('./game-feedback');
 const { drawObjectives } = require('./game-objectives');
 const { drawCollectionFlights } = require('./collection-flight');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
+const { itemTrayLayout, drawItemTray, itemAimHint, drawItemAimHint } = require('./item-view');
 
 // One- and two-line play hints share one slot, avoiding small board jumps as
 // the contextual copy changes between turns.
@@ -20,9 +21,11 @@ function controlLayout(r, game) {
   const guide = game.guideStep();
   // Renderer.H already excludes the device safe area. Reclaim the old 40px
   // bottom spacer for readable guidance while retaining an 8px touch inset.
-  const hintLines = r.wrapLines(game.playHint(), ready ? 278 : 310, 12), buttonY = r.H - CONTROL.height - 8;
+  const aiming = !!game.selectedItem;
+  const hintLines = r.wrapLines(aiming ? itemAimHint(game) : game.playHint(), !aiming && ready ? 278 : 310, 12), buttonY = r.H - CONTROL.height - 8;
   const hintHeight = guide ? guideCardLayout(r, guide).height : Math.max(PLAY_HINT_HEIGHT, hintLines.length * 18 + 14);
-  return { buttonY, hintY: buttonY - hintHeight - 8, hintHeight, hintLines, ready, guide };
+  const hintY = buttonY - hintHeight - 8;
+  return { buttonY, hintY, hintHeight, hintLines, ready, guide, aiming, tray: itemTrayLayout(game, guide, hintY) };
 }
 
 function drawControls(r, game, layout, now, feedback) {
@@ -31,7 +34,7 @@ function drawControls(r, game, layout, now, feedback) {
   const undoFeedback = feedback && feedback.items.find(item => item.type === 'undo');
   const warning = game.state.status === 'failed' || game.state.energy <= 3;
   if (guide) drawGuideCard(r, game, guide, hintY);
-  else if (!drawContextFeedback(r, feedback, layout, now)) {
+  else if (!drawItemAimHint(r, game, layout) && !drawContextFeedback(r, feedback, layout, now)) {
     r.panel(24, hintY, 342, hintHeight, { radius: 13, fill: warning ? '#fbebdf' : ready ? '#e6f0e2' : '#f8faf1',
       stroke: warning ? '#d6af95' : ready ? '#9cbd9c' : C.line });
     if (ready) r.icon('check', 44, hintY + hintHeight / 2, 16, C.green);
@@ -50,10 +53,13 @@ function drawControls(r, game, layout, now, feedback) {
   } else {
     r.button('撤回（' + remaining + '）', 24, buttonY, 165, CONTROL.height, () => game.undo(), {
       style: guide && guide.control === 'undo' ? 'primary' : 'secondary', icon: 'undo',
-      feedbackAt: undoFeedback && undoFeedback.at, disabled: !canUndo || !!guide && guide.kind === 'mechanic'
+      feedbackAt: undoFeedback && undoFeedback.at, disabled: !canUndo || layout.aiming || !!guide && guide.kind === 'mechanic'
     });
   }
-  if (guide && guide.kind === 'mechanic') r.button(guide.buttonLabel, 201, buttonY, 165, CONTROL.height, () => game.advanceMechanicGuide(), {
+  if (layout.aiming) r.button('取消选取', 201, buttonY, 165, CONTROL.height, () => game.cancelItem(), {
+    style: 'primary', icon: 'close', disabled: !canAct
+  });
+  else if (guide && guide.kind === 'mechanic') r.button(guide.buttonLabel, 201, buttonY, 165, CONTROL.height, () => game.advanceMechanicGuide(), {
     style: 'primary', icon: 'arrow-right', disabled: !canAct
   });
   else r.button('等一拍', 201, buttonY, 165, CONTROL.height, () => game.act('wait'), {
@@ -69,8 +75,9 @@ function gameBoardRect(r, layout) {
   // shorter play hint was visible. Reclaim that space for centering, while
   // adding the same amount to the projection padding so tile size stays fixed.
   const reclaimed = Math.max(0, GUIDE_HEIGHT - layout.hintHeight);
+  const itemSpace = layout.tray ? layout.tray.reserve : 0;
   return { x: r.viewport.x, y: top, w: r.viewport.w,
-    h: layout.hintY - top - gap, paddingY: 62 + reclaimed, centerOffsetY: 2 };
+    h: layout.hintY - top - gap - itemSpace, paddingY: Math.max(62, 62 + reclaimed - itemSpace), centerOffsetY: 2 };
 }
 
 function drawGame(r, game, now) {
@@ -80,6 +87,7 @@ function drawGame(r, game, now) {
   const showGuideEntry = !layout.guide && game.canShowGuide() && game.state.status === 'playing' && !game.reviewing;
   r.label(game.level.title, 24, 32, showGuideEntry ? 138 : 254, 24, C.ink, 'left', '600');
   if (game.reviewing) r.text('路线回顾', 24, 60, 11, C.muted);
+  else if (game.state.itemsUsed) r.text('已使用道具 · 本次最高二星', 24, 63, 10, '#925e37');
   else if (game.development) r.text('开发试玩 · 独立存档', 24, 63, 10, '#925e37');
   else r.label(game.mode === 'campaign' ? '第 ' + String(game.level.id).padStart(3, '0') + ' 封 · ' + (chapterNames[game.level.chapter] || '风笺邮路') : '今日来信 · 一次新的远行', 24, 60, 252, 10, C.muted);
   if (showGuideEntry) r.button('操作引导', 174, 18, 104, CONTROL.compactHeight, () => game.showGuide(), {
@@ -98,7 +106,8 @@ function drawGame(r, game, now) {
   drawBoard(r, game, now, boardRect, game.modal ? null : layout.guide);
   drawCollectionFlights(r, game, now);
   drawGuideOverlay(r, game, layout.guide, now);
+  drawItemTray(r, game, layout.tray);
   drawControls(r, game, layout, now, feedback);
 }
 
-module.exports = { PLAY_HINT_HEIGHT, drawGame, gameBoardRect };
+module.exports = { PLAY_HINT_HEIGHT, drawGame, gameBoardRect, controlLayout };

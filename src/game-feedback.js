@@ -9,6 +9,7 @@ const STYLES = {
   seal: { label: '邮票', objective: 2, icon: 'stamp', color: '#3c7c81', collection: true, duration: 2200 },
   light: { label: '风灯', objective: 0, icon: 'lamp', color: '#98683f', collection: true, duration: 2200 },
   bridge: { label: '纸桥碎了', icon: 'bridge', detail: '这格不能再走，回声仍能通过', duration: 1800 },
+  repair: { label: '纸桥已修好', icon: 'bridge', detail: '可以再次踏上，离开后仍会碎', duration: 1800 },
   wait: { label: '等一拍', objective: 0, color: C.green, duration: 1300 },
   undo: { label: '已撤回', color: C.green, duration: 1300 },
   blocked: { label: '这边不通', icon: 'close', detail: '试试相邻亮格，这次没有消耗拍数', duration: 1800 }
@@ -17,17 +18,24 @@ const STYLES = {
 function recordEvents(items, events, at) {
   const counts = new Map();
   for (const event of events) {
-    if (STYLES[event.type]) counts.set(event.type, (counts.get(event.type) || 0) + 1);
+    if (!STYLES[event.type]) continue;
+    const total = counts.get(event.type) || { count: 0, energy: 0 };
+    total.count++;
+    // Fixed map lamps carry no amount (3); supply events carry their real gain,
+    // including 3 for older saved oil uses and 6 for the current supply rule.
+    if (event.type === 'light') total.energy += Number.isSafeInteger(event.amount) && event.amount > 0 ? event.amount : 3;
+    counts.set(event.type, total);
   }
-  counts.forEach((amount, type) => {
+  counts.forEach((total, type) => {
     const style = STYLES[type], previous = items.get(type);
     if (style.objective === 0) {
       for (const [other, item] of items) if (other !== type && item.objective === 0) items.delete(other);
     }
-    const count = amount + (style.collection && previous ? previous.count : 0);
-    const value = type === 'light' ? '+' + count * 3 + ' 拍'
+    const count = total.count + (style.collection && previous ? previous.count : 0);
+    const energy = total.energy + (previous && type === 'light' ? previous.energy : 0);
+    const value = type === 'light' ? '+' + energy + ' 拍'
       : style.collection ? '+' + count : type === 'wait' ? '−1 拍' : '';
-    items.set(type, { ...style, type, at, count, value });
+    items.set(type, { ...style, type, at, count, value, ...(type === 'light' ? { energy } : {}) });
   });
 }
 

@@ -5,6 +5,7 @@ function turnFeedback(events, before, after) {
   const types = new Set(events.map(event => event.type));
   if (types.has('win')) return { sounds: ['win'], haptic: true };
   if (types.has('fail')) return { sounds: ['fail'], haptic: false };
+  if (types.has('repair')) return { sounds: ['light'], haptic: true };
   const sounds = ['light', 'seal', 'letter', 'bridge', 'wind'].filter(type => types.has(type)).slice(0, 2);
   const low = before.energy > 3 && after.energy <= 3;
   const echoAppeared = before.echo === null && after.echo !== null;

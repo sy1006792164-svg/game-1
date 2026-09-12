@@ -310,7 +310,7 @@ test('finished states ignore input and each new failure can be revived without r
   const snapshot = JSON.stringify(failed);
   assert.equal(step(level, failed, 'right').state, failed);
   const revived = revive(level, failed);
-  assert.equal(revived.energy, 8);
+  assert.equal(revived.energy, 6);
   assert.equal(revived.status, 'playing');
   assert.equal(revived.revived, true);
   assert.equal(failed.reviveCount, 0);
@@ -327,15 +327,18 @@ test('finished states ignore input and each new failure can be revived without r
   assert.equal(revivedAgain.energy, revived.energy);
   assert.equal(revivedAgain.turn, failedAgain.turn);
   assert.deepEqual(revivedAgain.history, failedAgain.history);
-  assert.equal(revive(board({ budget: 30 }), failed).energy, 15);
+  assert.equal(revive(board({ budget: 30 }), failed).energy, 6);
   assert.equal(revive(level, createState(level)).revived, false);
   const won = { ...failed, status: 'won' };
   assert.equal(revive(level, won), won);
 });
 
-test('revival rejects the real level 21 dead end even after more energy is granted', () => {
+test('revival rejects the real level 21 dead end unless completed videos have earned repair stock', () => {
   const level = CAMPAIGN[20];
-  const failed = replay(level, ['left', 'right', ...Array(level.budget - 2).fill('wait')]);
+  const actions = ['left', 'right', ...Array(level.budget - 2).fill('wait')];
+  const supplied = replay(level, actions, [], { bridge: 1 });
+  assert.equal(isReviveRouteBlocked(level, supplied), false, 'the adjacent torn bridge can still be repaired after relighting');
+  const failed = replay(level, actions);
   const before = JSON.stringify(failed);
   assert.equal(failed.status, 'failed');
   assert.equal(failed.player, level.start);
@@ -479,19 +482,19 @@ test('replay rebuilds any state from its action history and rejects impossible h
 
 test('ordered revival histories replay every completed reward and keep legacy single-revival saves', () => {
   const level = board({ letters: [1], budget: 3 });
-  const actions = ['right', 'wait', 'wait', ...Array(8).fill('wait'), 'right'];
-  const history = Object.freeze([3, 11]);
+  const actions = ['right', 'wait', 'wait', ...Array(6).fill('wait'), 'right'];
+  const history = Object.freeze([3, 9]);
   const state = replay(level, actions, history);
   assert.equal(state.status, 'playing');
   assert.equal(state.reviveCount, 2);
   assert.equal(state.revived, true);
   assert.equal(state.turn, actions.length);
-  assert.equal(state.energy, 7);
+  assert.equal(state.energy, 5);
   assert.deepEqual(state.letters, []);
-  assert.equal(replay(level, actions.slice(0, 11), history).reviveCount, 2, 'the final saved index can be a just-earned revival');
+  assert.equal(replay(level, actions.slice(0, 9), history).reviveCount, 2, 'the final saved index can be a just-earned revival');
   assert.deepEqual(replay(level, actions.slice(0, 4), 3), replay(level, actions.slice(0, 4), [3]));
   assert.deepEqual(replay(level, [], null), replay(level, [], []));
-  assert.throws(() => replay(level, actions, [3, 10]), /invalid revive/, 'each reward must occur at an actual failure');
+  assert.throws(() => replay(level, actions, [3, 8]), /invalid revive/, 'each reward must occur at an actual failure');
   assert.throws(() => replay(level, actions, [3]), /invalid action/, 'missing later rewards cannot bypass failure');
 });
 

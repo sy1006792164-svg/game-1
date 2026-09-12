@@ -12,6 +12,8 @@ const { drawResultHeader, drawResultStars } = require('../src/result-effects');
 const { C } = require('../src/theme');
 const { RUN_KEY, PROFILE_KEY, DEV_RUN_KEY, DEV_PROFILE_KEY } = require('../src/storage');
 const { StartupLoader } = require('../src/startup');
+const { replay: replayItems } = require('../src/engine');
+const { SUPPLY_ENERGY, RELIGHT_ACTION } = require('../src/supply-rules');
 
 const mainPath = path.join(__dirname, '../src/main.js');
 const source = fs.readFileSync(mainPath, 'utf8');
@@ -115,6 +117,251 @@ function harness(options = {}) {
     destroy() { game.ads.destroy(); game.sound.release(); }
   };
 }
+
+const settleItemVideo = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(); };
+async function completeItemVideo(h, ended = true) {
+  await settleItemVideo(); h.closeAd(ended); await settleItemVideo();
+}
+
+test('tool confirmation, cancellation, save/restore and undo preserve paid rewards without free refills', async t => {
+  const h = harness({ development: true }); t.after(() => h.destroy()); h.start(CAMPAIGN[22]);
+  const before = clone(h.game.state);
+  assert.deepEqual(before.inventory, { oil: 0, kite: 0, bridge: 0 });
+  h.callbacks.key('1');
+  assert.equal(h.game.modal.kind, 'item');
+  assert.ok(h.game.modal.lines.some(line => line.includes('最多二星')));
+  h.callbacks.key('Escape');
+  assert.equal(h.game.modal, null);
+  assert.deepEqual(h.game.state, before);
+  h.callbacks.key('1'); h.callbacks.key('Enter');
+  assert.equal(h.game.busy, true);
+  assert.deepEqual(h.game.state, before);
+  await completeItemVideo(h, false);
+  assert.deepEqual(h.game.state, before, 'cancelled video cannot grant or apply a tool');
+  h.callbacks.key('1'); h.callbacks.key('Enter');
+  await completeItemVideo(h);
+  assert.equal(h.game.state.energy, before.energy + SUPPLY_ENERGY);
+  assert.equal(h.game.state.turn, 0);
+  assert.equal(h.game.state.inventory.oil, 0);
+  assert.deepEqual(h.game.actions, ['item:oil']);
+  assert.equal(h.game.store.loadRun().itemRewards.oil, 1);
+  const supplied = clone(h.game.state);
+  h.game.home(); assert.equal(h.game.restore(), true);
+  assert.deepEqual(h.game.state, supplied);
+  h.advance(300); h.game.undo();
+  assert.deepEqual(h.game.state, { ...before, inventory: { ...before.inventory, oil: 1 } });
+  assert.equal(h.game.undosUsed, 1);
+  h.advance(300); h.callbacks.key('1'); h.callbacks.key('Enter');
+  assert.equal(h.game.state.itemsUsed, 1);
+  assert.equal(h.showCount, 2, 'undo returns the earned charge without another video');
+  h.game.start(h.game.level);
+  assert.deepEqual(h.game.state, before, 'restart never refills free supplies');
+  assert.deepEqual(h.game.itemRewards, { oil: 0, kite: 0, bridge: 0 });
+});
+
+test('targeted tools never move or show a video on invalid taps, pause or buffered input', async t => {
+  const h = harness(); t.after(() => h.destroy());
+  const level = { ...CAMPAIGN[6], width: 3, height: 2, start: 0, exit: 5, walls: [1], letters: [2], seals: [], lights: [], winds: {}, bridges: [], budget: 10, par: 4 };
+  h.start(level); h.game.selectItem('kite'); h.callbacks.key('Enter');
+  assert.equal(h.game.selectedItem, 'kite');
+  const before = clone(h.game.state);
+  h.callbacks.key('ArrowDown'); h.callbacks.key(' '); h.game.itemTarget(5);
+  assert.deepEqual(h.game.state, before);
+  assert.equal(h.showCount, 0);
+  assert.equal(h.game.selectedItem, 'kite');
+  h.callbacks.key('Escape');
+  assert.equal(h.game.selectedItem, null);
+  assert.equal(h.game.modal, null);
+  h.game.selectItem('kite'); h.callbacks.key('Enter'); h.game.pause();
+  assert.equal(h.game.selectedItem, null);
+  h.game.itemTarget(2); assert.deepEqual(h.game.state, before);
+  h.game.pause(); h.game.selectItem('kite'); h.callbacks.key('Enter');
+  h.game.itemTarget(2); h.game.itemTarget(2);
+  assert.deepEqual(h.game.state, before, 'a valid target still waits for completed playback');
+  await completeItemVideo(h);
+  assert.equal(h.showCount, 1);
+  assert.deepEqual(h.game.actions, ['item:kite:2']);
+  assert.equal(h.game.state.player, 0);
+  assert.deepEqual(h.game.state.letters, []);
+  assert.equal(h.game.state.turn, 0);
+  h.advance(300); h.game.undo(); assert.deepEqual(h.game.state, { ...before, inventory: { ...before.inventory, kite: 1 } });
+});
+
+test('kite delivery after completed video wins immediately but never overwrites an unaided record', async t => {
+  const h = harness(); t.after(() => h.destroy());
+  const level = { ...CAMPAIGN[6], width: 3, height: 1, start: 0, exit: 0, walls: [], letters: [2], seals: [], lights: [], winds: {}, bridges: [], budget: 5, par: 4 };
+  h.game.store.recordWin(level.id, 3, 4, 'campaign');
+  h.start(level); h.game.selectItem('kite'); h.callbacks.key('Enter'); h.game.itemTarget(2);
+  await completeItemVideo(h);
+  assert.equal(h.game.state.status, 'won');
+  assert.equal(h.game.modal.stars, 2);
+  assert.deepEqual(h.game.profile().completed[String(level.id)], { stars: 3, bestTurns: 4 });
+  assert.ok(!h.game.modal.lines.some(line => line.includes('刷新纪录')));
+  assert.ok(h.game.modal.lines.some(line => line.includes('按 5 拍计')));
+  assert.equal(h.game.store.loadRun(), null);
+});
+
+test('video repair restores a broken bridge and undo returns the earned inventory and exact terrain', async t => {
+  const h = harness(); t.after(() => h.destroy());
+  const level = { ...CAMPAIGN[15], width: 3, height: 2, start: 0, exit: 0, walls: [], letters: [5], seals: [], lights: [], winds: {}, bridges: [1], budget: 12, par: 6 };
+  h.start(level); h.act('right'); h.act('down'); h.advance(300);
+  const broken = clone(h.game.state);
+  assert.deepEqual(broken.bridges, []);
+  h.game.selectItem('bridge'); h.callbacks.key('Enter'); h.game.itemTarget(1);
+  await completeItemVideo(h);
+  assert.deepEqual(h.game.state.bridges, [1]);
+  assert.equal(h.game.state.turn, broken.turn);
+  assert.deepEqual(h.game.state, replayItems(level, h.game.actions, [], h.game.itemRewards));
+  h.advance(300); h.game.undo(); assert.deepEqual(h.game.state, { ...broken, inventory: { ...broken.inventory, bridge: 1 } });
+});
+
+test('tool selection drops a queued walk and repeated confirmation cannot reward twice', async t => {
+  const h = harness(); t.after(() => h.destroy()); h.start(CAMPAIGN[3]);
+  h.act(h.game.level.solution[0]); h.game.act(h.game.level.solution[1]);
+  assert.ok(h.game.pendingAction);
+  h.game.selectItem('oil'); assert.equal(h.game.pendingAction, null);
+  assert.equal(h.game.modal, null, 'moving courier cannot open a stale tool confirmation');
+  h.advance(300); h.game.selectItem('oil');
+  const confirm = h.game.modal.buttons[0].action;
+  confirm(); confirm();
+  await settleItemVideo();
+  await completeItemVideo(h); h.closeAd(true); await settleItemVideo();
+  assert.equal(h.showCount, 1);
+  assert.equal(h.game.itemRewards.oil, 1);
+  assert.equal(h.game.actions.filter(action => action === 'item:oil').length, 1);
+});
+
+test('item videos remain opt-in, never reward in browser or after an ad error, and can retry', async t => {
+  for (const options of [{ kind: 'browser' }, { configured: false }]) {
+    const h = harness(options); t.after(() => h.destroy()); h.start(CAMPAIGN[3]);
+    const before = clone(h.game.state);
+    h.game.selectItem('oil'); assert.equal(h.game.modal.buttons.some(button => button.primary), false);
+    h.game.modal = null; await h.game.requestItemReward('oil', before.player);
+    h.act('item:oil');
+    assert.equal(h.showCount, 0); assert.deepEqual(h.game.state, before);
+  }
+  const h = harness(); t.after(() => h.destroy()); h.start(CAMPAIGN[3]);
+  assert.equal(h.showCount, 0, 'opening a route never starts an advertisement');
+  const before = clone(h.game.state);
+  h.game.selectItem('oil'); h.callbacks.key('Enter'); await settleItemVideo();
+  h.failAd({ errCode: 1004 }); await settleItemVideo();
+  assert.deepEqual(h.game.state, before);
+  assert.equal(h.game.busy, false);
+  assert.match(h.game.toastText, /未发放/);
+  h.game.selectItem('oil'); h.callbacks.key('Enter'); await completeItemVideo(h);
+  assert.equal(h.game.itemRewards.oil, 1);
+  h.advance(300); h.game.selectItem('oil'); h.callbacks.key('Enter'); await completeItemVideo(h);
+  assert.equal(h.game.itemRewards.oil, 2);
+  assert.equal(h.game.state.energy, before.energy + SUPPLY_ENERGY * 2);
+  assert.equal(h.showCount, 3, 'each new dose requires its own completed video');
+});
+
+test('completed item playback saves exactly once in background and cannot reward another restored session', async t => {
+  const h = harness({ development: true }); t.after(() => h.destroy()); h.start(CAMPAIGN[3]);
+  const before = clone(h.game.state);
+  h.game.selectItem('oil'); h.callbacks.key('Enter'); await settleItemVideo();
+  h.callbacks.hide(); await completeItemVideo(h);
+  assert.equal(h.game.state.energy, before.energy + SUPPLY_ENERGY);
+  assert.equal(h.game.itemRewards.oil, 1);
+  assert.equal(h.game.modal.kind, 'pause');
+  assert.equal(h.game.store.loadRun().itemRewards.oil, 1);
+  h.callbacks.show(); h.game.pause(); h.advance(300);
+  h.game.selectItem('oil'); h.callbacks.key('Enter'); await settleItemVideo();
+  assert.equal(h.game.restore(), true);
+  const restored = clone(h.game.state);
+  await completeItemVideo(h);
+  assert.deepEqual(h.game.state, restored);
+  assert.equal(h.game.itemRewards.oil, 1, 'stale completion cannot apply to a different session');
+});
+
+test('proactive oil and a failed-route video give the same six energy without double rewards', async t => {
+  const active = harness(), failed = harness(); t.after(() => { active.destroy(); failed.destroy(); });
+  active.start(CAMPAIGN[3]); failed.start(CAMPAIGN[3]);
+  const starting = active.game.state.energy, activeHistory = clone(active.game.state.history);
+  active.game.selectItem('oil'); active.callbacks.key('Enter'); await completeItemVideo(active);
+  while (failed.game.state.status === 'playing') failed.act('wait');
+  const failedHistory = clone(failed.game.state.history), failedTurn = failed.game.state.turn;
+  assert.ok(failed.game.modal.lines.some(line => line.includes('和投递中的灯油相同')));
+  const revive = failed.game.requestRevive(); await completeItemVideo(failed); await revive;
+  assert.equal(active.game.state.energy - starting, 6);
+  assert.equal(failed.game.state.energy, 6);
+  assert.deepEqual(active.game.state.history, activeHistory);
+  assert.deepEqual(failed.game.state.history, failedHistory);
+  assert.equal(failed.game.state.turn, failedTurn);
+  assert.equal(active.showCount, 1); assert.equal(failed.showCount, 1);
+  assert.equal(active.game.state.inventory.oil, 0); assert.equal(failed.game.state.inventory.oil, 0);
+  assert.equal(failed.game.itemRewards.oil, 0, 'video relight does not additionally grant a stock item');
+});
+
+test('a failed route uses already-earned oil before ads and persists its own undo boundary', async t => {
+  const h = harness({ development: true }); t.after(() => h.destroy()); h.start(CAMPAIGN[3]);
+  h.game.selectItem('oil'); h.callbacks.key('Enter'); await completeItemVideo(h);
+  h.advance(300); h.game.undo();
+  assert.equal(h.game.state.inventory.oil, 1);
+  h.game.ads.isConfigured = () => false;
+  while (h.game.state.status === 'playing') h.act('wait');
+  assert.equal(h.game.modal.buttons[0].text, '使用已领取灯油 +6 拍');
+  assert.equal(h.game.modal.buttons.some(button => button.text.includes('看广告')), false);
+  const turn = h.game.state.turn, rewards = clone(h.game.itemRewards), use = h.game.modal.buttons[0].action;
+  use(); use();
+  assert.equal(h.game.state.status, 'playing'); assert.equal(h.game.state.energy, 6);
+  assert.equal(h.game.state.turn, turn); assert.equal(h.game.state.inventory.oil, 0);
+  assert.equal(h.game.state.reviveCount, 1); assert.equal(h.game.state.itemsUsed, 1);
+  assert.equal(h.showCount, 1); assert.deepEqual(h.game.itemRewards, rewards);
+  assert.deepEqual(h.game.reviveHistory, []);
+  assert.equal(h.game.actions.at(-1), RELIGHT_ACTION);
+  assert.equal(h.game.reviveAt, h.game.actions.length);
+  const restored = clone(h.game.state);
+  h.game.undo(); assert.deepEqual(h.game.state, restored, 'inventory relight itself cannot be undone');
+  h.act(h.game.level.solution[0]); h.game.undo();
+  assert.deepEqual(h.game.state, restored, 'the first move after relighting remains reversible');
+  h.game.home(); assert.equal(h.game.restore(), true);
+  assert.deepEqual(h.game.state, restored); assert.equal(h.game.canUndo(), false);
+  assert.deepEqual(h.game.itemRewards, rewards);
+});
+
+test('a route at its saved-action limit never sells an unusable relight or consumes owned oil', async t => {
+  const h = harness(); t.after(() => h.destroy());
+  const level = { ...CAMPAIGN[3], budget: 4096 };
+  h.start(level); h.game.actions = Array(4096).fill('wait'); h.game.itemRewards = { oil: 1, kite: 0, bridge: 0 };
+  h.game.state = replayItems(level, h.game.actions, [], h.game.itemRewards);
+  assert.equal(h.game.state.status, 'failed');
+  const before = clone(h.game.state);
+  h.game.failure();
+  assert.equal(h.game.modal.buttons.some(button => /看广告|已领取灯油/.test(button.text)), false);
+  assert.ok(h.game.modal.lines.some(line => line.includes('记录已满')));
+  await h.game.requestRevive(); h.game.useStoredOil();
+  assert.equal(h.showCount, 0); assert.deepEqual(h.game.state, before);
+});
+
+test('legacy oil and half-budget relights retain their gains while new mixed-history supplies use six', async t => {
+  const level = CAMPAIGN[3], legacyReviveAt = level.budget + 4;
+  const actions = ['item:oil', ...Array(level.budget + 3).fill('wait'), 'wait'];
+  const run = { mode: 'campaign', levelId: level.id, revision: level.revision, actions,
+    reviveHistory: [legacyReviveAt], itemRewards: { oil: 1 }, undosUsed: 0 };
+  const h = harness({ development: true, data: new Map([[DEV_RUN_KEY, run]]) }); t.after(() => h.destroy());
+  assert.equal(h.game.restore(), true);
+  const legacyGain = Math.max(8, Math.ceil(level.budget * .5));
+  assert.equal(h.game.state.energy, legacyGain - 1);
+  assert.deepEqual(h.game.supplyPolicy, { version: 2, legacyActionCount: actions.length, legacyReviveCount: 1 });
+  assert.deepEqual(h.game.store.loadRun().supplyPolicy, h.game.supplyPolicy, 'migration is saved before another action');
+  h.game.selectItem('oil'); h.callbacks.key('Enter'); await completeItemVideo(h);
+  assert.equal(h.game.state.energy, legacyGain - 1 + 6);
+  const mixed = clone(h.game.state);
+  h.game.home(); assert.equal(h.game.restore(), true); assert.deepEqual(h.game.state, mixed);
+  h.game.undo(); h.advance(300); h.game.undo();
+  assert.equal(h.game.state.energy, legacyGain);
+  assert.equal(h.game.supplyPolicy.legacyActionCount, legacyReviveAt);
+  h.advance(300); h.game.selectItem('oil'); h.callbacks.key('Enter');
+  assert.equal(h.game.state.energy, legacyGain + 6, 'a replacement for an undone legacy action uses current rules');
+  while (h.game.state.status === 'playing') h.act('wait');
+  const pending = h.game.requestRevive(); await completeItemVideo(h); await pending;
+  assert.equal(h.game.state.energy, 6);
+  assert.equal(h.game.state.reviveCount, 2);
+  assert.equal(h.game.supplyPolicy.legacyReviveCount, 1);
+  const final = clone(h.game.state);
+  h.game.home(); assert.equal(h.game.restore(), true); assert.deepEqual(h.game.state, final);
+});
 
 test('trees keep the same continuous wind motion through moves, waits and undo', t => {
   const idle = harness(), active = harness();
@@ -827,7 +1074,7 @@ test('SDK errors during close cleanup or after a completed close cannot change t
     h.closeAd(true);
     if (timing === 'after-close') h.failAd({ errCode: 1004, errMsg: 'no ad for next preload' });
     await pending;
-    assert.deepEqual(h.game.state, { ...before, energy: 8, status: 'playing', revived: true, reviveCount: 1 });
+    assert.deepEqual(h.game.state, { ...before, energy: SUPPLY_ENERGY, status: 'playing', revived: true, reviveCount: 1 });
     assert.deepEqual(h.game.store.loadRun().reviveHistory, [before.turn]);
     assert.equal(h.game.busy, false);
     assert.equal(h.game.ads.isActive(), false);
@@ -1175,8 +1422,8 @@ test('cancelled ads do not revive and the same route can relight repeatedly acro
   for (let index = 0; index < CAMPAIGN[0].budget; index++) h.act('wait');
   assert.equal(h.game.state.status, 'failed');
   const failed = clone(h.game.state);
-  assert.match(h.game.modal.buttons[0].text, /看广告续灯 \+8 拍/);
-  assert.ok(h.game.modal.lines.some(line => line.includes('可再次续灯')));
+  assert.match(h.game.modal.buttons[0].text, /看广告续灯 \+6 拍/);
+  assert.ok(h.game.modal.lines.some(line => line.includes('每次视频补 6 拍')));
   let pending = h.game.requestRevive();
   await Promise.resolve();
   assert.equal(h.game.busy, true);
@@ -1192,10 +1439,10 @@ test('cancelled ads do not revive and the same route can relight repeatedly acro
   h.closeAd(true); await pending;
   assert.equal(h.game.state.status, 'playing');
   assert.equal(h.game.state.revived, true);
-  assert.equal(h.game.state.energy, 8);
-  assert.match(h.game.toastText, /已增加 8 拍/);
+  assert.equal(h.game.state.energy, SUPPLY_ENERGY);
+  assert.match(h.game.toastText, /已增加 6 拍/);
   assert.equal(h.game.reviveAt, failed.turn);
-  assert.deepEqual(h.game.state, { ...failed, energy: 8, status: 'playing', revived: true, reviveCount: 1 });
+  assert.deepEqual(h.game.state, { ...failed, energy: SUPPLY_ENERGY, status: 'playing', revived: true, reviveCount: 1 });
   const reloaded = harness({ data: h.data });
   assert.equal(reloaded.game.restore(), true);
   assert.deepEqual(reloaded.game.state, h.game.state);
@@ -1205,7 +1452,7 @@ test('cancelled ads do not revive and the same route can relight repeatedly acro
     const before = clone(reloaded.game.state);
     pending = reloaded.game.requestRevive(); await Promise.resolve();
     reloaded.closeAd(true); await pending;
-    assert.deepEqual(reloaded.game.state, { ...before, energy: 8, status: 'playing', reviveCount: count });
+    assert.deepEqual(reloaded.game.state, { ...before, energy: SUPPLY_ENERGY, status: 'playing', reviveCount: count });
     assert.equal(reloaded.game.reviveHistory.length, count);
     assert.deepEqual(reloaded.game.store.loadRun().reviveHistory, reloaded.game.reviveHistory);
   }
@@ -1246,8 +1493,10 @@ test('an unconfigured real-WeChat ad never grants a preview reward', async () =>
 });
 
 test('an irrecoverable bridge route never offers or starts an ad and can restart for free', async () => {
-  const h = harness({ development: true }), level = CAMPAIGN[20];
-  h.start(level); h.act('left'); h.act('right');
+  const h = harness({ development: true }), level = { ...CAMPAIGN[20], width: 4, height: 1,
+    start: 0, exit: 3, letters: [3], seals: [], walls: [2], bridges: [1], lights: [], winds: {}, budget: 4 };
+  h.start(level); h.act('right'); h.act('left');
+  assert.equal(h.game.state.inventory.bridge, 0, 'no completed item video means no repair charge');
   while (h.game.state.status === 'playing') h.act('wait');
   const failed = clone(h.game.state);
   assert.equal(failed.status, 'failed');
@@ -1263,6 +1512,23 @@ test('an irrecoverable bridge route never offers or starts an ad and can restart
   assert.deepEqual(h.game.state.bridges, level.bridges);
   assert.equal(h.game.state.revived, false);
   h.destroy();
+});
+
+test('a broken route can relight then acquire its repair with a separate explicitly disclosed video', async t => {
+  const h = harness(); t.after(() => h.destroy()); h.start(CAMPAIGN[20]);
+  h.act('left'); h.act('right');
+  while (h.game.state.status === 'playing') h.act('wait');
+  assert.ok(h.game.modal.lines.some(line => line.includes('另看视频获取')));
+  assert.ok(h.game.modal.buttons.some(button => button.text.includes('看广告续灯')));
+  const relight = h.game.requestRevive(); await completeItemVideo(h); await relight;
+  assert.equal(h.game.state.status, 'playing');
+  assert.equal(h.game.state.inventory.bridge, 0, 'relight does not grant an unearned tool');
+  h.advance(300); h.game.selectItem('bridge'); h.callbacks.key('Enter');
+  h.game.itemTarget(h.game.level.bridges[0]); await completeItemVideo(h);
+  assert.equal(h.game.itemRewards.bridge, 1);
+  assert.equal(h.showCount, 2);
+  h.act('left');
+  assert.equal(h.game.state.player, h.game.level.bridges[0]);
 });
 
 test('a completed ad belongs to its original failed session and cannot reward a restored route', async () => {
@@ -1362,7 +1628,8 @@ test('a transient profile read failure retries before checking whether the saved
   assert.deepEqual(h.game.state, replayed(CAMPAIGN[1], ['right']));
   assert.equal(h.game.store.hasPendingReads(), false);
   assert.deepEqual(h.game.profile().completed['1'], { stars: 3, bestTurns: 4 });
-  assert.deepEqual(get(RUN_KEY), progress, 'a recovered profile never makes a valid route look locked');
+  assert.deepEqual(get(RUN_KEY), { ...progress, itemRewards: { oil: 0, kite: 0, bridge: 0 },
+    supplyPolicy: { version: 2, legacyActionCount: 1, legacyReviveCount: 0 } }, 'recovery preserves the route while recording its supply-rule migration');
 });
 
 test('unread profile or route data cannot be cleared or replaced by continuing or selecting a level', t => {
@@ -1391,7 +1658,8 @@ test('unread profile or route data cannot be cleared or replaced by continuing o
     assert.equal(h.game.level.id, 2);
     assert.deepEqual(h.game.state, replayed(CAMPAIGN[1], ['right']));
     assert.equal(h.game.store.hasPendingReads(), false);
-    assert.deepEqual(get(RUN_KEY), progress);
+    assert.deepEqual(get(RUN_KEY), { ...progress, itemRewards: { oil: 0, kite: 0, bridge: 0 },
+      supplyPolicy: { version: 2, legacyActionCount: 1, legacyReviveCount: 0 } });
   }
 });
 

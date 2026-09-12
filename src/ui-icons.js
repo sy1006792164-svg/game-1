@@ -89,6 +89,16 @@ function drawUiGlyph(c, type) {
     box(-6, -5, 12, 14, 2);
     line([[-8, -5], [8, -5]]); line([[-8, 10], [8, 10]]);
     line([[-2, 5], [0, 0], [2, 5]]);
+  } else if (type === 'oil') {
+    box(-7, -4, 14, 14, 4); box(-4, -9, 8, 5, 1);
+    line([[-2, -12], [2, -12]]);
+    c.moveTo(0, -1); c.bezierCurveTo(-6, 4, -1, 9, 3, 5); c.bezierCurveTo(5, 3, 1, 1, 0, -1);
+  } else if (type === 'kite') {
+    line([[0, -11], [10, -2], [0, 8], [-10, -2], [0, -11]]);
+    line([[0, -11], [0, 8], [3, 11], [0, 13]]); line([[-10, -2], [10, -2]]);
+  } else if (type === 'bridge') {
+    for (const y of [-5, 0, 5]) box(-10, y - 2, 20, 4, .5);
+    line([[-6, -9], [-6, 9]]); line([[6, -9], [6, 9]]);
   } else if (type === 'arrow-right') {
     line([[-9, 0], [9, 0]]); line([[2, -7], [9, 0], [2, 7]]);
   } else if (type === 'chevron' || type === 'back') {
