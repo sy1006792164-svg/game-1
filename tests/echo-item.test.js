@@ -31,7 +31,7 @@ function assertUnchanged(level, state, action) {
 test('echo whistle unlocks at route 31 and old reward ledgers keep their original shape', () => {
   assert.deepEqual(ITEMS.find(item => item.id === 'echo'), {
     id: 'echo', name: '回声笛', icon: 'echo', unlock: 31,
-    description: '提前盖好未来 1—3 拍回声将经过的一枚蓝票。\n只选最近走过的落点，不耗拍。', short: '提前盖蓝票'
+    description: '提前盖一张蓝票，省下等回声的时间。\n先踩上蓝票，在回声到来前使用。\n离开后也能用：点亮起的那张票即可。\n未踩过的票不能用；每次只盖一张。\n不耗拍、不补灯火，也不移动回声。', short: '提前盖蓝票'
   });
   const empty = { oil: 0, kite: 0, bridge: 0 };
   for (const id of [1, 30, 31, 999]) {

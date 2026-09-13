@@ -5,6 +5,7 @@ const FILTERS = Object.freeze([
   Object.freeze({ id: 'owned', label: '已收藏' }),
   Object.freeze({ id: 'locked', label: '待收藏' })
 ]);
+const filteredAlbums = new WeakMap();
 
 function collectionFilter(game) {
   return FILTERS.some(filter => filter.id === game.collectionFilter) ? game.collectionFilter : 'all';
@@ -12,7 +13,11 @@ function collectionFilter(game) {
 
 function visibleStamps(game, album = game.album()) {
   const filter = collectionFilter(game);
-  return album.stamps.filter(stamp => filter === 'all' || stamp.owned === (filter === 'owned'));
+  if (filter === 'all') return album.stamps;
+  let cached = filteredAlbums.get(album);
+  if (!cached) { cached = {}; filteredAlbums.set(album, cached); }
+  if (!cached[filter]) cached[filter] = album.stamps.filter(stamp => stamp.owned === (filter === 'owned'));
+  return cached[filter];
 }
 
 function setCollectionFilter(game, filter) {

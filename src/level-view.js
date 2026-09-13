@@ -46,7 +46,7 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   r.text(String(level.id).padStart(3, '0'), x + 17, y + 26, 22, unlocked ? C.green : '#74897a', 'left', '600');
   if (inProgress) r.text('进行中', x + 77, y + 26, 10, C.goldText);
   else {
-    const difficulty = difficultyProfile(level);
+    const difficulty = level.difficulty || difficultyProfile(level);
     r.label(difficulty.name, x + 74, y + 26, 48, 9, unlocked && difficulty.tier >= 4 ? C.goldText : C.muted);
   }
   const idle = unlocked && !record && highlighted && !held && !scroll.touching &&

@@ -2,45 +2,16 @@
 
 const { C } = require('./theme');
 const { decorativeTime, quiet } = require('./page-feedback');
+const { drawStampPaper } = require('./stamp-paper');
 
 const INKS = ['#376f5d', '#a87440', '#3b7b88', '#65754a'];
-
-// The notches belong to the paper silhouette, leaving the background visible.
-function stampOutline(c, x, y, w, h) {
-  const notch = 1.65, inset = 10, spacing = 11;
-  c.beginPath(); c.moveTo(x + 3, y);
-  for (let px = x + inset; px < x + w - inset; px += spacing) {
-    c.lineTo(px - notch, y); c.quadraticCurveTo(px, y + notch * 2, px + notch, y);
-  }
-  c.lineTo(x + w - 3, y); c.quadraticCurveTo(x + w, y, x + w, y + 3);
-  for (let py = y + inset; py < y + h - inset; py += spacing) {
-    c.lineTo(x + w, py - notch); c.quadraticCurveTo(x + w - notch * 2, py, x + w, py + notch);
-  }
-  c.lineTo(x + w, y + h - 3); c.quadraticCurveTo(x + w, y + h, x + w - 3, y + h);
-  for (let px = x + w - inset; px > x + inset; px -= spacing) {
-    c.lineTo(px + notch, y + h); c.quadraticCurveTo(px, y + h - notch * 2, px - notch, y + h);
-  }
-  c.lineTo(x + 3, y + h); c.quadraticCurveTo(x, y + h, x, y + h - 3);
-  for (let py = y + h - inset; py > y + inset; py -= spacing) {
-    c.lineTo(x, py + notch); c.quadraticCurveTo(x + notch * 2, py, x, py - notch);
-  }
-  c.lineTo(x, y + 3); c.quadraticCurveTo(x, y, x + 3, y); c.closePath();
-}
 
 // One paper face for both the album grid and its enlarged detail.
 function drawStampArt(r, stamp, rect, { next = false, held = false, scrolling = false } = {}) {
   const c = r.ctx, w = 106, h = 144, middle = w / 2, owned = stamp.owned;
   const ink = owned ? INKS[stamp.index % INKS.length] : next ? C.gold : '#7e9681';
-  const paper = owned ? '#fffbed' : next ? '#fff0d5' : '#e2eade';
-  const border = held ? owned ? '#86a489' : C.gold : owned ? '#b9c7a9' : next ? '#cba477' : '#b5c9b6';
   c.save(); c.translate(rect.x, rect.y); c.scale(rect.w / w, rect.h / h);
-  stampOutline(c, 0, 4, w, h); c.fillStyle = '#496c5120'; c.fill();
-  stampOutline(c, 0, 0, w, h); c.fillStyle = paper; c.fill(); c.strokeStyle = border; c.lineWidth = held ? 1.8 : next ? 1.3 : .8; c.stroke();
-  // Offset strokes are clipped to the paper, so the perforations stay open.
-  c.save(); c.clip();
-  stampOutline(c, .8, .8, w, h); c.strokeStyle = '#fffef2dc'; c.lineWidth = .85; c.stroke();
-  stampOutline(c, -.85, -.85, w, h); c.strokeStyle = owned ? '#859b797d' : next ? '#ac874c7d' : '#87a0857d'; c.lineWidth = 1; c.stroke();
-  c.restore();
+  drawStampPaper(r, rect, owned, next, held);
   r.round(6, 6, w - 12, h - 12, 2, null, owned ? '#d9dfc6' : next ? '#e2c796' : '#c9d7c6');
   r.text(String(stamp.index + 1).padStart(2, '0'), 13, 17, 9, C.muted);
   if (next) {

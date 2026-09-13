@@ -78,8 +78,8 @@ test('difficulty advice and daily contribution derive from actual mechanics and 
       if (item.id === 'echo') {
         assert.ok(level.seals.length > 0);
         assert.ok(profile.timingTargets > 0 || level.seals.length >= 4);
-        assert.match(profile.itemReason, /回声队列中的一枚/);
-        assert.match(profile.itemReason, /不能收从未经过的票/);
+        assert.match(profile.itemReason, /回声还没到时/);
+        assert.match(profile.itemReason, /未踩过的票不能选/);
       }
     } else assert.ok(level.id <= 3);
   }

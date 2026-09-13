@@ -339,8 +339,16 @@ function createPlatform(environment) {
   };
   const requestFrame = env.requestAnimationFrame || (win && win.requestAnimationFrame) || canvas.requestAnimationFrame;
   const cancelFrame = env.cancelAnimationFrame || (win && win.cancelAnimationFrame) || canvas.cancelAnimationFrame;
+  function createSurface() {
+    // The first wx canvas is the screen; later canvases are independent surfaces.
+    // Allocate only on demand, and never let a host reuse the visible canvas.
+    try {
+      const surface = api ? api.createCanvas() : doc && typeof doc.createElement === 'function' && doc.createElement('canvas');
+      return surface && surface !== canvas ? surface : null;
+    } catch (_) { return null; }
+  }
   return {
-    kind: api ? 'wechat' : 'browser', wx: api, canvas, resize, onPointer, onKey, onResize, storage, setFrameRate,
+    kind: api ? 'wechat' : 'browser', wx: api, canvas, createSurface, resize, onPointer, onKey, onResize, storage, setFrameRate,
     get reducedMotion() { return !!(reducedMotionQuery && reducedMotionQuery.matches); },
     effectsQuality: 'high',
     isDevelopment: isDevelopmentEnvironment(api, win && win.location),

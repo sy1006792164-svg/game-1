@@ -86,7 +86,8 @@ test('help explains the real item-assisted rating instead of offering a new thre
   assert.doesNotMatch(score(two + 1), /本次最高二星/);
   assert.match(score(0), /已获得的三星与更短纪录会保留/);
   const items = helpContent(level, 0, 'browser').sections.find(section => section.title === '随身道具').text;
-  assert.match(items, /横竖合计2格/);
+  assert.match(items, /直着数最多2格/);
+  assert.match(items, /拐弯数各1格/);
 });
 
 test('relighting at the exact two-star boundary still permits a zero-turn kite delivery', () => {

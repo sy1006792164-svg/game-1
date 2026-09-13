@@ -116,12 +116,12 @@ function drawItemTray(r, game, layout) {
 
 function itemAimHint(game) {
   const held = game.state.inventory && game.state.inventory[game.selectedItem] > 0;
-  if (!held && game.selectedItem === 'kite') return '点亮起的信笺，看视频获取纸鸢。\n完整观看后收取；取消不发放道具。';
-  if (!held && game.selectedItem === 'bridge') return '点亮起的断桥，看视频获取修桥包。\n完整观看后修复；取消不发放道具。';
-  if (!held && game.selectedItem === 'echo') return '点亮起的蓝票，看视频获取回声笛。\n完整观看后提前盖一票；取消不发放。';
-  if (game.selectedItem === 'kite') return '点亮起的信笺，用纸鸢取回一封。\n可越过障碍；你与回声都留在原地。';
-  if (game.selectedItem === 'bridge') return '点亮起的断桥，用修桥包修复。\n不耗拍；修好后，离开仍会塌落。';
-  if (game.selectedItem === 'echo') return '点亮起的蓝票，提前盖好其中一枚。\n只盖回声队列中的票，不移动回声。';
+  if (!held && game.selectedItem === 'kite') return '点亮起的橙色信笺，选一封取回。\n看完视频后收信；没看完不发放道具。';
+  if (!held && game.selectedItem === 'bridge') return '点身旁亮起的断桥，选一座修好。\n看完视频后修桥；没看完不发放道具。';
+  if (!held && game.selectedItem === 'echo') return '离开蓝票后也能用，点亮起的票。\n看完视频后提前盖一张，省下等待。';
+  if (game.selectedItem === 'kite') return '点亮起的橙色信笺，隔空取回一封。\n可隔墙，不收蓝票；你留在原地。';
+  if (game.selectedItem === 'bridge') return '点身旁亮起的断桥，修好其中一座。\n修桥不耗拍；走上去再离开仍会碎。';
+  if (game.selectedItem === 'echo') return '离开蓝票后也能用，点亮起的票。\n提前盖一张，省下等待；不耗拍。';
   return '';
 }
 

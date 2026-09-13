@@ -5,13 +5,13 @@ const { SUPPLY_ENERGY, plainRecord } = require('./supply-rules');
 // Only completed rewarded videos grant supplies; a new route starts empty.
 const ITEMS = Object.freeze([
   Object.freeze({ id: 'oil', name: '灯油', icon: 'oil', unlock: 4,
-    description: '原地补充 ' + SUPPLY_ENERGY + ' 拍灯火。\n不耗拍，也不会移动你与回声。', short: '灯火 +' + SUPPLY_ENERGY }),
+    description: '补充 ' + SUPPLY_ENERGY + ' 拍灯火，能再走或等 ' + SUPPLY_ENERGY + ' 次。\n灯还亮着时，点下方按钮直接补充。\n不用选格子，不移动人物，也不耗拍。', short: '灯火 +' + SUPPLY_ENERGY }),
   Object.freeze({ id: 'kite', name: '纸鸢', icon: 'kite', unlock: 7,
-    description: '取回横竖合计 2 格内的一封信。\n可隔墙，不踩桥、不收蓝票、不耗拍。', short: '隔空收信' }),
+    description: '隔空取回一封橙色信笺，省下绕路。\n直着数最多 2 格，拐弯数各 1 格。\n点亮起的信即可；隔墙也能取，不耗拍。\n只收信，不收蓝票，也不会踩桥。', short: '隔空收信' }),
   Object.freeze({ id: 'bridge', name: '修桥包', icon: 'bridge', unlock: 16,
-    description: '修复上下左右相邻的一座断纸桥。\n不耗拍；修好后再离开仍会碎。', short: '修复断桥' }),
+    description: '修好一座断纸桥，让你能再走过去。\n先走到断桥旁，上下左右紧挨一格，\n再点亮起的断桥；每次只修一座。\n修好后再离开仍会碎，修桥不耗拍。', short: '修复断桥' }),
   Object.freeze({ id: 'echo', name: '回声笛', icon: 'echo', unlock: 31,
-    description: '提前盖好未来 1—3 拍回声将经过的一枚蓝票。\n只选最近走过的落点，不耗拍。', short: '提前盖蓝票' })
+    description: '提前盖一张蓝票，省下等回声的时间。\n先踩上蓝票，在回声到来前使用。\n离开后也能用：点亮起的那张票即可。\n未踩过的票不能用；每次只盖一张。\n不耗拍、不补灯火，也不移动回声。', short: '提前盖蓝票' })
 ]);
 
 function itemDefinition(id) { return ITEMS.find(item => item.id === id); }
@@ -86,9 +86,9 @@ function itemOffer(level, state, id) {
   const targets = candidateTargets(level, state, id);
   if (!targets.length) {
     if (id === 'kite') return unavailable((state.letters || []).length ? '两格内没有待收的信' : '信笺已全部收齐');
-    if (id === 'echo') return unavailable((state.seals || []).length ? '最近三拍落点没有待盖蓝票' : '蓝票已全部盖好');
+    if (id === 'echo') return unavailable((state.seals || []).length ? '先踩蓝票，趁回声还没到时使用' : '蓝票已全部盖好');
     const torn = (level.bridges || []).some(cell => !(state.bridges || []).includes(cell));
-    return unavailable(torn ? '请先走到断桥相邻格' : '纸桥完好，无需修复');
+    return unavailable(torn ? '先走到断桥旁，上下左右紧挨一格' : '纸桥完好，无需修复');
   }
   return { eligible: true, reason: '', targets };
 }

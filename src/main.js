@@ -66,7 +66,7 @@ class Game {
       else { this.syncMusic(); this.sound.resume('ad'); }
     });
     this.musicActive = false; this.cueCount = 0;
-    this.renderer = new Renderer(platform.canvas);
+    this.renderer = new Renderer(platform.canvas, platform.createSurface);
     this.camera = new SceneCamera();
     this.cameraMovedAt = -Infinity;
     this.startupPublication = publicationLines(config.PUBLICATION_INFO);
@@ -493,8 +493,8 @@ class Game {
     const close = () => { this.modal = null; this.cancelItem(); this.syncMusic(); };
     this.modal = {
       kind: 'item', itemId: id, title: item.name,
-      lines: [item.description, needsVideo ? '完整看完视频，获得 1 份并使用。\n仅本次路线有效，重开后清空。' : '使用已领取的道具，无需再看视频。',
-        '使用不耗拍，回声保持原位；本次最多二星。\n送达计邮程，星光进入邮票册与排行。',
+      lines: [item.description, needsVideo ? '看完一段视频，可使用一次。\n重新挑战或换关后，需要重新领取。' : '你已领取，无需再看视频。',
+        '使用时不扣步数，也不会让回声前进。\n本次通关最多二星。',
         ...(!offer.eligible ? [offer.reason] : needsVideo && !canWatch ? [this.platform.kind === 'browser' ? '请在微信小游戏内观看视频获取。' : '广告暂时不可用，请稍后再试。'] :
           [id === 'oil' ? '当前 ' + state.energy + ' 拍 → 使用后 ' + (state.energy + SUPPLY_ENERGY) + ' 拍' : needsVideo ? '先选目标，再看视频；未看完不发放。' : '点棋盘上亮起的目标使用。'])],
       buttons: [

@@ -22,15 +22,15 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
     if (mechanics.length) sections.push({ title: '本关机关', icon: 'lamp', color: C.green, text: mechanics.join('\n') });
     if (level.id >= 4) sections.push({ title: '随身道具', icon: 'lamp', color: C.goldText,
       text: '灯未灭时，灯油原地补' + SUPPLY_ENERGY + '拍。' +
-        (level.id >= 7 ? '\n纸鸢取横竖合计2格内一封信，可隔墙。' : '') +
-        (level.id >= 16 ? '\n修桥包修相邻断桥，离开仍会碎。' : '') +
-        '\n道具不耗拍，也不推进回声；最高二星。\n点道具看说明，再选亮起的目标。' });
+        (level.id >= 7 ? '\n纸鸢隔空收一封信：直着数最多2格，\n或拐弯数各1格；可隔墙，不收蓝票。' : '') +
+        (level.id >= 16 ? '\n修桥包修身旁断桥，上下左右紧挨一格；\n修好后再离开仍会碎。' : '') +
+        '\n道具不耗拍，回声也不前进；最高二星。\n点道具看说明，再选亮起的目标。' });
     if (level.id >= 4) sections.push({ title: '灯油与续灯', icon: 'oil', color: C.goldText,
       text: '灯灭后已有灯油，优先用油补' + SUPPLY_ENERGY + '拍。' +
         (videoAvailable ? '\n没有灯油时，可完整看视频续灯' + SUPPLY_ENERGY + '拍。' : '\n无法续灯时，可免费重新挑战。') +
         '\n续灯消耗同一份补给，不额外送库存。\n每份只补一次，已有灯油无需另看视频。' });
     if (level.id >= 31) sections.push({ title: '回声笛 · 提前盖票', icon: 'echo', color: C.blueText,
-      text: '第31封解锁。先走过蓝票，再用回声笛。\n可提前盖好未来1至3拍将被回声盖到的一票。\n不耗拍、不加灯火、不移动人物或回声。\n未经过的蓝票不能选；每份只盖一枚。\n用后最高二星；送达照常计邮程。' });
+      text: '提前盖好一张蓝票，省下等回声的时间。\n先踩上蓝票，在回声到来前用；\n离开蓝票后也能用，点亮起的票即可。\n未踩过的票不能选；每次只盖一张。\n到了邮局只差这张票时，可直接盖好通关。\n不耗拍、不补灯火；用后最高二星。' });
     if (level.id >= 4) sections.push({ title: videoAvailable ? '按需看视频获取' : '道具获取与保留', icon: 'play', color: C.goldText,
       text: (videoAvailable ? '在微信内，自愿完整看1个视频获1份道具。\n未看完、加载失败或取消，都不会发放。' :
         '当前环境没有可用的视频补给。\n已有道具仍可使用，无道具也能通关。') +

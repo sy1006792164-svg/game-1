@@ -101,7 +101,7 @@ function difficultyProfile(level) {
   const echoFocus = id >= 31 && (timingTargets > 0 || (bridges < 3 && seals >= 4));
   const recommendedItem = id < 4 ? null : echoFocus ? 'echo' : bridges >= 3 ? 'bridge' : id >= 7 && letters >= 3 ? 'kite' : 'oil';
   const itemReason = recommendedItem === 'bridge' ? '纸桥离开即断，修桥包可补救相邻断桥。'
-    : recommendedItem === 'echo' ? '先踩过蓝票；回声笛仅能提前盖好回声队列中的一枚待收蓝票，不能收从未经过的票。'
+    : recommendedItem === 'echo' ? '先踩过蓝票，趁回声还没到时用笛提前盖好；离开后也能用，每次只盖一张，未踩过的票不能选。'
     : recommendedItem === 'kite' ? '信笺分散，纸鸢可取回两格内的信，减少折返。'
     : recommendedItem === 'oil' ? '灯油可补充 ' + SUPPLY_ENERGY + ' 拍灯火，为规划失误留出余地。' : '先掌握三拍回声，再挑战最短路线。';
   const focus = timingTargets ? '末段有蓝票需要提前经过，等回声盖好再回邮局。'

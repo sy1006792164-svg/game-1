@@ -13,6 +13,7 @@ function createOpenDataLeaderboard(api) {
   let key = DEFAULT_KEY, status = 'idle', rows = [], self = null, notice = '';
   let identity = null, refreshing = false, refreshQueued = false, updatedAt = null, hits = [], syncSnapshot = '';
   let suspended = false, cacheOnly = false, syncEnabled = true, frameTimer = null, pointer = null;
+  let lastPaintAt = -Infinity;
   let visitBaseline = null, visitSettled = false, observationOk = false, rankChange = null;
   const motion = createRankMotion();
   const history = createRankHistory(api, target => target === key && visible && !suspended && !cacheOnly && status !== 'denied');
@@ -47,7 +48,23 @@ function createOpenDataLeaderboard(api) {
     ctx.restore();
   }
 
+  function queuePaint() {
+    if (!visible || suspended || frameTimer !== null) return;
+    const delay = Math.max(1, 16 - (Date.now() - lastPaintAt));
+    frameTimer = setTimeout(() => { frameTimer = null; paint(); }, delay);
+    if (frameTimer !== null && typeof frameTimer.unref === 'function') frameTimer.unref();
+  }
+  function requestPaint() {
+    if (!visible || suspended) return;
+    if (Date.now() - lastPaintAt >= 16) paint();
+    else queuePaint();
+  }
   function paint() {
+    // An immediate data/permission update also satisfies the pending input frame.
+    // Keep only one owner of the next draw, including during an inertial scroll.
+    if (frameTimer !== null) clearTimeout(frameTimer);
+    frameTimer = null;
+    lastPaintAt = Date.now();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     hits = [];
@@ -57,14 +74,12 @@ function createOpenDataLeaderboard(api) {
     const frame = motion.frame(Date.now());
     hits = paintLeaderboard(ctx, { width, height, status, rows, self, notice, sync: hostedSync.getState(), updatedAt, refreshing,
       scrollOffset: frame.scrollOffset, rankChange, rankMotion: frame.rankMotion && { ...frame.rankMotion, active: true } }, avatar) || [];
-    if (frame.active && !frameTimer) {
-      frameTimer = setTimeout(() => { frameTimer = null; paint(); }, 16);
-      if (frameTimer && typeof frameTimer.unref === 'function') frameTimer.unref();
-    }
-    else if (!frame.active && frameTimer) { clearTimeout(frameTimer); frameTimer = null; }
+    // A captured finger changes the surface only when it moves. Repainting for
+    // both touch events and a timer doubled the draw rate and spun while held.
+    if (frame.active && (!pointer || frame.rankMotion)) queuePaint();
   }
   function cancelMotion() {
-    if (frameTimer) clearTimeout(frameTimer); frameTimer = null; pointer = null; motion.cancel(Date.now());
+    if (frameTimer !== null) clearTimeout(frameTimer); frameTimer = null; pointer = null; motion.cancel(Date.now());
   }
   function enter() {
     cancelMotion(); motion.enter(Date.now());
@@ -215,7 +230,7 @@ function createOpenDataLeaderboard(api) {
         if (phase === 'cancel') motion.cancel(now);
       }
     } else if (phase === 'cancel') motion.cancel(now, false);
-    paint();
+    requestPaint();
   }
   api.onMessage(function (message) {
     if (!message || message.channel !== CHANNEL) return;
@@ -244,9 +259,9 @@ function createOpenDataLeaderboard(api) {
     else if (message.action === 'hide') { visible = false; stop(); cancelMotion(); history.pause(); paint(); }
     else if (message.action === 'suspend') { suspended = true; stop(); cancelMotion(); history.pause(); hostedSync.pause(); }
     else if (message.action === 'pointer' && visible && !suspended) gesture(message);
-    else if (message.action === 'wheel' && visible && !suspended && Number.isFinite(message.delta)) { pointer = null; motion.wheel(message.delta, Date.now()); paint(); }
+    else if (message.action === 'wheel' && visible && !suspended && Number.isFinite(message.delta)) { pointer = null; motion.wheel(message.delta, Date.now()); requestPaint(); }
     else if (message.action === 'scroll' && visible && !suspended && ['start', 'end'].includes(message.edge)) {
-      pointer = null; motion.wheel(message.edge === 'end' ? rows.length * leaderboardLayout(width, height).stride : -1e8, Date.now()); paint();
+      pointer = null; motion.wheel(message.edge === 'end' ? rows.length * leaderboardLayout(width, height).stride : -1e8, Date.now()); requestPaint();
     }
     else if (message.action === 'tap' && visible && !suspended && Number.isFinite(message.x) && Number.isFinite(message.y)) tap(message.x, message.y);
     else if (message.action === 'close') {

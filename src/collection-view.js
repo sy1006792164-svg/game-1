@@ -137,11 +137,14 @@ function drawCollection(r, game) {
   } else r.text('轻触邮票 · 读纪念短笺', 365, 287, 10, C.muted, 'right');
   const c = r.ctx;
   c.save(); c.beginPath(); c.rect(viewport.x, viewport.y, viewport.w, viewport.h); c.clip();
-  stamps.forEach((stamp, index) => {
+  const first = Math.max(0, Math.floor((scroll.offset - 6) / 160)) * 3;
+  const end = Math.min(stamps.length, (Math.floor((scroll.offset + viewport.h - 6) / 160) + 1) * 3);
+  for (let index = first; index < end; index++) {
+    const stamp = stamps[index];
     const row = Math.floor(index / 3), count = Math.min(3, stamps.length - row * 3);
     const rect = { x: (390 - (count * 106 + (count - 1) * 12)) / 2 + index % 3 * 118, y: viewport.y + 6 + row * 160 - scroll.offset, w: 106, h: 144 };
     if (rect.y + rect.h > viewport.y && rect.y < viewport.y + viewport.h) drawStamp(r, game, stamp, rect, viewport, now);
-  });
+  }
   if (stamps.length) r.text('每一次抵达，都成为珍藏。', 195, viewport.y + contentHeight - 17 - scroll.offset, 11, C.muted, 'center');
   else drawEmpty(r, game, viewport);
   c.restore();

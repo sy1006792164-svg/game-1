@@ -58,7 +58,7 @@ function preparationAdvice(level) {
   if (!itemId) return result(null, profile.focus || '先掌握三拍回声，把收信与盖票串成一路。');
   if (itemId === 'bridge') return result(itemId, '先安排过桥顺序；走到断桥旁时，修桥包可修复一座。');
   if (itemId === 'kite') return result(itemId, '信笺分散；靠近两格内时，纸鸢可取一封，蓝票仍靠回声。');
-  if (itemId === 'echo') return result(itemId, '先踩过蓝票；回声笛仅能提前盖回声队列中的一枚待收蓝票，不能收从未经过的票，也不补灯火。');
+  if (itemId === 'echo') return result(itemId, '先踩过蓝票，趁回声还没到时用笛提前盖好；离开后也能用，每次只盖一张。未踩过的票不能选，也不补灯火。');
   const reserve = profile.reserve;
   const context = reserve === 0 ? '本关灯火零余量；' : Number.isFinite(reserve) && reserve <= 2 ? '本关灯火余量' + reserve + '拍；' : '';
   return result(itemId, context + '灯油可补' + SUPPLY_ENERGY + '拍，仍需安排剩余路线。');
@@ -89,10 +89,10 @@ function supplyAdvice(level, state) {
     if (waiting >= 2 && offers.echo.targets.includes(seal)) {
       const twoStarLimit = Math.max(1, level.par || level.budget) + STAR_TWO_MARGIN;
       if (state.energy < waiting) {
-        return result('echo', '已在邮局，只差队列中一枚蓝票；正常还需等' + waiting + '拍，灯火不足。回声笛可提前盖这一枚，不补灯火，使用后最多二星。');
+        return result('echo', '已在邮局，只差刚踩过的一张蓝票；正常还需等' + waiting + '拍，灯火不足。回声笛可提前盖这一张，不补灯火，使用后最多二星。');
       }
       if ((state.itemsUsed > 0 || state.revived) && state.turn <= twoStarLimit && state.turn + waiting > twoStarLimit) {
-        return result('echo', '已在邮局，只差队列中一枚蓝票；再等' + waiting + '拍会超出二星步数。回声笛可提前盖这一枚，使用后最多二星。');
+        return result('echo', '已在邮局，只差刚踩过的一张蓝票；再等' + waiting + '拍会超出二星步数。回声笛可提前盖这一张，使用后最多二星。');
       }
       // There is no light shortfall or demonstrated rating rescue for an assisted run.
       return null;

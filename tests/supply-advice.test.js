@@ -105,7 +105,7 @@ test('echo advice saves a final queued stamp only when waiting would exhaust the
   assert.equal(itemOffer(level, state, advice.itemId).eligible, true);
   assert.match(advice.reason, /正常还需等2拍/);
   assert.match(advice.reason, /灯火不足/);
-  assert.match(advice.reason, /这一枚/);
+  assert.match(advice.reason, /这一张/);
   assert.match(advice.reason, /不补灯火/);
   assert.match(advice.reason, /最多二星/);
   assert.equal(JSON.stringify(state), before);
@@ -194,8 +194,8 @@ test('echo preparation connects timing-heavy routes to a single previously visit
   const advice = preparationAdvice(level);
   assert.equal(advice.itemId, 'echo');
   assert.match(advice.reason, /先踩过蓝票/);
-  assert.match(advice.reason, /回声队列中的一枚待收蓝票/);
-  assert.match(advice.reason, /不能收从未经过的票/);
+  assert.match(advice.reason, /回声还没到时/);
+  assert.match(advice.reason, /未踩过的票不能选/);
   assert.match(advice.reason, /不补灯火/);
   assert.equal(preparationAdvice({ ...level, id: 30 }).itemId, 'oil');
   assert.equal(preparationAdvice({ ...level, seals: [] }).itemId, 'oil');

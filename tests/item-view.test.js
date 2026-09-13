@@ -131,7 +131,7 @@ test('aim mode replaces waiting with cancellation and keeps its two-line hint st
   game.selectedItem = 'kite';
   game.state.inventory.kite = 1;
   drawGame(r, game, 1000);
-  assert.ok(texts.some(text => text.value.includes('你与回声都留在原地')));
+  assert.ok(texts.some(text => text.value.includes('你留在原地')));
   assert.equal(buttons.some(button => button.label === '等一拍'), false);
   assert.equal(buttons.find(button => button.label.startsWith('撤回')).style.disabled, true);
   buttons.find(button => button.label === '取消选取').action();

@@ -21,7 +21,9 @@ function browserAudit(Game, levels, helpers) {
     ['guide', '首次操作引导'], ['low-light', '最后三拍'], ['fail', '灯灭后的重试'], ['help', '当前路线说明'],
     ['pause', '对局暂停'], ['stamp', '已收藏邮票详情'], ['next-stamp', '下一枚邮票详情'],
     ['win', '送达结算'], ['save-warning', '通关保存失败'],
-    ['echo-ready', '回声笛 · 第53关末段补救'], ['echo-target', '回声笛 · 选取蓝票'], ['echo-finish', '回声笛 · 二星送达']
+    ['echo-ready', '回声笛 · 第53关末段补救'], ['echo-target', '回声笛 · 选取蓝票'], ['echo-finish', '回声笛 · 二星送达'],
+    ['item-oil', '灯油 · 使用说明'], ['item-kite', '纸鸢 · 使用说明'],
+    ['item-bridge', '修桥包 · 使用说明'], ['item-echo', '回声笛 · 使用说明']
   ];
   const baseTime = 10000, noop = () => {};
   let game = null, now = baseTime, sampleAge = 900, metrics, playing = false, playbackAt = 0, frameId = null, interactionAt = null;
@@ -49,7 +51,7 @@ function browserAudit(Game, levels, helpers) {
     document.documentElement.dataset.auditAge = String(Math.round(age));
   }
   function prepare() {
-    if (game) { game.ads.destroy(); game.sound.release(); game.friendLeaderboard.close(); }
+    if (game) { game.ads.destroy(); game.sound.release(); game.friendLeaderboard.close(); game.renderer.clearCaches(); }
     const small = screenInput.value === 'small', data = new Map();
     metrics = small ? { width: 320, height: 568, pixelRatio: 1, safeTop: 20, safeBottom: 0 } :
       { width: 390, height: 844, pixelRatio: 1, safeTop: 50, safeBottom: 34 };
@@ -82,7 +84,22 @@ function browserAudit(Game, levels, helpers) {
     game.renderer.draw(game, now, metrics);
     now = baseTime;
     const scene = sceneInput.value;
-    if (scene.startsWith('echo-')) {
+    if (scene.startsWith('item-')) {
+      const id = scene.slice(5), level = levels[52];
+      for (const earlier of levels.slice(14, 52)) game.store.recordWin(earlier.id, 3, earlier.par);
+      game.start(level); game.guideEnabled = false; game.mechanicGuide = null; game.camera.reset();
+      // Legal route states and memory-only completed rewards exercise the actual dialog.
+      game.itemRewards = { oil: 1, kite: 1, bridge: 1, echo: 1 };
+      game.state = helpers.replay(level, [], [], game.itemRewards);
+      for (const action of level.solution) {
+        if (helpers.itemOffer(level, game.state, id).eligible) break;
+        const result = helpers.step(level, game.state, action);
+        if (!result.moved || result.state.status !== 'playing') break;
+        game.state = result.state; game.actions.push(action);
+      }
+      game.transitionAt = baseTime - 2000; game.previousState = null; game.moveEvents = [];
+      game.selectItem(id);
+    } else if (scene.startsWith('echo-')) {
       const level = levels[52];
       for (const earlier of levels.slice(14, 52)) game.store.recordWin(earlier.id, 3, earlier.par);
       game.start(level); game.guideEnabled = false; game.mechanicGuide = null; game.camera.reset();
@@ -261,7 +278,7 @@ function bundle() {
     if (id === 'src/main.js') {
       assert.ok(source.includes('new Game(createPlatform());'));
       source = source.replace('new Game(createPlatform());', '(' + browserAudit.toString() +
-        ')(Game, CAMPAIGN, { step, replay, openStampDetail: require("./stamp-detail-view").openStampDetail, resultDelay: require("./feedback-timing").RESULT_DELAY_MS });');
+        ')(Game, CAMPAIGN, { step, replay, itemOffer, openStampDetail: require("./stamp-detail-view").openStampDetail, resultDelay: require("./feedback-timing").RESULT_DELAY_MS });');
     }
     source = source.replace(/require\(['"](\.[^'"]+)['"]\)/g, (_, relative) => {
       const dependency = path.resolve(path.dirname(filename), relative + (path.extname(relative) ? '' : '.js'));
@@ -317,7 +334,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(output, 'experience-preview.html'), html);
   fs.writeFileSync(path.join(output, 'experience-preview.js'), source);
   console.log('Experience QA: http://127.0.0.1:8765/work/experience-preview.html');
-  console.log('19 real page/modal specimens, 2 screen sizes, 4 entry samples; legal result from level ' + result.levelId + ' in ' + result.turns + ' turns.');
+  console.log('23 real page/modal specimens, 2 screen sizes, 4 entry samples; legal result from level ' + result.levelId + ' in ' + result.turns + ' turns.');
 }
 
 module.exports = { bundle, verifyResultSample };

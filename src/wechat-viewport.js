@@ -9,11 +9,23 @@ function getWindowInfo(api) {
   const valid = value => Number.isFinite(value) && value > 0;
   if (fields.every(key => valid(info[key]))) return info;
   let legacy = {};
-  try { legacy = api.getSystemInfoSync() || {}; } catch (_) { /* Use the available window fields. */ }
-  const merged = Object.assign({}, legacy, info);
-  // A partially supported window API must not turn a real high-DPI device
-  // into the default 1x canvas. Preserve current fields over legacy values.
-  fields.forEach(key => { if (!valid(merged[key]) && valid(legacy[key])) merged[key] = legacy[key]; });
+  try {
+    if (typeof api.getSystemInfoSync === 'function') legacy = api.getSystemInfoSync() || {};
+  } catch (_) { /* Use the available window fields. */ }
+  const merged = {};
+  // Recent SDKs expose lazy getters on the legacy system-info object. Copying
+  // the entire object also invokes unrelated orientation/authorization APIs.
+  // Recover only missing layout fields, without touching those native getters.
+  fields.concat(['screenTop', 'statusBarHeight', 'safeArea']).forEach(key => {
+    let current, fallback;
+    try { current = info[key]; } catch (_) { /* Recover this one field below. */ }
+    const missing = fields.includes(key) ? !valid(current) : current == null;
+    if (missing) {
+      try { fallback = legacy[key]; } catch (_) { /* An optional layout field may be unavailable. */ }
+    }
+    if (missing && fallback != null && (!fields.includes(key) || valid(fallback))) merged[key] = fallback;
+    else if (current !== undefined) merged[key] = current;
+  });
   return merged;
 }
 

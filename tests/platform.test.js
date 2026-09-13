@@ -29,6 +29,44 @@ function browser(reducedMotion = false) {
   return { canvas, doc, win, saved, rect, motion, platform: createPlatform({ window: win, document: doc }) };
 }
 
+test('render surfaces are allocated only on demand and are independent from the screen', () => {
+  const canvases = [];
+  const wx = { createCanvas() { assert.equal(this, wx); const canvas = {}; canvases.push(canvas); return canvas; } };
+  const native = createPlatform({ wx });
+  assert.equal(canvases.length, 1);
+  const nativeSurface = native.createSurface();
+  assert.equal(canvases.length, 2);
+  assert.equal(nativeSurface, canvases[1]);
+  assert.equal(native.canvas, canvases[0]);
+
+  const browserHost = browser();
+  const surfaces = [];
+  browserHost.doc.createElement = function (tag) {
+    assert.equal(this, browserHost.doc); assert.equal(tag, 'canvas');
+    const surface = {}; surfaces.push(surface); return surface;
+  };
+  assert.equal(surfaces.length, 0);
+  assert.equal(browserHost.platform.createSurface(), surfaces[0]);
+  assert.equal(surfaces.length, 1);
+  assert.notEqual(surfaces[0], browserHost.canvas);
+});
+
+test('render surface failures and hosts returning the screen use the renderer fallback', () => {
+  const h = browser();
+  assert.equal(h.platform.createSurface(), null, 'a browser host without createElement remains usable');
+  h.doc.createElement = () => h.canvas;
+  assert.equal(h.platform.createSurface(), null);
+  h.doc.createElement = () => { throw new Error('out of memory'); };
+  assert.equal(h.platform.createSurface(), null);
+  const canvas = {}, wx = { createCanvas: () => canvas };
+  const native = createPlatform({ wx });
+  assert.equal(native.createSurface(), null, 'a reused screen is never resized as a cache');
+  wx.createCanvas = () => null;
+  assert.equal(native.createSurface(), null);
+  wx.createCanvas = () => { throw new Error('canvas unavailable'); };
+  assert.equal(native.createSurface(), null);
+});
+
 test('Tab navigates canvas controls without trapping focus or taking over other page elements', () => {
   const { platform, canvas, win } = browser();
   const keys = []; let handled = true, prevented = 0;

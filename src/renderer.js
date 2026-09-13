@@ -22,6 +22,7 @@ const { chapterMood } = require('./chapter-atmosphere');
 const { AmbientClock } = require('./ambient-clock');
 const { pageFrame } = require('./ui-motion');
 const { drawKeyboardFocus } = require('./keyboard-focus');
+const { clearStampPaperCache } = require('./stamp-paper');
 const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑': 'arrow-up', '↓': 'arrow-down', '↗': 'arrow-ne', '↘': 'arrow-se', '↙': 'arrow-sw', '↖': 'arrow-nw', '✓': 'check' });
 const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2, ne: -Math.PI / 4, se: Math.PI / 4, sw: Math.PI * .75, nw: -Math.PI * .75 });
 
@@ -43,14 +44,18 @@ function ambientRect(page, viewport) {
 }
 
 class Renderer {
-  constructor(canvas) {
+  constructor(canvas, createSurface) {
     this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.hits = []; this.scale = 1;
+    this.createSurface = createSurface || (canvas.ownerDocument && (() => canvas.ownerDocument.createElement('canvas')));
+    this.pixelRatio = 1;
     this.ox = 0; this.oy = 0; this.H = 844; this.safeBottom = 0; this.ambientFreezeAt = null;
     this.ambientClock = new AmbientClock();
   }
   pauseAmbient(now) { this.ambientClock.sample(now, true); }
   clearCaches() {
     if (this.wrapCache) this.wrapCache.clear();
+    if (this.labelCache) this.labelCache.clear();
+    clearStampPaperCache(this);
     this.boardGeometry = null; this.motionEffects = null; this.routePreview = null;
     this.uiFeedback = null;
     this.hits = []; this.boardProjection = null; this.boardRect = null; this.collectionRect = null; this.levelRect = null;
@@ -81,11 +86,21 @@ class Renderer {
   label(text, x, y, width, size, color, align, weight) {
     const c = this.ctx; let value = String(text);
     this.font(size, weight);
-    if (c.measureText(value).width > width) {
-      const chars = Array.from(value);
-      while (chars.length && c.measureText(chars.join('') + '…').width > width) chars.pop();
-      value = chars.length ? chars.join('') + '…' : '';
+    const key = c.font + '|' + width + '|' + value;
+    const cache = this.labelCache || (this.labelCache = new Map());
+    if (cache.has(key)) {
+      value = cache.get(key);
+      // Keep the visible rows hot while old chapters leave the bounded cache.
+      cache.delete(key);
+    } else {
+      if (c.measureText(value).width > width) {
+        const chars = Array.from(value);
+        while (chars.length && c.measureText(chars.join('') + '…').width > width) chars.pop();
+        value = chars.length ? chars.join('') + '…' : '';
+      }
+      if (cache.size >= 512) cache.delete(cache.keys().next().value);
     }
+    cache.set(key, value);
     this.text(value, x, y, size, color, align, weight);
   }
   panel(x, y, w, h, options) {
@@ -132,7 +147,7 @@ class Renderer {
       }
       lines.push(line);
     }
-    if (cache.size >= 256) cache.clear();
+    if (cache.size >= 256) cache.delete(cache.keys().next().value);
     cache.set(key, lines);
     return lines.slice();
   }
@@ -204,6 +219,7 @@ class Renderer {
   }
   draw(game, now, metrics) {
     const c = this.ctx; const ratio = metrics.pixelRatio || 1;
+    this.pixelRatio = ratio;
     const safeTop = metrics.safeTop || 0, safeBottom = metrics.safeBottom || 0;
     this.safeBottom = safeBottom;
     const available = metrics.height - safeTop - safeBottom;

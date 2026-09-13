@@ -94,8 +94,9 @@ test('late timed-out callbacks repair their original key without changing the vi
 
 function drawing() {
   const labels = [], positions = [], requests = { friends: [], mine: [], identity: [], writes: [] };
+  let paints = 0;
   const ctx = new Proxy({
-    clearRect: () => { labels.length = 0; positions.length = 0; },
+    clearRect: () => { paints++; labels.length = 0; positions.length = 0; },
     fillText: (value, x, y) => { labels.push(String(value)); positions.push({ value: String(value), x, y }); },
     measureText: value => ({ width: Array.from(String(value)).length * 8 }) },
     { get: (target, name) => target[name] || (() => {}) });
@@ -115,6 +116,7 @@ function drawing() {
     requests.friends[index].success({ data: peers.map((name, i) => ({ openid: 'peer-' + i, nickname: name, KVDataList: kv(score(), key) })) });
   };
   return { send, labels, positions, requests, resolve, tap,
+    paints: () => paints,
     scoreWrites: () => requests.writes.filter(request => request.KVDataList.some(item => item.key === KEY)) };
 }
 
@@ -254,6 +256,7 @@ test('canvas gestures and wheel scroll continuously while invalid input and obso
     assert.ok(h.labels.includes('甲')); assert.equal(h.labels.includes('癸'), false);
     h.send({ action: 'pointer', phase: 'start', x: 100, y: 330 }); advance(t, 30);
     h.send({ action: 'pointer', phase: 'move', x: 100, y: 260 });
+    advance(t, 16);
     assert.equal(h.labels.includes('甲'), false, 'dragging changes visible rows before release');
     h.send({ action: 'pointer', phase: 'end', x: 100, y: 260 }); advance(t);
     h.send({ action: 'scroll', edge: 'start' }); advance(t);
@@ -270,6 +273,56 @@ test('canvas gestures and wheel scroll continuously while invalid input and obso
     assert.equal(h.labels.some(label => ['上一页', '下一页', '刷新成绩'].includes(label)), false);
     assert.equal(h.requests.friends.length, 1, 'scrolling and obsolete controls never refetch the list');
   } finally { h.send({ action: 'close' }); }
+});
+
+test('touch frames are coalesced, a held finger stays idle and release retains inertia', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const h = drawing();
+  try {
+    h.send({ action: 'open', width: 354, height: 400 });
+    h.resolve(0, Array.from({ length: 200 }, (_, i) => '好友' + String(i).padStart(3, '0')));
+    advance(t, 32);
+    const start = h.paints();
+    h.send({ action: 'pointer', phase: 'start', x: 100, y: 330 });
+    for (let i = 1; i <= 20; i++) h.send({ action: 'pointer', phase: 'move', x: 100, y: 330 - i });
+    assert.equal(h.paints() - start, 1, 'a burst of touch updates shares the next paint');
+    advance(t, 16);
+    assert.equal(h.paints() - start, 2, 'the queued frame draws the latest finger position');
+    const held = h.paints(); advance(t, 5000);
+    assert.equal(h.paints(), held, 'a stationary finger needs no repeating frame timer');
+
+    const moving = h.paints();
+    for (let i = 1; i <= 60; i++) {
+      advance(t, 16);
+      h.send({ action: 'pointer', phase: 'move', x: 100, y: 310 - i * 2 });
+    }
+    assert.ok(h.paints() - moving <= 61, '60 move events must not also produce 60 timer frames');
+    const beforeRelease = h.positions.map(point => ({ ...point }));
+    h.send({ action: 'pointer', phase: 'end', x: 100, y: 190 }); advance(t, 200);
+    assert.notDeepEqual(h.positions, beforeRelease, 'inertial movement continues after release');
+    advance(t, 5000);
+    const settled = h.paints(); advance(t, 1000);
+    assert.equal(h.paints(), settled, 'the timer stops when inertia settles');
+  } finally { h.send({ action: 'close' }); }
+});
+
+test('queued touch frames cannot survive hide, suspension, close or permission rejection', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  for (const action of ['hide', 'suspend', 'close', 'denied']) {
+    const h = drawing();
+    try {
+      h.send({ action: 'open', width: 354, height: 400 }); h.resolve(0, ['甲', '乙', '丙', '丁', '戊']);
+      h.send({ action: 'pointer', phase: 'start', x: 100, y: 330 });
+      h.send({ action: 'pointer', phase: 'move', x: 100, y: 260 });
+      if (action === 'denied') {
+        h.send({ action: 'refresh' });
+        h.requests.friends[1].fail({ errMsg: 'auth deny' });
+        assert.equal(h.labels.includes('甲'), false, 'permission rejection removes people immediately');
+      } else h.send({ action });
+      const paints = h.paints(); advance(t, 1000);
+      assert.equal(h.paints(), paints, action + ' cancels the pending draw');
+    } finally { h.send({ action: 'close' }); }
+  }
 });
 
 test('automatic entry uses the real tied row and removed location controls cannot jump the list', t => {
