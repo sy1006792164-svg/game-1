@@ -19,11 +19,9 @@ function startupLayout(height) {
 }
 
 function drawBrand(r, top) {
-  r.line([[128, top + 22], [151, top + 22]], '#90ac99', .8);
-  r.text('风 起 · 信 至', 195, top + 22, 10, C.green, 'center');
-  r.line([[239, top + 22], [262, top + 22]], '#90ac99', .8);
+  r.text('一封信，一段小小的旅程', 195, top + 22, 13, C.green, 'center');
   drawTitle(r, 195, top + 62, 36, 48);
-  r.text('一封信，一段与回声同行的邮路。', 195, top + 100, 12, C.muted, 'center');
+  r.text('和三拍后的自己，一起送信。', 195, top + 100, 14, C.muted, 'center');
 }
 
 function drawLoading(r, game, y, now) {
@@ -44,7 +42,7 @@ function drawLoading(r, game, y, now) {
     r.round(42 - 36 + (width + 36) * sweep, y + 27, 36, 8, 4, '#e4f5d85c');
     r.ctx.restore();
   }
-  r.text('加载完成后自动进入', 195, y + 52, 11, C.muted, 'center');
+  r.text('加载完成后自动进入', 195, y + 52, 12, C.muted, 'center');
 }
 
 function drawStartup(r, game, now) {
@@ -57,9 +55,9 @@ function drawStartup(r, game, now) {
   const hero = { x: 13, y: ui.heroY, w: 364, h: ui.heroH };
   drawVignette(r, sceneNow, hero, { reducedMotion: quietMotion, mood });
   drawStartupJourney(r, game.startup && game.startup.progress, hero, sceneNow, { reducedMotion: quietMotion });
-  r.panel(24, ui.adviceY, 342, ui.adviceH, { fill: C.raised, stroke: C.line, flat: true });
-  r.text(HEALTH_ADVICE_TITLE, 195, ui.adviceY + 27, 16, C.ink, 'center', '600');
-  HEALTH_ADVICE_LINES.forEach((text, index) => r.text(text, 195, ui.adviceY + 61 + index * 23, 15, C.ink, 'center'));
+  r.panel(24, ui.adviceY, 342, ui.adviceH, { fill: C.panel, radius: 18, flat: true });
+  r.text(HEALTH_ADVICE_TITLE, 44, ui.adviceY + 27, 15, C.green, 'left', '600');
+  HEALTH_ADVICE_LINES.forEach((text, index) => r.text(text, 44, ui.adviceY + 61 + index * 23, 15, C.muted));
   drawLoading(r, game, ui.loadingY, now);
 }
 

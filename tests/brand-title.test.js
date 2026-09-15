@@ -12,8 +12,9 @@ const { CAMPAIGN } = require('../src/levels');
 
 // Deliberately expose only baseline Canvas geometry. Font, text, image, transforms and Path2D
 // access fails instead of being silently accepted by the broader renderer mocks.
-function outlineCanvas() {
+function outlineCanvas({ allowClip = false } = {}) {
   const fills = [], stack = [];
+  let clips = 0;
   let state = { sx: 2, sy: 2, x: 17, y: 23, fillStyle: '#123456' };
   let points = [], closed = 0;
   const initial = { ...state };
@@ -34,6 +35,10 @@ function outlineCanvas() {
       fills.push({ points: points.slice(), closed, color: state.fillStyle });
     },
   };
+  if (allowClip) methods.clip = () => {
+    assert.ok(stack.length > 0, 'page artwork clipping is isolated inside a saved state');
+    clips++;
+  };
   const ctx = new Proxy({}, {
     get(_, key) {
       if (key === 'fillStyle') return state.fillStyle;
@@ -45,7 +50,7 @@ function outlineCanvas() {
       state.fillStyle = value; return true;
     },
   });
-  return { ctx, fills, initial, state: () => state, depth: () => stack.length };
+  return { ctx, fills, initial, state: () => state, depth: () => stack.length, clips: () => clips };
 }
 
 function assertTitleGeometry(record, y, size, spacing, color = C.ink) {
@@ -69,7 +74,7 @@ function assertTitleGeometry(record, y, size, spacing, color = C.ink) {
 }
 
 test('title outlines render at startup and home sizes without any device font or optional Canvas API', () => {
-  for (const [size, spacing] of [[36, 48], [39, 50]]) {
+  for (const [size, spacing] of [[36, 48], [39, 50], [44, 56]]) {
     for (const color of [undefined, '#456789']) {
       const record = outlineCanvas();
       drawTitle({ ctx: record.ctx }, 195, 76, size, spacing, color);
@@ -88,7 +93,7 @@ function loadView(filename) {
   return module.exports;
 }
 
-test('both real page views draw the four outlined title characters at their existing layout positions', () => {
+test('real page views retain four outlined characters at their responsive title positions', () => {
   const { drawHome } = loadView('home-view.js');
   const { drawStartup } = loadView('startup-view.js');
   const game = {
@@ -97,17 +102,18 @@ test('both real page views draw the four outlined title characters at their exis
   };
   for (const height of [680, 844, 1000]) {
     for (const [draw, size, spacing, y] of [
-      [drawHome, 39, 50, Math.max(0, (height - 844) / 2) + 76],
+      [drawHome, 44, 56, Math.max(0, (height - 844) * .2) + 78],
       [drawStartup, 36, 48, (height - Math.min(height, 840)) / 2 + 62],
     ]) {
-      const record = outlineCanvas(), text = [];
+      const record = outlineCanvas({ allowClip: true }), text = [];
       const renderer = {
         ctx: record.ctx, H: height, reducedMotion: true, line() {}, panel() {}, round() {}, label() {}, button() {},
         text(value) { text.push(value); },
       };
       draw(renderer, game, 1000);
       assertTitleGeometry(record, y, size, spacing);
-      assert.ok(text.includes('风 起 · 信 至'), 'ordinary labels remain text');
+      assert.equal(record.clips(), draw === drawHome ? 1 : 0, 'only the home illustration needs a clipping boundary');
+      assert.ok(text.includes(draw === drawHome ? '风 起 · 信 至' : '一封信，一段小小的旅程'), 'ordinary labels remain text');
       assert.equal(text.some(value => /^(风|笺|回|廊|风笺回廊)$/.test(value)), false, 'the page must not replace its outlined title with system text');
     }
   }

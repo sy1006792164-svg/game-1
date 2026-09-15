@@ -8,11 +8,11 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
   const videoAvailable = platformKind === 'wechat' && options.canRevive === true;
   const sections = [
     { title: '移动与等待', icon: 'arrow-right', color: C.green,
-      text: '轻点相邻亮格移动；点脚下格或「等一拍」等待。\n长按亮格或等待按钮，预览这一步；松手取消。\n预览不耗拍，再轻点一次才行动。\n移动和等待消耗 1 拍，思考时不扣拍。\n撤回会退回上一步，灯灭后仍可撤回。' },
+      text: '轻点相邻亮格移动；点脚下格或「等一拍」等待。\n每次行动消耗 1 拍，思考时不扣拍。\n长按亮格或等待按钮可免费预览，松手取消，再轻点才行动。\n点「撤回」退回上一步，灯灭后仍可撤回。' },
     { title: '你收信，回声收票', icon: 'echo', color: C.blueText,
-      text: '你收橙色信笺，回声收蓝色邮票。\n停在蓝票格后，再移动或等待 3 次，\n回声就会到那里收票。' },
+      text: '你收橙色信笺，回声收蓝色邮票。\n先踩上蓝票格，再移动或等待 3 次，回声就会到那里收票。' },
     { title: '提前看见三拍回声', icon: 'echo', color: C.blueText,
-      text: '棋盘上的 1、2、3 是回声未来三拍的落点。\n同格等候会合并编号；青色标记表示将盖好蓝票。\n上方三个圆点对应三拍，有邮票图标时将盖票。\n使用道具不会推进回声。' },
+      text: '棋盘上的 1、2、3 标出回声未来三拍的落点，同格等候时合并编号。\n青色标记和上方的邮票图标，表示这一拍会盖票。\n使用道具不会推进回声。' },
     { title: '收齐后，抵达邮局', icon: 'home', color: C.green,
       text: '信笺、邮票全收齐，抵达邮局即通关。' }
   ];
@@ -64,20 +64,22 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
 function layoutHelp(r, sections, width) {
   let height = 0;
   const blocks = sections.map(section => {
+    const titleLines = r.wrapLines(section.title, width - 30, 15, '600');
     const lines = r.wrapLines(section.text, width, 14);
-    const block = { ...section, lines, y: height };
-    height += 22 + lines.length * 22 + 14;
+    const headingHeight = titleLines.length * 22;
+    const block = { ...section, titleLines, headingHeight, lines, y: height };
+    height += headingHeight + lines.length * 22 + 18;
     return block;
   });
-  return { blocks, height: Math.max(0, height - 14) };
+  return { blocks, height: Math.max(0, height - 18) };
 }
 
 function drawHelp(r, layout, x, y) {
   layout.blocks.forEach(block => {
     const top = y + block.y;
-    r.icon(block.icon, x + 8, top + 9, 16, block.color);
-    r.text(block.title, x + 23, top + 9, 16, C.ink, 'left', '600');
-    block.lines.forEach((line, i) => r.text(line, x, top + 33 + i * 22, 14, C.muted));
+    r.icon(block.icon, x + 11, top + 9, 15, block.color);
+    block.titleLines.forEach((line, index) => r.text(line, x + 30, top + 9 + index * 22, 15, C.ink, 'left', '600'));
+    block.lines.forEach((line, i) => r.text(line, x, top + block.headingHeight + 11 + i * 22, 14, C.muted));
   });
 }
 

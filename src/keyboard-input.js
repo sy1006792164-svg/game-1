@@ -46,7 +46,7 @@ function handleGameKey(game, key) {
       activateModalButton(game, { action: delivery.skip });
       return true;
     }
-    if (key === 'Enter' && ['help', 'pause', 'win', 'fail', 'reset-confirm', 'journey', 'route-plan'].includes(game.modal.kind)) {
+    if (key === 'Enter' && ['help', 'pause', 'win', 'fail', 'reset-confirm', 'restart-confirm', 'journey', 'route-plan'].includes(game.modal.kind)) {
       // Result actions become available after the final move is presented.
       // Use the actual painted control so reduced motion and restored results
       // keep exactly the same activation timing as pointer input.
@@ -67,7 +67,7 @@ function handleGameKey(game, key) {
       }
     }
     if (key === 'Escape') {
-      if (game.modal.kind === 'journey' || game.modal.kind === 'route-plan') {
+      if (['journey', 'route-plan', 'restart-confirm'].includes(game.modal.kind)) {
         activateModalButton(game, buttons[buttons.length - 1]);
       } else if (game.modal.kind === 'help') {
         activateModalButton(game, buttons[0]);

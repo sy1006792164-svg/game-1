@@ -15,10 +15,11 @@ const { difficultyProfile } = require('./difficulty');
 const { ECHO_TIMELINE_HEIGHT, drawEchoTimeline } = require('./echo-timeline');
 const { drawStageNotice } = require('./scene-effects');
 const { previewMessage } = require('./action-preview');
+const { GAME_LAYOUT } = require('./game-layout');
 
 // One- and two-line play hints share one slot, avoiding small board jumps as
 // the contextual copy changes between turns.
-const PLAY_HINT_HEIGHT = 50;
+const PLAY_HINT_HEIGHT = GAME_LAYOUT.hintHeight;
 
 function routeStatus(game) {
   const { level, state } = game, turn = state.turn, two = level.par + STAR_TWO_MARGIN;
@@ -37,16 +38,17 @@ function controlLayout(r, game) {
   // bottom spacer for readable guidance while retaining an 8px touch inset.
   const aiming = !!game.selectedItem;
   const preview = game.actionPreview && game.actionPreview.source === game.state ? game.actionPreview : null;
-  const normalLines = r.wrapLines(aiming ? itemAimHint(game) : game.playHint(), !aiming && ready ? 278 : 310, 12);
-  const buttonY = r.H - CONTROL.height - 8;
-  const normalHeight = guide ? guideCardLayout(r, guide).height : Math.max(PLAY_HINT_HEIGHT, normalLines.length * 18 + 14);
-  const boardHintY = buttonY - normalHeight - 8;
+  const normalLines = r.wrapLines(aiming ? itemAimHint(game) : game.playHint(), !aiming && ready ? 278 : 310, GAME_LAYOUT.hintSize);
+  const buttonY = r.H - CONTROL.height - GAME_LAYOUT.bottomInset;
+  const normalHeight = guide ? guideCardLayout(r, guide).height :
+    Math.max(PLAY_HINT_HEIGHT, normalLines.length * GAME_LAYOUT.hintLineHeight + 14);
+  const boardHintY = buttonY - normalHeight - GAME_LAYOUT.gap;
   const tray = itemTrayLayout(game, guide && !guide.interactive ? guide : null, boardHintY);
-  const hintLines = preview ? r.wrapLines(previewMessage(preview), 310, 12) : normalLines;
+  const hintLines = preview ? r.wrapLines(previewMessage(preview), 310, GAME_LAYOUT.hintSize) : normalLines;
   // A held forecast temporarily uses the satchel area when it needs more room.
   // Keep the board and the pressed tile in their original positions throughout.
-  const hintHeight = preview ? Math.max(normalHeight, hintLines.length * 16 + 18) : normalHeight;
-  const hintY = buttonY - hintHeight - 8;
+  const hintHeight = preview ? Math.max(normalHeight, hintLines.length * 18 + 30) : normalHeight;
+  const hintY = buttonY - hintHeight - GAME_LAYOUT.gap;
   return { buttonY, hintY, hintHeight, hintLines, boardHintY, ready, guide, aiming, preview, tray };
 }
 
@@ -56,17 +58,19 @@ function drawControls(r, game, layout, now, feedback) {
   const undoFeedback = feedback && feedback.items.find(item => item.type === 'undo');
   const warning = game.state.status === 'failed' || game.state.energy <= 3;
   if (layout.preview) {
-    r.panel(24, hintY, 342, hintHeight, { radius: 12, fill: C.panel, stroke: C.blue, flat: true });
-    const textY = hintY + (hintHeight - 18 - (hintLines.length - 1) * 16) / 2;
-    hintLines.forEach((line, index) => r.text(line, 195, textY + index * 16, 12, C.ink, 'center', '600'));
-    r.text('松手不行动 · 轻点确认这一步', 195, hintY + hintHeight - 9, 10, C.blueText, 'center');
+    r.panel(24, hintY, 342, hintHeight, { radius: 14, fill: C.panel, stroke: C.blue, flat: true });
+    const textY = hintY + (hintHeight - 24 - (hintLines.length - 1) * 18) / 2;
+    hintLines.forEach((line, index) => r.text(line, 195, textY + index * 18, GAME_LAYOUT.hintSize, C.ink, 'center', '600'));
+    r.text('松手不行动 · 轻点确认这一步', 195, hintY + hintHeight - 12, 12, C.blueText, 'center');
   } else if (guide) drawGuideCard(r, game, guide, hintY);
   else if (!drawItemAimHint(r, game, layout) && !drawContextFeedback(r, feedback, layout, now)) {
-    r.panel(24, hintY, 342, hintHeight, { radius: 13, fill: warning ? '#fbebdf' : ready ? '#e6f0e2' : '#f8faf1',
-      stroke: warning ? '#d6af95' : ready ? '#9cbd9c' : C.line, flat: true });
+    // Ordinary guidance reads as a caption. Reserve a card for a changed state
+    // that needs attention, so the tools, help and actions no longer compete.
+    if (warning || ready) r.round(24, hintY, 342, hintHeight, 12, warning ? C.peach : C.soft);
     if (ready) r.icon('check', 44, hintY + hintHeight / 2, 16, C.green);
     const textY = hintY + hintHeight / 2 - (hintLines.length - 1) * 9;
-    hintLines.forEach((line, index) => r.text(line, ready ? 209 : 195, textY + index * 18, 12, warning ? '#955d42' : ready ? '#316c5f' : C.muted, 'center'));
+    hintLines.forEach((line, index) => r.text(line, ready ? 209 : 195, textY + index * 18,
+      GAME_LAYOUT.hintSize, warning ? C.dangerText : ready ? C.green : C.muted, 'center'));
   }
   if (game.reviewing) {
     r.button('重新规划', 24, buttonY, 165, CONTROL.height, () => game.start(game.level, game.mode), { style: 'primary', icon: 'restart' });
@@ -79,7 +83,7 @@ function drawControls(r, game, layout, now, feedback) {
     r.button('重新学一遍', 24, buttonY, 165, CONTROL.height, () => game.restartGuide(), { style: 'primary', icon: 'restart', disabled: !canAct });
   } else {
     r.button('撤回（' + remaining + '）', 24, buttonY, 165, CONTROL.height, () => game.undo(), {
-      style: guide && guide.control === 'undo' ? 'primary' : 'quiet', icon: 'undo',
+      style: guide && guide.control === 'undo' ? 'primary' : 'text', icon: 'undo',
       feedbackAt: undoFeedback && undoFeedback.at, disabled: !canUndo || layout.aiming || !!guide && guide.kind === 'mechanic' && !guide.interactive
     });
   }
@@ -97,8 +101,8 @@ function drawControls(r, game, layout, now, feedback) {
 }
 
 function gameBoardRect(r, layout) {
-  const timelineSpace = layout.guide && !layout.guide.interactive ? 0 : ECHO_TIMELINE_HEIGHT + 8;
-  const top = 148 + timelineSpace, gap = 4;
+  const timelineSpace = layout.guide && !layout.guide.interactive ? 0 : ECHO_TIMELINE_HEIGHT + GAME_LAYOUT.gap;
+  const top = GAME_LAYOUT.boardTop + timelineSpace, gap = 4;
   const itemSpace = layout.tray ? layout.tray.reserve : 0;
   return { x: r.viewport.x, y: top, w: r.viewport.w,
     h: (layout.boardHintY ?? layout.hintY) - top - gap - itemSpace,
@@ -111,16 +115,16 @@ function drawGame(r, game, now) {
   const atmosphereNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   const showGuideEntry = !layout.guide && game.canShowGuide() && game.state.status === 'playing' && !game.reviewing;
   const showChallenge = !showGuideEntry && !layout.guide && !game.reviewing && game.level.id >= 4 && typeof game.openRoutePlan === 'function';
-  r.label(game.level.title, 24, 32, showGuideEntry ? 138 : showChallenge ? 184 : 254, 22, C.ink, 'left', '700');
+  r.label(game.level.title, 24, 31, showGuideEntry ? 138 : showChallenge ? 184 : 254, 23, C.ink, 'left', '700');
   if (showChallenge) r.button(game.level.experience ? game.level.experience.phaseName + '邮路' : difficultyProfile(game.level).name, 216, 10, 66, CONTROL.compactHeight,
     () => game.openRoutePlan(), { style: 'text', size: 12, disabled: !!game.modal || game.busy || game.state.status !== 'playing' });
   // The subtitle sits below the complete 44px guide/pause targets. Its former
   // baseline crossed the guide button on the first level.
-  if (game.reviewing) r.text('路线回顾', 24, 69, 12, C.muted);
-  else if (game.development && !game.state.itemsUsed && !game.state.revived) r.text('开发试玩 · 独立存档', 24, 69, 12, C.goldText);
+  if (game.reviewing) r.text('路线回顾', 24, 64, 12, C.muted);
+  else if (game.development && !game.state.itemsUsed && !game.state.revived) r.text('开发试玩 · 独立存档', 24, 64, 12, C.goldText);
   else {
     const status = routeStatus(game);
-    r.label(status.text, 24, 69, 342, 12, status.warning ? C.goldText : C.muted);
+    r.label(status.text, 24, 64, 342, 12, status.warning ? C.goldText : C.muted);
   }
   if (showGuideEntry) r.button('操作引导', 174, 10, 104, CONTROL.compactHeight, () => game.showGuide(), {
     style: 'text', icon: 'route', disabled: !!game.modal || game.busy
@@ -129,7 +133,7 @@ function drawGame(r, game, now) {
     style: 'text', icon: game.reviewing ? 'route' : 'pause', disabled: !!game.modal || game.busy || (!game.reviewing && game.state.status !== 'playing')
   });
   drawObjectives(r, game, now, feedback);
-  const timeline = { x: 24, y: 151, w: 342, h: ECHO_TIMELINE_HEIGHT };
+  const timeline = { x: GAME_LAYOUT.x, y: GAME_LAYOUT.timelineY, w: GAME_LAYOUT.width, h: ECHO_TIMELINE_HEIGHT };
   const blockingGuide = layout.guide && !layout.guide.interactive;
   // Pending blue tickets need the forecast even when all orange letters were
   // just collected; the objectives already acknowledge that milestone.

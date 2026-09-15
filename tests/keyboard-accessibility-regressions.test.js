@@ -43,7 +43,7 @@ function harness() {
   const game = new module.exports.Game(platform);
   for (let frame = 0; game.page !== 'home' && frame < 200; frame++) { now += 100; game.loop(); }
   return { game, saved, key: callbacks.key,
-    start() { game.start(CAMPAIGN[0], 'campaign'); now += 1000; game.loop(); },
+    start(level = CAMPAIGN[0]) { game.start(level, 'campaign'); now += 1000; game.loop(); },
     act(action) { now += MOVE_MS + 1; game.act(action); },
     draw(ms = 0) { now += ms; game.renderer.draw(game, now, metrics); },
     destroy() { game.ads.destroy(); game.sound.release(); },
@@ -116,7 +116,7 @@ test('Escape only skips a visible delivery and keyboard focus cannot activate st
   h.draw(400);
   const { focusedTarget } = require('../src/keyboard-focus');
   h.key('Tab');
-  assert.match(focusedTarget(h.game).label, /跳过演出/);
+  assert.equal(focusedTarget(h.game).label, '查看回执');
   h.key('Escape');
   assert.equal(h.game.modal, modal);
   assert.equal(h.game.level.id, 1);
@@ -175,6 +175,74 @@ test('Escape and Enter both preserve local data when closing the reset confirmat
     assert.equal(h.game.page, 'settings');
     assert.equal(JSON.stringify([...h.saved]), before, 'a keyboard dismissal cannot select the destructive action');
   }
+});
+
+test('Escape cancels a pause restart without changing the route, held supplies or saved progress', t => {
+  const h = harness(); t.after(() => h.destroy()); h.start(CAMPAIGN[3]);
+  for (const action of h.game.level.solution.slice(0, 4)) h.act(action);
+  assert.equal(h.game.state.inventory.oil, 1, 'the actual route station supplies the held oil');
+  h.game.pause();
+  const pause = h.game.modal, state = h.game.state;
+  const before = JSON.stringify({ state, actions: h.game.actions, rewards: h.game.itemRewards,
+    run: h.game.store.loadRun(), profile: h.game.profile(), saved: [...h.saved] });
+  pause.buttons.find(button => button.text === '重新开始').action();
+  assert.equal(h.game.modal.kind, 'restart-confirm');
+  assert.equal(h.game.state, state, 'opening the confirmation never replaces the running state');
+  assert.match(h.game.modal.lines.join(''), /本次路线和随身道具将重置/);
+  h.draw();
+  h.game.pointer = h.game.renderer.pointer = { x: 195, y: 500 };
+  h.key('Escape');
+  assert.equal(h.game.modal, pause, 'cancel returns to the original pause menu');
+  assert.equal(h.game.pointer, null);
+  assert.equal(h.game.renderer.pointer, null);
+  assert.deepEqual(h.game.renderer.hits, []);
+  assert.equal(JSON.stringify({ state: h.game.state, actions: h.game.actions, rewards: h.game.itemRewards,
+    run: h.game.store.loadRun(), profile: h.game.profile(), saved: [...h.saved] }), before);
+});
+
+test('Enter confirms a pause restart, resets this route and keeps earned stars and stamps', t => {
+  const h = harness(); t.after(() => h.destroy()); h.start();
+  for (const action of h.game.level.solution) h.act(action);
+  const profile = JSON.stringify(h.game.profile()), album = JSON.stringify(h.game.album());
+  assert.ok(h.game.profile().completed['1']);
+  h.start(CAMPAIGN[3]);
+  for (const action of h.game.level.solution.slice(0, 4)) h.act(action);
+  assert.equal(h.game.state.inventory.oil, 1);
+  h.game.pause();
+  h.game.modal.buttons.find(button => button.text === '重新开始').action();
+  assert.equal(h.game.modal.kind, 'restart-confirm');
+  h.draw(); h.key('Enter');
+  assert.equal(h.game.modal, null);
+  assert.equal(h.game.page, 'game');
+  assert.equal(h.game.level.id, 4);
+  assert.equal(h.game.state.status, 'playing');
+  assert.equal(h.game.state.turn, 0);
+  assert.equal(h.game.state.inventory.oil, 0);
+  assert.equal(h.game.undosUsed, 0);
+  assert.deepEqual(h.game.actions, []);
+  assert.deepEqual(h.game.store.loadRun().actions, []);
+  assert.equal(JSON.stringify(h.game.profile()), profile);
+  assert.equal(JSON.stringify(h.game.album()), album);
+});
+
+test('an untouched route restarts directly but a route rewound to its start still asks first', t => {
+  const h = harness(); t.after(() => h.destroy()); h.start();
+  const session = h.game.session;
+  h.game.pause();
+  h.game.modal.buttons.find(button => button.text === '重新开始').action();
+  assert.equal(h.game.modal, null, 'an untouched route does not need another confirmation');
+  assert.equal(h.game.session, session + 1, 'the blank route really restarts');
+  assert.equal(h.game.state.turn, 0);
+  assert.deepEqual(h.game.actions, []);
+  h.act('right'); h.game.undo();
+  assert.equal(h.game.state.turn, 0);
+  assert.deepEqual(h.game.actions, []);
+  assert.equal(h.game.undosUsed, 1);
+  h.game.pause();
+  h.game.modal.buttons.find(button => button.text === '重新开始').action();
+  assert.equal(h.game.modal.kind, 'restart-confirm', 'rewind usage is progress even with no remaining actions');
+  h.key('Escape');
+  assert.equal(h.game.undosUsed, 1);
 });
 
 test('Enter acknowledges an unavailable tool and modal movement keys stay isolated', t => {

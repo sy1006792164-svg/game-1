@@ -1,4 +1,5 @@
 'use strict';
+const { confirmRestart } = require('./restart-flow');
 const { createPlatform } = require('./platform');
 const { createStore } = require('./storage');
 const { createAds } = require('./ads');
@@ -662,7 +663,7 @@ class Game {
     const saveLine = this.store.getStatus().persisted ? '路线已自动保存，没有倒计时。' : '没有倒计时。路线仅在本次运行保留。';
     this.modal = { kind: 'pause', title: '歇一会', lines: [saveLine], buttons: [
       { text: '继续投递', primary: true, action: () => { this.modal = null; this.syncMusic(); } },
-      { text: '重新开始', icon: 'restart', action: () => this.start(this.level, this.mode) },
+      { text: '重新开始', icon: 'restart', action: () => confirmRestart(this) },
       ...(this.camera.isAdjusted() ? [{ text: '恢复视角', textOnly: true, icon: 'grid', action: () => this.resetView() }] : []),
       ...(this.canShowGuide() ? [{ text: '操作引导', textOnly: true, icon: 'route', action: () => this.showGuide() }] : []),
       { text: '玩法说明', textOnly: true, icon: 'book', action: () => this.help() },

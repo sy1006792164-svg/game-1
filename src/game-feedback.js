@@ -8,12 +8,12 @@ const STYLES = {
   letter: { label: '信笺', objective: 1, icon: 'letter', color: '#98683f', collection: true, duration: 2200 },
   seal: { label: '邮票', objective: 2, icon: 'stamp', color: '#3c7c81', collection: true, duration: 2200 },
   light: { label: '风灯', objective: 0, icon: 'lamp', color: '#98683f', collection: true, duration: 2200 },
-  bridge: { label: '纸桥碎了', icon: 'bridge', detail: '这格不能再走，回声仍能通过', duration: 1800 },
+  bridge: { label: '纸桥碎了', icon: 'bridge', detail: '这格不能再走，回声仍可通过', duration: 1800 },
   repair: { label: '纸桥已修好', icon: 'bridge', detail: '可以再次踏上，离开后仍会碎', duration: 1800 },
-  'order-blocked': { label: '还没轮到这封信', icon: 'letter', detail: '先收发亮的编号信笺，再回来取这封', duration: 1800 },
+  'order-blocked': { label: '还没轮到这封信', icon: 'letter', detail: '先收发亮的编号信笺，再回来', duration: 1800 },
   wait: { label: '等一拍', objective: 0, color: C.green, duration: 1300 },
   undo: { label: '已撤回', color: C.green, duration: 1300 },
-  blocked: { label: '这边不通', icon: 'close', detail: '试试相邻亮格，这次没有消耗拍数', duration: 1800 }
+  blocked: { label: '这边不通', icon: 'close', detail: '点相邻亮格重试，这次不耗拍', duration: 1800 }
 };
 
 function recordEvents(items, events, at) {
@@ -87,7 +87,7 @@ function objectiveFeedback(feedback, index) {
     !latest || item.at >= latest.at ? item : latest, null);
 }
 
-// Keep the gain in the icon's own column, inside the paper and clear of the progress ticks.
+// Keep the gain beneath its icon, clear of the live counters.
 function drawObjectiveFeedback(r, item, bounds, now) {
   if (!item || !item.value) return;
   const opacity = feedbackOpacity(r, item, now);
@@ -107,12 +107,11 @@ function drawContextFeedback(r, notice, layout, now) {
   const item = notice && notice.items.filter(entry => entry.detail).sort((a, b) => b.at - a.at)[0];
   if (!item) return false;
   const { hintY: y, hintHeight: h } = layout, c = r.ctx;
-  r.panel(24, y, 342, h, { fill: C.panel, stroke: C.line, radius: 13 });
-  r.line([[26, y + 12], [26, y + h - 12]], '#b68b67', 2);
-  r.icon(item.icon, 46, y + h / 2, 17, '#93613f');
+  r.panel(24, y, 342, h, { fill: C.peach, stroke: C.line, radius: 14, flat: true });
+  r.icon(item.icon, 46, y + h / 2, 18, C.dangerText);
   c.save(); c.globalAlpha *= feedbackOpacity(r, item, now);
-  r.text(item.label, 70, y + h / 2 - 9, 14, '#805237', 'left', '600');
-  r.text(item.detail, 70, y + h / 2 + 10, 11, '#826d53');
+  r.text(item.label, 70, y + h / 2 - 9, 14, C.ink, 'left', '600');
+  r.text(item.detail, 70, y + h / 2 + 10, 12, C.muted);
   c.restore();
   return true;
 }

@@ -4,11 +4,11 @@ const { C } = require('./theme');
 const { UI_ICON, drawUiIcon } = require('./ui-icons');
 const { buttonTouch, TOUCH_MS } = require('./ui-motion');
 
-const CONTROL = Object.freeze({ height: 52, compactHeight: 44, icon: UI_ICON.size, gap: 8, depth: 3, lineHeight: 20 });
+const CONTROL = Object.freeze({ height: 52, compactHeight: 44, icon: UI_ICON.size, gap: 8, lineHeight: 20 });
 const TONES = Object.freeze({
-  primary: { face: '#3b7058', held: '#305d49', edge: '#779a70', base: '#294d3d', shine: '#d4dca288', ink: C.white, icon: '#f3d4a0' },
-  secondary: { face: '#fcfaf0', held: '#e1eadc', edge: '#b7cbbd', base: '#b4c6b8', shine: '#ffffff', ink: C.ink, icon: C.green },
-  quiet: { face: '#edf2e8', held: '#d7e4d6', edge: '#c3d2c4', base: '#c4d2c5', shine: '#ffffff99', ink: C.ink, icon: C.green }
+  primary: { face: C.green, held: '#204d42', ink: C.white, icon: '#f4e9d5' },
+  secondary: { face: C.panel, held: '#e4ece2', ink: C.ink, icon: C.green },
+  quiet: { face: C.soft, held: '#d9e5da', ink: C.ink, icon: C.green }
 });
 
 function optionsFor(style) { return style && typeof style === 'object' ? style : { style }; }
@@ -28,26 +28,6 @@ function buttonLayout(r, text, width, style) {
   return { options, size, weight, inset, leading, trailing, textWidth, textSpan, lines, lineHeight: CONTROL.lineHeight };
 }
 
-// A cut paper silhouette; the ticket notches remain transparent on any backdrop.
-function plaque(r, x, y, w, h, cut, notch, fill, stroke) {
-  const c = r.ctx, middle = y + h / 2;
-  c.beginPath(); c.moveTo(x + cut, y); c.lineTo(x + w - cut, y);
-  c.lineTo(x + w, y + cut);
-  if (notch) { c.lineTo(x + w, middle - 4); c.quadraticCurveTo(x + w - 7, middle, x + w, middle + 4); }
-  c.lineTo(x + w, y + h - cut); c.lineTo(x + w - cut, y + h);
-  c.lineTo(x + cut, y + h); c.lineTo(x, y + h - cut);
-  if (notch) { c.lineTo(x, middle + 4); c.quadraticCurveTo(x + 7, middle, x, middle - 4); }
-  c.lineTo(x, y + cut); c.closePath();
-  if (fill) { c.fillStyle = fill; c.fill(); }
-  if (stroke) { c.strokeStyle = stroke; c.lineWidth = 1; c.stroke(); }
-}
-
-function bevel(r, x, y, w, h, cut, tone) {
-  r.line([[x + 2, y + cut], [x + cut, y + 2], [x + w - cut - 2, y + 2]], tone.shine, 1);
-  if (r.effectsQuality !== 'low') r.line([[x + cut + 1, y + h - 1.5],
-    [x + w - cut, y + h - 1.5], [x + w - 1.5, y + h - cut]], tone.base, .9);
-}
-
 function drawButton(r, text, x, y, w, h, action, style) {
   const c = r.ctx;
   c.save();
@@ -55,47 +35,31 @@ function drawButton(r, text, x, y, w, h, action, style) {
   const tone = TONES[options.style] || TONES.secondary;
   const primary = options.style === 'primary', disabled = !!options.disabled;
   const tab = options.style === 'tab', textOnly = options.style === 'text', quiet = options.style === 'quiet';
-  const flat = tab || textOnly || quiet;
   const pointer = r.pointer;
   const pressed = !disabled && pointer && !pointer.dragging &&
     pointer.x >= x && pointer.x <= x + w && pointer.y >= y && pointer.y <= y + h;
-  // Color changes priority; geometry, icon size and baseline stay the same.
-  const depth = flat ? 0 : CONTROL.depth, faceH = h - depth;
-  const top = y + (pressed && !flat && !r.reducedMotion ? depth - 1 : 0);
-  const cut = primary ? 12 : 9, notch = primary && w >= 140;
-  if (disabled) c.globalAlpha *= .46;
+  // The full face is also the touch target; feedback never shifts the label.
+  const faceH = h, top = y, radius = primary ? 16 : 13;
   if (tab) {
-    plaque(r, x + 2, y + 4, w - 4, h - 8, 7, false,
-      pressed ? C.soft : options.selected ? C.panel : null, options.selected ? C.line : null);
-    if (options.selected) {
-      r.line([[x + w / 2 - 15, y + h - 8], [x + w / 2 + 15, y + h - 8]], C.green, 1.5);
-    }
+    r.round(x + 2, y + 3, w - 4, h - 6, 12,
+      options.selected ? C.green : pressed ? C.soft : null);
   } else if (textOnly) {
-    if (pressed) r.round(x + 2, y + 5, w - 4, h - 10, 8, C.soft, C.line);
-  } else if (quiet) {
-    r.round(x, top, w, h, 9, pressed ? tone.held : tone.face, tone.edge);
+    if (pressed) r.round(x, y, w, h, radius, C.soft);
   } else {
     if (!pressed && !disabled && primary && r.effectsQuality !== 'low') {
-      r.round(x + 4, y + 7, w - 8, faceH, 14, '#476c5b12');
-      r.round(x + 2, y + 4, w - 4, faceH, 14, '#476c5b12');
+      r.round(x, y + 3, w, faceH, radius, '#214c4112');
     }
-    plaque(r, x, y + depth, w, faceH, cut, notch, tone.base);
-    plaque(r, x, top, w, faceH, cut, notch, pressed ? tone.held : tone.face, tone.edge);
-    bevel(r, x, top, w, faceH, cut, tone);
+    r.round(x, top, w, h, radius, disabled ? C.raised : pressed ? tone.held : tone.face,
+      !primary && !quiet ? C.line : null);
   }
   const touch = !disabled && !r.reducedMotion && buttonTouch(r, x, y, w, h);
   const touchAge = touch ? r.now - touch.at : -1;
   if (touchAge >= 0 && touchAge < TOUCH_MS) {
     const t = touchAge / TOUCH_MS;
     c.save();
-    plaque(r, x + 1, top + 1, w - 2, Math.max(1, faceH - 2), cut, notch);
+    r.round(x + 1, top + 1, w - 2, Math.max(1, faceH - 2), radius);
     c.clip(); c.globalAlpha *= (1 - t) * (primary ? .19 : .12);
     r.circle(touch.touchX, touch.touchY, Math.max(2, Math.hypot(w, h) * (1 - (1 - t) ** 3)), primary ? '#f8ecc6' : '#39796b');
-    c.restore();
-  }
-  if (pressed && !r.reducedMotion && r.effectsQuality !== 'low') {
-    c.save(); c.globalAlpha *= .45;
-    r.line([[x + cut + 2, top + 2], [x + w - cut - 2, top + 2]], primary ? '#e0e8bd' : '#ffffff', 1.2);
     c.restore();
   }
   const middle = top + faceH / 2;
@@ -104,7 +68,7 @@ function drawButton(r, text, x, y, w, h, action, style) {
   const response = feedback ? Math.sin(feedbackAge / 650 * Math.PI) : 0;
   if (response) {
     c.save(); c.globalAlpha *= response * .55;
-    plaque(r, x + 2, top + 2, w - 4, faceH - 4, Math.max(4, cut - 2), false, null, C.green);
+    r.round(x + 2, top + 2, w - 4, faceH - 4, radius - 2, null, primary ? C.white : C.green);
     c.restore();
   }
   const groupX = x + ui.inset + (w - ui.inset * 2 - ui.trailing - ui.leading - ui.textSpan) / 2;
@@ -113,14 +77,14 @@ function drawButton(r, text, x, y, w, h, action, style) {
     const iconX = iconOnly ? x + w / 2 : groupX + CONTROL.icon / 2;
     c.save(); c.translate(iconX, middle);
     if (feedback) c.rotate(options.icon === 'hourglass' ? Math.PI * (1 - (1 - feedbackAge / 650) ** 3) : -.18 * response);
-    drawUiIcon(r, options.icon, 0, 0, options.color || tone.icon);
+    drawUiIcon(r, options.icon, 0, 0, disabled ? C.muted : tab && options.selected ? C.white : options.color || tone.icon);
     c.restore();
   }
   const textX = groupX + ui.leading + ui.textSpan / 2;
   const textY = middle - (ui.lines.length - 1) * ui.lineHeight / 2;
-  const ink = options.color || (tab ? options.selected ? C.green : C.muted : textOnly ? C.green : tone.ink);
+  const ink = disabled ? C.muted : options.color || (tab ? options.selected ? C.white : C.muted : textOnly ? C.green : tone.ink);
   ui.lines.forEach((line, index) => r.text(line, textX, textY + index * ui.lineHeight, ui.size, ink, 'center', ui.weight));
-  if (options.trailing) drawUiIcon(r, options.trailing, x + w - ui.inset - CONTROL.icon / 2, middle, options.color || tone.icon);
+  if (options.trailing) drawUiIcon(r, options.trailing, x + w - ui.inset - CONTROL.icon / 2, middle, disabled ? C.muted : options.color || tone.icon);
   c.restore();
   if (!disabled) {
     const minimum = 44 / (r.scale || 1), hitW = Math.max(w, minimum), hitH = Math.max(h, minimum);
@@ -128,4 +92,4 @@ function drawButton(r, text, x, y, w, h, action, style) {
   }
 }
 
-module.exports = { CONTROL, drawButton, buttonLayout, drawPaperPlaque: plaque };
+module.exports = { CONTROL, drawButton, buttonLayout };

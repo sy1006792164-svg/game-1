@@ -1,7 +1,6 @@
 'use strict';
 const { C } = require('./theme');
 const { drawCourier } = require('./courier-art');
-const { drawSurfaceEdges } = require('./surface-edges');
 const { CONTROL, drawButton } = require('./controls');
 const { drawUiIcon, UI_ICON } = require('./ui-icons');
 const { drawHome } = require('./home-view');
@@ -25,6 +24,8 @@ const { drawKeyboardFocus } = require('./keyboard-focus');
 const { clearStampPaperCache } = require('./stamp-paper');
 const SYMBOLS = Object.freeze({ '→': 'arrow-right', '←': 'arrow-left', '↑': 'arrow-up', '↓': 'arrow-down', '↗': 'arrow-ne', '↘': 'arrow-se', '↙': 'arrow-sw', '↖': 'arrow-nw', '✓': 'check' });
 const ARROW_ANGLES = Object.freeze({ right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2, ne: -Math.PI / 4, se: Math.PI / 4, sw: Math.PI * .75, nw: -Math.PI * .75 });
+const NO_LINE_START = '，。！？、；：）】》〉」』〕］｝’”…,.!?:;)]}';
+const NO_LINE_END = '（【《〈「『〔［｛‘“([{';
 
 function atmosphereChapter(game, height) {
   if (game.page === 'game' && game.level) return game.level.chapter || 0;
@@ -105,14 +106,11 @@ class Renderer {
     this.text(value, x, y, size, color, align, weight);
   }
   panel(x, y, w, h, options) {
-    const style = options || {}, radius = style.radius == null ? 16 : style.radius;
+    const style = options || {}, radius = style.radius == null ? 18 : style.radius;
     if (!style.flat) {
-      this.round(x + 1, y + 5, w - 2, h, radius, '#55745c13');
-      this.round(x, y + 2, w, h, radius, '#9cac967a');
+      this.round(x, y + 3, w, h, radius, '#294d4909');
     }
     this.round(x, y, w, h, radius, style.fill || C.panel, style.stroke || C.line);
-    if (!style.flat) drawSurfaceEdges(this, x, y, w, h, radius);
-    if (style.accent) this.line([[x + 18, y + 1], [x + Math.min(w - 18, 66), y + 1]], style.accent, 1.5);
   }
   line(points, color, width, dash) {
     const c = this.ctx; c.beginPath(); c.strokeStyle = color || C.line; c.lineWidth = width || 1.4; c.lineCap = 'round'; c.lineJoin = 'round'; c.setLineDash(dash || []);
@@ -125,7 +123,7 @@ class Renderer {
   }
   actionIcon(type, x, y, color) { drawUiIcon(this, type, x, y, color || C.green); }
   meter(x, y, w, value, target, color) {
-    this.round(x, y, w, 5, 2.5, '#d4e1d6');
+    this.round(x, y, w, 5, 2.5, C.soft);
     const filled = Math.max(0, Math.min(1, value / Math.max(1, target))) * w;
     if (filled > 0) this.round(x, y, Math.max(5, filled), 5, 2.5, color || C.green);
   }
@@ -143,12 +141,23 @@ class Renderer {
     if (cached) return cached.slice();
     const lines = [];
     for (const paragraph of String(text).split(/\r?\n/)) {
-      let line = '';
-      for (const char of paragraph) {
-        if (line && this.ctx.measureText(line + char).width > width) { lines.push(line); line = char; }
-        else line += char;
+      const chars = Array.from(paragraph);
+      if (!chars.length) { lines.push(''); continue; }
+      for (let start = 0; start < chars.length;) {
+        let end = start + 1, line = chars[start];
+        while (end < chars.length && this.ctx.measureText(line + chars[end]).width <= width) line += chars[end++];
+        if (end < chars.length) {
+          let boundary = end;
+          // Move the word with its punctuation to the next row; never squeeze
+          // extra glyphs past the measured width to fix a dangling full stop.
+          while (boundary > start && (NO_LINE_END.includes(chars[boundary - 1]) || NO_LINE_START.includes(chars[boundary]))) boundary--;
+          // A tiny column may have no legal punctuation boundary. Fall back to
+          // its fitting prefix (or one indivisible glyph) and make progress.
+          if (boundary > start) end = boundary;
+        }
+        lines.push(chars.slice(start, end).join(''));
+        start = end;
       }
-      lines.push(line);
     }
     if (cache.size >= 256) cache.delete(cache.keys().next().value);
     cache.set(key, lines);
@@ -210,10 +219,9 @@ class Renderer {
     this.text('风 · 邮', x, y - 7, 10, color || C.muted, 'center'); this.text(label, x, y + 9, 10, color || C.muted, 'center');
   }
   header(title, subtitle, back, options = {}) {
-    this.button('', 24, 10, 44, CONTROL.compactHeight, back, { style: 'text', icon: 'back' });
-    this.label(title, 80, 29, 286 - (options.actionWidth || 0), 22, C.ink, 'left', '700');
+    this.button('', 24, 10, 44, CONTROL.compactHeight, back, { style: 'quiet', icon: 'back' });
+    this.label(title, 80, 29, 286 - (options.actionWidth || 0), 24, C.ink, 'left', '700');
     this.label(subtitle, 80, 56, 286, 12, C.muted);
-    this.line([[24, 77], [366, 77]], C.line, .7);
   }
   scrim(color) {
     const bounds = this.viewport || { x: -this.ox / this.scale, y: -this.oy / this.scale,

@@ -2,16 +2,25 @@
 
 const { ITEMS, itemOffer } = require('./items');
 const { C } = require('./theme');
-const { drawPaperPlaque } = require('./controls');
 const { pendingSupplyCells } = require('./supply-stations');
 
-const ITEM_TRAY_HEIGHT = 58;
+const ITEM_TRAY_HEIGHT = 62;
 const ITEM_TRAY_GAP = 8;
 const TONES = Object.freeze({
   oil: { ink: '#986431', face: '#faf1d9', line: '#ccb58a' },
   kite: { ink: '#377c79', face: '#edf4e9', line: '#9fbfb1' },
   bridge: { ink: '#89694b', face: '#f3ecdc', line: '#c2b399' },
   echo: { ink: '#397d91', face: '#e9f2ef', line: '#9abdc6' }
+});
+const SHORT_REASONS = Object.freeze({
+  '只能在投递中使用': '投递时可用',
+  '下一封编号信不在两格内': '下封信超范围',
+  '两格内没有待收的信': '信笺不在范围',
+  '信笺已全部收齐': '信笺已齐',
+  '先踩蓝票，趁回声还没到时使用': '先踩蓝票再用',
+  '蓝票已全部盖好': '蓝票已齐',
+  '先走到断桥旁，上下左右紧挨一格': '靠近断桥再修',
+  '纸桥完好，无需修复': '纸桥完好'
 });
 
 function itemTrayLayout(game, guide, hintY) {
@@ -68,51 +77,56 @@ function drawItemArt(r, id, x, y, size, muted = false) {
   c.restore();
 }
 
+function itemTrayDetail(r, game, item, offer, remaining, advice, width) {
+  if (game.selectedItem === item.id) return '点亮起的目标';
+  if (game.state.status !== 'playing') return SHORT_REASONS[offer.reason] || offer.reason;
+  if (!remaining && pendingSupplyCells(game.level, game.state, item.id).length > 0) return '驿站免费领取';
+  if (!offer.eligible) {
+    r.font(11);
+    return r.ctx.measureText(offer.reason).width <= width ? offer.reason : SHORT_REASONS[offer.reason] || offer.reason;
+  }
+  if (remaining) return item.short;
+  if (game.platform.kind === 'browser') return '微信视频获取';
+  return advice && advice.itemId === item.id ? '建议看视频' : '看视频获取';
+}
+
 function drawItemTray(r, game, layout) {
   if (!layout.visible) return;
   const canInspect = !game.modal && !game.busy && game.state.status === 'playing';
   const advice = typeof game.supplyAdvice === 'function' ? game.supplyAdvice() : null;
-  for (const card of layout.cards) {
+  // One quiet tool band keeps the island as the focus. Only the tool currently
+  // being pressed or aimed receives a face; every tool retains its full target.
+  r.line([[24, layout.y], [366, layout.y]], C.line, 1);
+  for (const [index, card] of layout.cards.entries()) {
     const { item, x, y, w, h } = card, tone = TONES[item.id];
-    const compact = w < 100;
+    const compact = w < 100, spacious = w >= 160;
     const offer = itemOffer(game.level, game.state, item.id);
     const remaining = game.state.inventory && game.state.inventory[item.id] || 0;
     const selected = game.selectedItem === item.id;
     const muted = !offer.eligible && !selected;
     const pointer = r.pointer, pressed = canInspect && pointer && !pointer.dragging &&
       pointer.x >= x && pointer.x <= x + w && pointer.y >= y && pointer.y <= y + h;
-    const face = selected ? tone.face : pressed ? C.soft : C.raised;
-    if (selected) drawPaperPlaque(r, x, y + 3, w, h - 3, 7, false, '#aab9a785');
-    drawPaperPlaque(r, x, y, w, h - 3, 7, false, face, selected ? C.green : C.line);
-    drawItemArt(r, item.id, x + (compact ? 17 : 20), y + (compact ? 18 : 21), compact ? 20 : 24, muted);
-    const nameInset = compact ? 31 : 38;
-    r.label(item.name, x + nameInset, y + 16, w - nameInset - 8, compact ? 12 : 13,
+    if (selected || pressed) r.round(x, y + 3, w, h - 3, 12, selected ? tone.face : C.soft,
+      selected ? C.green : null);
+    if (index > 0) r.line([[x - 3, y + 15], [x - 3, y + h - 13]], C.line, 1);
+    drawItemArt(r, item.id, x + (compact ? 17 : 20), y + (spacious ? 31 : 23), compact ? 21 : 25, muted);
+    const nameInset = compact ? 34 : spacious ? 42 : 38;
+    r.text(item.name, x + nameInset, y + (spacious ? 22 : 16), compact ? 12 : 13,
       muted ? C.muted : C.ink, 'left', '600');
-    r.label('×' + remaining, x + w - 9, y + 30, 38, 10, C.muted, 'right', '600');
-    const video = !selected && offer.eligible && remaining === 0;
+    r.font(13, '600');
+    const stockX = x + nameInset + (spacious ? r.ctx.measureText(item.name).width + 10 : 0);
+    r.text('×' + remaining, stockX, y + (spacious ? 22 : 32), 10, remaining ? C.green : C.muted, 'left', '600');
     const station = remaining === 0 && pendingSupplyCells(game.level, game.state, item.id).length > 0;
-    let detail = selected ? '请点亮起的目标' :
-      !offer.eligible ? offer.reason : video ? game.platform.kind === 'browser' ? '微信视频获取' :
-        advice && advice.itemId === item.id ? '建议·看视频获取' : '看视频获取' : item.short;
-    if (compact) {
-      if (selected) detail = '点亮起的目标';
-      else if (video) detail = game.platform.kind === 'browser' ? '微信视频获取' : advice && advice.itemId === item.id ? '建议·看视频' : '看视频获取';
-      else if (!offer.eligible) detail = item.id === 'echo' ? !(game.state.seals || []).length ? '蓝票已齐' : '先走过蓝票' :
-        item.id === 'kite' ? (game.state.letters || []).length ? '信笺不在范围' : '信笺已齐' :
-        !(game.level.bridges || []).length ? '本关没有纸桥' : (game.level.bridges || []).some(cell => !(game.state.bridges || []).includes(cell)) ? '靠近断桥再修' : '纸桥完好';
-    }
-    if (!selected && station) detail = '驿站免费领取';
-    if (video && !station && !compact) {
-      r.round(x + 9, y + 40, 13, 10, 2, null, tone.ink);
-      const c = r.ctx; c.beginPath(); c.moveTo(x + 14, y + 42); c.lineTo(x + 18, y + 45); c.lineTo(x + 14, y + 48); c.closePath();
-      c.fillStyle = tone.ink; c.fill();
-    }
-    r.label(detail, x + w / 2 + (video && !station && !compact ? 9 : 0), y + 45,
-      w - (video && !station && !compact ? 34 : 14), 11, selected || station ? C.green : C.muted, 'center');
+    // Use complete, concise state labels in narrow columns. The existing item
+    // inspector provides the full rule when tapped, without spending a beat.
+    const detailWidth = spacious ? w - nameInset - 6 : w - 14;
+    const detail = itemTrayDetail(r, game, item, offer, remaining, advice, detailWidth);
+    r.text(detail, spacious ? x + nameInset : x + w / 2, y + (spacious ? 43 : 51), 11,
+      selected || station ? C.green : C.muted, spacious ? 'left' : 'center');
     // Temporarily unavailable tools explain their rule without changing row order.
     if (canInspect) {
       const action = Object.assign(() => game.selectItem(item.id), { itemId: item.id });
-      r.hit(x, y, w, h, action);
+      r.hit(x, y, w, h, action, undefined, item.name + '，' + remaining + ' 件，' + detail);
     }
   }
 }
@@ -131,9 +145,9 @@ function itemAimHint(game) {
 function drawItemAimHint(r, game, layout) {
   if (!game.selectedItem) return false;
   const { hintY, hintHeight, hintLines } = layout;
-  r.panel(24, hintY, 342, hintHeight, { radius: 13, fill: '#eaf2e4', stroke: '#9fbaa0', accent: C.green });
+  r.panel(24, hintY, 342, hintHeight, { radius: 14, fill: C.soft, stroke: C.green, flat: true });
   const y = hintY + hintHeight / 2 - (hintLines.length - 1) * 9;
-  hintLines.forEach((line, index) => r.text(line, 195, y + index * 18, 12, C.green, 'center'));
+  hintLines.forEach((line, index) => r.text(line, 195, y + index * 18, 13, C.green, 'center'));
   return true;
 }
 

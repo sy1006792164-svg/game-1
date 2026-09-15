@@ -2,31 +2,30 @@
 
 const { C } = require('./theme');
 const { drawUiIcon } = require('./ui-icons');
-const { drawPaperPlaque } = require('./controls');
+const { GAME_LAYOUT } = require('./game-layout');
 const { objectiveFeedback, drawObjectiveFeedback } = require('./game-feedback');
 const { COLLECTION_IMPACT_MS, OBJECTIVE_PULSE_MS } = require('./feedback-timing');
 
-const OBJECTIVES = Object.freeze({ x: 24, y: 81, w: 342, h: 62, column: 114 });
-const objectiveAnchor = index => ({ x: OBJECTIVES.x + index * OBJECTIVES.column + 22, y: 110 });
+const OBJECTIVES = Object.freeze({ x: GAME_LAYOUT.x, y: GAME_LAYOUT.objectivesY,
+  w: GAME_LAYOUT.width, h: GAME_LAYOUT.objectivesHeight, column: 114 });
+const objectiveAnchor = index => ({ x: OBJECTIVES.x + index * OBJECTIVES.column + 22, y: OBJECTIVES.y + 31 });
 
 function drawObjectives(r, game, now, feedback) {
   const l = game.level, s = game.state, previous = game.previousState;
   const low = s.status === 'playing' && s.energy <= 3;
   const { x, y, w, h, column } = OBJECTIVES;
-  // One sheet of paper, with open columns and the same cut corners as the controls.
-  drawPaperPlaque(r, x, y + 2, w, h, 6, false, '#91a48985');
-  drawPaperPlaque(r, x, y, w, h, 6, false, C.panel, '#ccd5c5');
-  r.line([[x + 8, y + 2], [x + w - 8, y + 2]], '#ffffffb0', .8);
-  r.line([[x + w - 1.5, y + 7], [x + w - 1.5, y + h - 6], [x + w - 6, y + h - 1.5], [x + 7, y + h - 1.5]], '#718a7163', .8);
+  // Separate the action budget from the quieter collection ledger.
+  r.round(x, y, column - 8, h, 16, low || s.status === 'failed' ? C.dangerText : C.green);
+  r.round(x + column + 4, y + 3, w - column - 4, h - 6, 14, C.panel);
   const objectives = [
     { label: '剩余拍数', icon: 'lamp', value: s.energy, suffix: ' 拍', changed: previous && previous.energy !== s.energy,
-      color: low || s.status === 'failed' ? '#ad5845' : '#98683f' },
+      color: C.white },
     { label: !s.letters.length ? '信笺已齐' : '收集信笺', icon: 'letter', value: l.letters.length - s.letters.length,
-      total: l.letters.length, suffix: ' / ' + l.letters.length, complete: !s.letters.length,
-      changed: previous && previous.letters.length !== s.letters.length, color: !s.letters.length ? C.green : '#98683f' },
-    { label: !s.seals.length ? '邮票已齐' : '回声邮票', icon: 'stamp', value: l.seals.length - s.seals.length,
-      total: l.seals.length, suffix: ' / ' + l.seals.length, complete: !s.seals.length,
-      changed: previous && previous.seals.length !== s.seals.length, color: !s.seals.length ? C.green : '#3c7c81' }
+      suffix: ' / ' + l.letters.length, complete: !s.letters.length,
+      changed: previous && previous.letters.length !== s.letters.length, color: !s.letters.length ? C.green : C.orange },
+    { label: !s.seals.length ? '蓝票已齐' : '回声蓝票', icon: 'stamp', value: l.seals.length - s.seals.length,
+      suffix: ' / ' + l.seals.length, complete: !s.seals.length,
+      changed: previous && previous.seals.length !== s.seals.length, color: !s.seals.length ? C.green : C.blueText }
   ];
   objectives.forEach((objective, index) => {
     const left = x + index * column, anchor = objectiveAnchor(index), item = objectiveFeedback(feedback, index);
@@ -34,7 +33,7 @@ function drawObjectives(r, game, now, feedback) {
     const age = now - impactAt;
     const emphasized = index ? objective.changed || item : item;
     const pulse = !r.reducedMotion && emphasized && age >= 0 && age < OBJECTIVE_PULSE_MS ? Math.sin(age / OBJECTIVE_PULSE_MS * Math.PI) : 0;
-    if (index) r.line([[left, 99], [left, 125]], '#d4dccd', .8);
+    if (index === 2) r.line([[left + 2, y + 17], [left + 2, y + h - 17]], C.line, 1);
     if (pulse) {
       r.ctx.save(); r.ctx.globalAlpha *= pulse * .65;
       r.circle(anchor.x, anchor.y, 13 + pulse * 4, null, objective.color);
@@ -49,24 +48,24 @@ function drawObjectives(r, game, now, feedback) {
       r.ctx.restore();
     }
     drawUiIcon(r, objective.complete ? 'check' : objective.icon, anchor.x, anchor.y, objective.color, 21);
-    r.label(objective.label, left + 42, 95, 66, 11, C.muted);
-    const size = (index ? 21 : 25) + pulse * .8;
-    r.text(objective.value, left + 42, 116, size, objective.color, 'left', '600');
-    r.font(size, '600');
+    r.label(objective.label, left + 42, y + 16, 66, 12, index ? C.muted : C.white);
+    const preferred = index ? 22 : 30;
+    r.font(preferred, '700');
+    const size = Math.min(preferred, preferred * 42 / Math.max(1, r.ctx.measureText(String(objective.value)).width)) + pulse * .8;
+    r.text(objective.value, left + 42, y + 40, size, objective.color, 'left', '700');
+    r.font(size, '700');
     const numberWidth = r.ctx.measureText(String(objective.value)).width;
-    r.text(objective.suffix, left + 42 + numberWidth, 119, 12, C.muted);
-    if (objective.total) {
-      const tickWidth = Math.min(8, 58 / objective.total - 3);
-      for (let tick = 0; tick < objective.total; tick++) {
-        r.round(left + 42 + tick * (tickWidth + 3), 135, tickWidth, 2, 1,
-          tick < objective.value ? objective.color : '#dce3d6');
-      }
+    r.text(objective.suffix, left + 42 + numberWidth, y + 43, 12, index ? C.muted : C.white);
+    if (index) {
+      const total = index === 1 ? l.letters.length : l.seals.length;
+      r.meter(left + 42, y + h - 11, 62, total ? objective.value : 1, total || 1, objective.color);
     }
-    drawObjectiveFeedback(r, item, { x: left + 6, y: 124, w: 32, h: 16 }, now);
+    drawObjectiveFeedback(r, index === 0 && item ? { ...item, color: C.white } : item,
+      { x: left + 6, y: y + 45, w: 32, h: 16 }, now);
   });
   if (low && !game.modal && !game.busy) {
     r.ctx.save(); r.ctx.globalAlpha *= r.reducedMotion ? .5 : .3 + (Math.sin(now / 380) + 1) * .12;
-    r.line([[x + 42, 135], [x + 91, 135]], '#bb715a', 1.5);
+    r.line([[x + 42, y + 57], [x + 91, y + 57]], C.white, 1.5);
     r.ctx.restore();
   }
 }

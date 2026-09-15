@@ -3,7 +3,6 @@
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { decorativeTime, quiet } = require('./page-feedback');
-const { drawPostalPaper, drawPostmark, drawPostalRules } = require('./postal-paper');
 
 const HEADER_ACTION_X = 322;
 const CONTENT_Y = 94;
@@ -25,31 +24,32 @@ function drawIntro(r, game) {
   }
 }
 
-function drawStatusCard(r, box) {
+function drawStatusCard(r, box, hasSecondary = false) {
   const height = Math.min(446, box.h), compact = height < 380;
-  drawPostalPaper(r, box.x, box.y, box.w, height, { radius: 22 });
   if (!compact) {
-    r.circle(195, box.y + 49, 29, '#eee4c9');
-    drawPostmark(r, 195, box.y + 49, 52, 'ranking', C.green);
+    r.circle(195, box.y + 45, 28, C.soft);
+    r.icon('ranking', 195, box.y + 45, 27, C.green);
   }
   const touchHeight = 44 / (r.scale || 1);
   const primaryHeight = Math.max(48, touchHeight), secondaryHeight = Math.max(CONTROL.compactHeight, touchHeight);
-  const buttonY = box.y + Math.min(280, height - primaryHeight - secondaryHeight - 34);
-  return { titleY: box.y + (compact ? 28 : 105), subtitleY: box.y + (compact ? 58 : 137),
-    detailY: box.y + (compact ? 80 : 159), messageY: box.y + (compact ? 108 : 193),
-    buttonY, primaryHeight, secondaryHeight, secondaryY: buttonY + primaryHeight + 12, noteY: box.y + height - 30 };
+  const buttonY = box.y + Math.min(compact ? 174 : 234,
+    height - primaryHeight - (hasSecondary ? secondaryHeight + 12 : 0) - 32);
+  return { titleY: box.y + (compact ? 28 : 98), subtitleY: box.y + (compact ? 58 : 129),
+    detailY: box.y + (compact ? 80 : 151), messageY: box.y + (compact ? 108 : 181),
+    buttonY, primaryHeight, secondaryHeight, secondaryY: buttonY + primaryHeight + 12,
+    noteY: buttonY + primaryHeight + 28 };
 }
 
 function drawMessage(r, message, ui, warning) {
-  const lines = r.wrapLines(message, 294, 12);
+  const lines = r.wrapLines(message, 294, 14);
   const limit = Math.max(1, Math.floor((ui.buttonY - ui.messageY - 16) / 20) + 1);
   lines.slice(0, limit).forEach((line, index) =>
     r.label(line + (index === limit - 1 && lines.length > limit ? '…' : ''), 195,
-      ui.messageY + index * 20, 294, 12, warning ? C.goldText : C.muted, 'center'));
+      ui.messageY + index * 20, 294, 14, warning ? C.goldText : C.muted, 'center'));
 }
 
 function drawFooter(r, note, warning) {
-  r.label(note, 195, r.H - 18, 342, 10, warning ? C.goldText : C.muted, 'center');
+  r.label(note, 195, r.H - 18, 342, 11, warning ? C.goldText : C.muted, 'center');
 }
 
 function drawSkeletonLine(r, x, y, w, h, offset = 0) {
@@ -77,7 +77,7 @@ function drawRankPlaceholder(r, game, box) {
   const count = Math.min(3, Math.max(0, Math.floor((box.h - heroH - 52 - 20) / stride)));
   for (let i = 0; i < count; i++) {
     const y = box.y + heroH + 52 + i * stride;
-    drawPostalPaper(r, box.x, y, box.w, stride - 8, { radius: 13, binding: false });
+    r.round(80, y + stride - 4, box.w - 80, 1, 0, C.line);
     r.circle(49, y + (stride - 8) / 2, 17, C.soft);
     drawSkeletonLine(r, 80, y + 20, 116, 7, i * 170);
     drawSkeletonLine(r, 80, y + 38, 73, 6, i * 170 + 80);
@@ -89,7 +89,7 @@ function drawRankPlaceholder(r, game, box) {
 function drawFriends(r, game, box) {
   const friend = game.friendLeaderboard, state = friend.getState();
   if (state.status === 'ready' || state.status === 'preview') {
-    r.round(box.x - 3, box.y - 3, box.w + 6, box.h + 6, 19, '#efe5cb', '#c8b792');
+    r.round(box.x - 3, box.y - 3, box.w + 6, box.h + 6, 19, C.panel);
     friend.resize({ width: box.w, height: box.h, pixelRatio: (game.metrics.pixelRatio || 1) * r.scale });
     friend.draw(r.ctx, box.x, box.y, box.w, box.h);
     // The host forwards complete gestures; scrolling and tap recognition both
@@ -102,12 +102,13 @@ function drawFriends(r, game, box) {
     const ui = drawStatusCard(r, box);
     const title = unavailable ? '在微信里，与好友相逢' : state.status === 'error' ? '来信暂时没有送达' : '和好友一起收集星光';
     r.label(title, 195, ui.titleY, 306, 22, C.ink, 'center', '700');
-    r.label(unavailable ? '好友成绩由微信提供' : '看看彼此走过的邮路与收集的星星', 195, ui.subtitleY, 306, 12, C.muted, 'center');
+    r.label(unavailable ? '好友成绩由微信提供' : '看看彼此走过的邮路与收集的星星', 195, ui.subtitleY, 306, 13, C.muted, 'center');
     drawMessage(r, state.message || (unavailable ? '请在微信小游戏中打开好友排行' : '允许好友互动后，即可查看好友成绩'), ui, warning);
     if (!unavailable) {
       r.button(state.status === 'denied' ? '去授权' : state.status === 'error' ? '重新打开好友榜' : '查看好友榜',
-        92, ui.buttonY, 206, 48, () => game.openFriendLeaderboard(), { style: 'primary' });
-    }
+        92, ui.buttonY, 206, ui.primaryHeight, () => game.openFriendLeaderboard(), { style: 'primary' });
+    } else r.button('继续送信', 55, ui.buttonY, 280, ui.primaryHeight,
+      () => game.primary(), { style: 'primary', icon: 'letter', trailing: 'arrow-right' });
     r.label(unavailable ? '这段邮路，可以先由你独自探索' : '随时可以返回，继续自己的旅程', 195, ui.noteY, 306, 11, C.muted, 'center');
   }
   const syncError = state.syncStatus === 'error';
@@ -120,10 +121,10 @@ function drawAuthorization(r, game, box, state) {
   const auth = game.rankingAuthorization;
   const unavailable = state.status === 'unavailable';
   const warning = ['denied', 'error'].includes(state.status);
-  const ui = drawStatusCard(r, box);
+  const ui = drawStatusCard(r, box, !unavailable);
   const title = unavailable ? '好友排行，在微信里相见' : '开启好友排行';
   r.label(title, 195, ui.titleY, 306, 22, C.ink, 'center', '700');
-  r.label(unavailable ? '浏览器中可以完整体验解谜旅程' : '好友头像与昵称由微信好友榜提供', 195, ui.subtitleY, 306, 12, C.muted, 'center');
+  r.label(unavailable ? '浏览器中可以完整体验解谜旅程' : '好友头像与昵称由微信好友榜提供', 195, ui.subtitleY, 306, 13, C.muted, 'center');
   if (!unavailable) r.label('确认隐私授权后，再申请好友互动权限', 195, ui.detailY, 306, 11, C.muted, 'center');
   drawMessage(r, state.message || '首次使用时，请完成微信隐私授权', ui, warning);
 
@@ -134,14 +135,17 @@ function drawAuthorization(r, game, box, state) {
   if (!unavailable) {
     r.button('隐私保护指引', 45, ui.secondaryY, 144, ui.secondaryHeight, () => auth.openContract(), { style: 'text', size: 12 });
     r.button('暂不授权', 201, ui.secondaryY, 144, ui.secondaryHeight, () => game.home(), { style: 'text', size: 12 });
-  } else r.label('星光与本地进度，会留在你的旅途中', 195, ui.noteY, 306, 11, C.muted, 'center');
+  } else {
+    r.button('继续送信', 55, ui.buttonY, 280, ui.primaryHeight,
+      () => game.primary(), { style: 'primary', icon: 'letter', trailing: 'arrow-right' });
+    r.label('星光与本地进度，会留在你的旅途中', 195, ui.noteY, 306, 12, C.muted, 'center');
+  }
   drawFooter(r, '拒绝授权不影响单人游玩与本地存档');
 }
 
 function drawLeaderboard(r, game) {
   drawIntro(r, game);
   const box = leaderboardRect(r.H);
-  drawPostalRules(r, 337, box.y - 16, 24);
   const state = game.rankingAuthorization.getState();
   if (!state.enabled && !state.canDisplay) {
     if (['privacy', 'authorizing', 'loading'].includes(state.status)) return drawRankPlaceholder(r, game, box);

@@ -2,25 +2,45 @@
 
 const { C } = require('./theme');
 const { CONTROL, buttonLayout } = require('./controls');
-const { drawResultHeader, drawResultStars } = require('./result-effects');
+const { drawResultStars } = require('./result-effects');
 const { layoutHelp, drawHelp } = require('./help-view');
-const { drawSurfaceEdges } = require('./surface-edges');
 const { drawItemArt } = require('./item-view');
-const { drawEmblemLight } = require('./keepsake-effects');
 const { drawDeliveryIntro } = require('./delivery-presentation');
-const { drawPostalRules, drawPostmark } = require('./postal-paper');
+
+function actionRows(r, modal, width, touchHeight) {
+  const gap = 10, half = (width - gap) / 2;
+  const isExit = button => modal.kind === 'pause' && button.text === '返回邮局';
+  const layout = (button, w) => {
+    const style = button.primary ? 'primary' : isExit(button) ? 'text' :
+      modal.kind === 'pause' ? 'quiet' : button.textOnly ? 'text' : 'secondary';
+    const measured = buttonLayout(r, button.text, w, { style, icon: button.icon });
+    return { ...button, w, style, h: Math.max(button.primary ? CONTROL.height : CONTROL.compactHeight,
+      touchHeight, measured.lines.length * measured.lineHeight + 16) };
+  };
+  const rows = [];
+  for (let index = 0; index < modal.buttons.length; index++) {
+    const button = modal.buttons[index], next = modal.buttons[index + 1];
+    const pair = modal.kind !== 'reset-confirm' && !button.primary && next && !next.primary &&
+      !isExit(button) && !isExit(next) &&
+      button.text.length <= 9 && next.text.length <= 9;
+    const buttons = pair ? [layout(button, half), layout(next, half)] : [layout(button, width)];
+    rows.push({ buttons, height: Math.max(...buttons.map(entry => entry.h)), gap, exit: isExit(button) });
+    if (pair) index++;
+  }
+  return rows;
+}
 
 // Measure each block before drawing so titles, paragraphs and actions keep
 // their own space, including when a longer label wraps onto another line.
 function measureModal(r, modal, navigation = null, helpHeight = 0, compact = false) {
   const x = 22, w = 346, inset = 24, width = w - inset * 2;
-  const titleSize = 22, titleHeight = 30, lineHeight = compact ? 20 : 22;
+  const titleSize = compact ? 22 : 24, titleHeight = 30, bodySize = 14, lineHeight = compact ? 21 : 23;
   const touchHeight = Math.max(CONTROL.compactHeight, 44 / (r.scale || 1));
   const result = modal.kind === 'win' || modal.kind === 'fail';
-  let cursor = 76;
+  let cursor = modal.kind === 'item' ? 68 : modal.kind === 'pause' ? 30 : 24;
   if (modal.journeyProgress) cursor = compact ? 72 : 86;
   else if (modal.sections) cursor = compact ? 18 : 24;
-  else if (result) cursor = compact ? 64 : 96;
+  else if (result) cursor = compact ? 56 : 72;
   const kickerY = modal.kicker ? cursor + 5 : null;
   if (modal.kicker) cursor += 22;
   const title = r.wrapLines(modal.title, width, titleSize, '700');
@@ -35,13 +55,13 @@ function measureModal(r, modal, navigation = null, helpHeight = 0, compact = fal
   if (modal.lines.length) cursor += compact ? 14 : 18;
   modal.lines.forEach((text, index) => {
     if (index) cursor += compact ? 4 : 6;
-    const lines = r.wrapLines(text, width, 13);
+    const lines = r.wrapLines(text, width, bodySize);
     paragraphs.push({ lines, y: cursor + lineHeight / 2 });
     cursor += lines.length * lineHeight;
   });
   let progress = null;
   if (modal.progressLine) {
-    const style = { style: 'text', icon: 'stamp', trailing: 'chevron', size: 12,
+    const style = { style: 'quiet', icon: 'stamp', trailing: 'chevron', size: 13,
       disabled: typeof modal.progressAction !== 'function' };
     const layout = buttonLayout(r, modal.progressLine, width, style);
     cursor += compact ? 8 : 12;
@@ -56,18 +76,15 @@ function measureModal(r, modal, navigation = null, helpHeight = 0, compact = fal
   }
   const actionGap = compact ? 8 : navigation ? 14 : 12;
   if (modal.buttons.length) cursor += navigation || progress ? actionGap : compact ? 16 : 24;
-  const buttons = modal.buttons.map((button, index) => {
-    const style = button.primary ? 'primary' : button.textOnly ? 'text' : 'secondary';
-    const layout = buttonLayout(r, button.text, width, { style, icon: button.icon });
-    const buttonHeight = Math.max(button.primary ? CONTROL.height : CONTROL.compactHeight, touchHeight,
-      layout.lines.length * layout.lineHeight + 20);
-    if (index) cursor += compact ? 6 : 8;
-    const result = { ...button, x: x + inset, y: cursor, w: width, h: buttonHeight, style };
-    cursor += buttonHeight;
-    return result;
+  const buttons = [];
+  actionRows(r, modal, width, touchHeight).forEach((row, index) => {
+    if (index) cursor += row.exit ? compact ? 12 : 18 : compact ? 8 : 10;
+    row.buttons.forEach((button, column) => buttons.push({ ...button, x: x + inset + column * (button.w + row.gap),
+      y: cursor, h: row.height }));
+    cursor += row.height;
   });
   const h = cursor + (compact ? 20 : 24);
-  return { x, y: Math.max(24, (r.H - h) / 2), w, h, width, compact, kickerY, title, titleY, titleSize, titleHeight, starsY, help, helpY, paragraphs, lineHeight, progress, buttons, navigation };
+  return { x, y: Math.max(24, (r.H - h) / 2), w, h, width, compact, kickerY, title, titleY, titleSize, titleHeight, bodySize, starsY, help, helpY, paragraphs, lineHeight, progress, buttons, navigation };
 }
 
 function modalLayout(r, modal) {
@@ -115,66 +132,52 @@ function drawModal(r, modal, now, resultAge = null) {
   const c = r.ctx, age = Number.isFinite(r.modalAt) ? Math.max(0, now - r.modalAt) : 1000, ui = modalLayout(r, modal);
   r.helpNavigation = ui.navigation ? { ...ui.navigation, modal } : null;
   const result = modal.kind === 'win' || modal.kind === 'fail';
-  const accent = modal.kind === 'fail' ? '#a76e55' : C.gold;
   const enter = Math.min(1, age / 220);
   c.save(); c.globalAlpha *= r.reducedMotion ? 1 : .32 + .68 * (1 - (1 - enter) ** 3);
   r.scrim('#36554979');
-  r.round(ui.x + 3, ui.y + 8, ui.w - 6, ui.h, 23, '#24473526');
-  r.round(ui.x - 2, ui.y + 3, ui.w + 4, ui.h, 23, '#e5d6b7', '#bda77f');
-  r.round(ui.x, ui.y, ui.w, ui.h, 23, '#fff8e8', '#caba96');
-  drawSurfaceEdges(r, ui.x, ui.y, ui.w, ui.h, 23);
-  r.line([[ui.x + 42, ui.y + 2], [ui.x + ui.w - 42, ui.y + 2]], accent, 2);
-  for (let hole = ui.y + 24; hole < ui.y + ui.h - 18; hole += 18) {
-    r.round(ui.x + 8, hole, 2, 2, 1, '#b8a07c60');
-    r.round(ui.x + ui.w - 10, hole, 2, 2, 1, '#b8a07c60');
-  }
-  // Small cancellation marks turn the result into a paper receipt without
-  // adding height or moving its text and actions on compact screens.
-  if (result) [ui.x + 48, ui.x + ui.w - 89].forEach(left => {
-    for (let line = 0; line < 3; line++) {
-      const y = ui.y + 46 + line * 6;
-      r.line([[left, y + 2], [left + 12, y], [left + 26, y + 2], [left + 40, y]], '#c7d4be', 1);
-    }
-  });
+  r.round(ui.x, ui.y + 6, ui.w, ui.h, 20, '#173c3518');
+  r.round(ui.x, ui.y, ui.w, ui.h, 20, C.panel, C.line);
   const help = modal.kind === 'help';
-  if (result) drawResultHeader(r, modal.kind, ui, resultAge);
+  const reading = modal.sections || modal.kind === 'pause';
+  if (result) {
+    const centerY = ui.y + (ui.compact ? 30 : 42);
+    r.circle(195, centerY, ui.compact ? 19 : 23, modal.kind === 'win' ? C.soft : C.peach);
+    r.icon(modal.kind === 'win' ? 'check' : 'lamp', 195, centerY, ui.compact ? 23 : 27,
+      modal.kind === 'win' ? C.green : C.orange);
+  }
   else if (modal.journeyProgress) {
     const journey = modal.journeyProgress;
-    drawPostmark(r, 195, ui.y + 32, 39, journey.done ? 'check' : 'stamp', C.goldText);
+    r.circle(195, ui.y + 32, 21, C.soft);
+    r.icon(journey.done ? 'check' : 'stamp', 195, ui.y + 32, 25, C.green);
     const gap = 19, start = 195 - (journey.target - 1) * gap / 2;
     for (let index = 0; index < journey.target; index++) {
-      r.circle(start + index * gap, ui.y + 66, 4, index < journey.points ? C.gold : '#e4dac2', '#c6b593');
+      r.circle(start + index * gap, ui.y + 66, 4, index < journey.points ? C.green : C.line);
     }
   }
   else if (modal.kind === 'item') {
-    const itemAccent = modal.itemId === 'echo' ? '#72aabb' : modal.itemId === 'kite' ? '#719f89' : modal.itemId === 'bridge' ? '#ab8860' : C.gold;
-    r.circle(195, ui.y + 41.5, 26, '#8b997524');
-    r.circle(195, ui.y + 40, 24, modal.itemId === 'echo' ? '#e0eff1' : modal.itemId === 'kite' ? '#e8efdd' : '#f5ecd5', '#d6c5a5');
-    r.circle(195, ui.y + 40, 20, null, '#fff9e9');
-    drawItemArt(r, modal.itemId, 195, ui.y + 40, 29);
-    drawEmblemLight(r, 195, ui.y + 40, 24, age, itemAccent);
-  } else if (!ui.help) {
-    r.circle(195, ui.y + 40, 22, C.raised, C.line);
-    const emblem = help ? 'echo' : modal.kind === 'pause' ? 'lamp' : modal.kind === 'journey' ? 'stamp' : 'wind';
-    r.icon(emblem, 195, ui.y + 40, 24, help ? C.blue : C.gold);
-    drawEmblemLight(r, 195, ui.y + 40, 22, age, help ? C.blue : C.gold);
-    drawPostalRules(r, 228, ui.y + 34, 35);
+    r.circle(195, ui.y + 36, 24, modal.itemId === 'echo' ? C.bluePale : C.soft);
+    drawItemArt(r, modal.itemId, 195, ui.y + 36, 31);
   }
-  if (modal.kicker) r.label(modal.kicker, 195, ui.y + ui.kickerY, ui.width, 11, C.muted, 'center');
-  ui.title.forEach((line, i) => r.text(line, 195, ui.y + ui.titleY + i * ui.titleHeight, ui.titleSize, C.ink, 'center', '700'));
+  else if (modal.kind === 'pause') {
+    r.circle(ui.x + ui.w - 46, ui.y + 44, 20, C.soft);
+    r.icon('pause', ui.x + ui.w - 46, ui.y + 44, 22, C.green);
+  }
+  if (modal.kicker) r.label(modal.kicker, 195, ui.y + ui.kickerY, ui.width, 12, C.muted, 'center');
+  ui.title.forEach((line, i) => r.text(line, reading ? ui.x + 24 : 195,
+    ui.y + ui.titleY + i * ui.titleHeight, ui.titleSize, C.ink, reading ? 'left' : 'center', '700'));
   if (ui.starsY != null) drawResultStars(r, modal.stars, ui.y + ui.starsY, resultAge);
   if (ui.help) drawHelp(r, ui.help, ui.x + 24, ui.y + ui.helpY);
-  const left = help || ui.paragraphs.some(paragraph => paragraph.lines.length > 1);
+  const left = help || modal.kind === 'pause' || modal.kind === 'item' || ui.paragraphs.some(paragraph => paragraph.lines.length > 1);
   ui.paragraphs.forEach((paragraph, index) => {
-    const color = result && index === 0 ? C.ink : C.muted;
+    const warning = paragraph.lines.some(line => /仅在本次运行|存储.*异常|未能保存/.test(line));
+    const lead = (result || modal.kind === 'item') && index === 0;
+    const color = warning ? C.dangerText : lead ? C.ink : C.muted;
     paragraph.lines.forEach((line, i) => r.text(line, left ? ui.x + 24 : 195,
-      ui.y + paragraph.y + i * ui.lineHeight, 13, color, left ? 'left' : 'center'));
+      ui.y + paragraph.y + i * ui.lineHeight, ui.bodySize, color, left ? 'left' : 'center', lead && i === 0 ? '600' : '400'));
   });
-  if (ui.progress || ui.buttons.length || ui.navigation) {
+  if (modal.kind !== 'pause' && (ui.progress || ui.buttons.length || ui.navigation)) {
     const separatorY = ui.y + (ui.progress ? ui.progress.y - 6 : (ui.navigation ? ui.navigation.y : ui.buttons[0].y) - 12);
-    r.line([[ui.x + 24, separatorY], [ui.x + ui.w - 24, separatorY]], '#d1d8c3', 1, [2, 5]);
-    r.circle(ui.x + 8, separatorY, 3, '#e0e6d3');
-    r.circle(ui.x + ui.w - 8, separatorY, 3, '#e0e6d3');
+    r.line([[ui.x + 24, separatorY], [ui.x + ui.w - 24, separatorY]], C.line, 1);
   }
   if (ui.progress) {
     const progress = ui.progress;
@@ -189,7 +192,8 @@ function drawModal(r, modal, now, resultAge = null) {
       { style: 'text', icon: 'chevron', disabled: nav.page === nav.count - 1 });
   }
   ui.buttons.forEach(button => r.button(button.text, button.x, ui.y + button.y, button.w, button.h, button.action,
-    { style: button.style, icon: button.icon }));
+    { style: button.style, icon: button.icon,
+      ...(modal.kind === 'reset-confirm' && !button.primary ? { color: C.dangerText } : {}) }));
   c.restore();
   return ui;
 }

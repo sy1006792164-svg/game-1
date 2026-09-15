@@ -2,11 +2,11 @@
 
 // Shared palette for the world, menus and in-game overlays.
 const C = Object.freeze({
-  paper: '#f2efdf', ink: '#294d49', green: '#316c5f', soft: '#e5e8d6',
-  line: '#c8ccb2', muted: '#4d6359', orange: '#ba694e', peach: '#f2e1ce',
-  blue: '#368f9d', bluePale: '#deeeed', white: '#fffdf4', yellow: '#e9b871',
-  panel: '#fff9e9', raised: '#f6efdc', gold: '#bc7e47', dark: '#294d49',
-  blueText: '#246b76', goldText: '#885729', dangerText: '#934c3c',
+  paper: '#f7f6f0', ink: '#233e39', green: '#285d50', soft: '#e8eee7',
+  line: '#dce2d8', muted: '#506359', orange: '#c77354', peach: '#f8e8dc',
+  blue: '#418f99', bluePale: '#e8f2f1', white: '#ffffff', yellow: '#edc17c',
+  panel: '#fffefa', raised: '#f0f2eb', gold: '#bd8550', dark: '#213f36',
+  blueText: '#276873', goldText: '#80572f', dangerText: '#984a37',
 });
 
 module.exports = { C };

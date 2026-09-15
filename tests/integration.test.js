@@ -1153,8 +1153,8 @@ test('cold launch shows the full health notice and real progress, then automatic
   assert.equal(h.game.page, 'startup');
   assert.equal(h.game.state, null);
   const text = startupText(h);
-  const brandStart = h.calls.findIndex(call => call.method === 'fillText' && call.args[0] === '风 起 · 信 至');
-  const brandEnd = h.calls.findIndex(call => call.method === 'fillText' && call.args[0] === '一封信，一段与回声同行的邮路。');
+  const brandStart = h.calls.findIndex(call => call.method === 'fillText' && call.args[0] === '一封信，一段小小的旅程');
+  const brandEnd = h.calls.findIndex(call => call.method === 'fillText' && call.args[0] === '和三拍后的自己，一起送信。');
   assert.ok(brandStart >= 0 && brandEnd > brandStart);
   assert.equal(h.calls.slice(brandStart + 1, brandEnd).filter(call => call.method === 'fill').length, 4,
     'cold launch paints all four title glyphs as outlines before the subtitle');
@@ -1377,6 +1377,9 @@ test('selecting the ongoing level resumes its route and guide while explicit res
   assert.equal(reloaded.game.guideStep().step, h.game.guideStep().step);
   reloaded.game.pause();
   reloaded.game.modal.buttons.find(button => button.text === '重新开始').action();
+  assert.equal(reloaded.game.modal.kind, 'restart-confirm');
+  assert.deepEqual(reloaded.game.state, state, 'opening restart confirmation preserves the resumed route');
+  reloaded.game.modal.buttons.find(button => button.primary).action();
   assert.equal(reloaded.game.state.turn, 0);
   assert.equal(reloaded.game.undosUsed, 0);
   assert.deepEqual(reloaded.game.actions, []);

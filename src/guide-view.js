@@ -16,13 +16,13 @@ const MARKERS = {
 
 function guideCardLayout(r, guide) {
   if (guide.interactive) {
-    const bodyLines = r.wrapLines(guide.text, 232, 12);
+    const bodyLines = r.wrapLines(guide.text, 232, 13);
     return { titleLines: [guide.title], bodyLines, tipLines: [],
       height: 44 + bodyLines.length * 17, compact: true };
   }
   const titleLines = r.wrapLines(guide.title, 186, 16, '600');
   const bodyLines = r.wrapLines(guide.text, 306, 14);
-  const tipLines = guide.visual && guide.visual.echo ? [] : r.wrapLines(guide.tip, 282, 11);
+  const tipLines = guide.visual && guide.visual.echo ? [] : r.wrapLines(guide.tip, 282, 12);
   const titleExtra = Math.max(0, titleLines.length - 1) * 21;
   const contentExtra = titleExtra + Math.max(0, bodyLines.length - 2) * 21;
   const footerHeight = 24 + Math.max(0, tipLines.length - 1) * 16;
@@ -34,22 +34,22 @@ function guideCardLayout(r, guide) {
 function drawGuideCard(r, game, guide, y) {
   const total = guide.total || 4, ui = guideCardLayout(r, guide);
   if (ui.compact) {
-    r.panel(24, y, 342, ui.height, { fill: C.panel, stroke: C.line, radius: 12, flat: true });
-    r.label(guide.title, 38, y + 20, 232, 13, C.ink, 'left', '600');
-    ui.bodyLines.forEach((line, index) => r.text(line, 38, y + 41 + index * 17, 12, C.muted));
+    r.panel(24, y, 342, ui.height, { fill: C.panel, stroke: C.line, radius: 16, flat: true });
+    r.label(guide.title, 38, y + 20, 232, 14, C.ink, 'left', '700');
+    ui.bodyLines.forEach((line, index) => r.text(line, 38, y + 41 + index * 17, 13, C.muted));
     r.button('跳过', 284, y + 12, 64, CONTROL.compactHeight, () => game.dismissGuide(),
-      { style: 'text', size: 11, disabled: !!game.modal || game.busy });
+      { style: 'text', size: 12, disabled: !!game.modal || game.busy });
     return;
   }
-  r.panel(24, y, 342, ui.height, { fill: '#fffaf0', stroke: '#c9d2b9', radius: 16 });
-  r.round(42, y + 18, 34, 28, 9, '#e5eddd', '#b9cdb1');
-  r.text(guide.step + '/' + total, 59, y + 32, 11, '#316c5f', 'center', '600');
+  r.panel(24, y, 342, ui.height, { fill: C.panel, stroke: C.line, radius: 18, flat: true });
+  r.round(42, y + 18, 34, 28, 10, C.soft);
+  r.text(guide.step + '/' + total, 59, y + 32, 12, C.green, 'center', '700');
   ui.titleLines.forEach((line, index) => r.text(line, 86, y + 30 + index * 21, 16, C.ink, 'left', '600'));
   // Progress belongs with the step heading, leaving the rule its own quiet row.
   const segment = 96 / total;
   for (let index = 0; index < total; index++) {
     r.round(86 + index * segment, y + 48 + ui.titleExtra, segment - 5, 3, 1.5,
-      index < guide.step ? C.green : '#e0e5d8');
+      index < guide.step ? C.green : C.soft);
   }
   // The full 44px hit target sits inside the card, clear of both title and body.
   r.button('跳过', 284, y + 14, 64, CONTROL.compactHeight, () => game.dismissGuide(), {
@@ -58,18 +58,19 @@ function drawGuideCard(r, game, guide, y) {
   ui.bodyLines.forEach((line, index) => r.text(line, 42, y + ui.bodyY + index * 21, 14, C.ink));
   const footerY = y + ui.footerY;
   const echo = guide.visual && guide.visual.echo;
-  r.round(42, footerY, 306, ui.footerHeight, 8, echo ? '#e9f2ee' : '#f0f2e8');
+  if (echo) r.round(42, footerY, 306, ui.footerHeight, 8, C.bluePale);
+  else r.line([[42, footerY - 2], [348, footerY - 2]], C.line, 1);
   if (echo) {
     r.icon('echo', 56, footerY + 12, 14, C.blue);
-    r.text('再行动 ' + echo.turns + ' 次，回声收票', 70, footerY + 12, 11, '#2b737b');
+    r.text('再行动 ' + echo.turns + ' 次，回声收票', 70, footerY + 12, 12, C.blueText);
     for (let index = 0; index < 3; index++) {
       const turns = 3 - index, done = echo.turns < turns;
-      r.circle(292 + index * 21, footerY + 12, 7, done ? C.blue : '#e1eeea', echo.turns === turns ? C.blue : '#b4cfca');
+      r.circle(292 + index * 21, footerY + 12, 7, done ? C.blueText : C.panel, echo.turns === turns ? C.blueText : C.line);
       if (done) r.icon('check', 292 + index * 21, footerY + 12, 9, C.white);
-      else r.text(turns, 292 + index * 21, footerY + 12, 10, echo.turns === turns ? '#2b737b' : C.muted, 'center', echo.turns === turns ? '600' : '400');
+      else r.text(turns, 292 + index * 21, footerY + 12, 11, echo.turns === turns ? C.blueText : C.muted, 'center', echo.turns === turns ? '600' : '400');
     }
-  } else ui.tipLines.forEach((line, index) => r.text(line, 54, footerY + 12 + index * 16, 11,
-    game.state.energy <= 3 ? '#925e37' : C.muted));
+  } else ui.tipLines.forEach((line, index) => r.text(line, 54, footerY + 12 + index * 16, 12,
+    game.state.energy <= 3 ? C.dangerText : C.muted));
 }
 
 // Painted in the board's existing projection; markers never add click targets.

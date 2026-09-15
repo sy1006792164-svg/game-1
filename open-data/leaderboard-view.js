@@ -1,7 +1,7 @@
 'use strict';
 
 // Friend identities and all conditional controls remain inside the open-data domain.
-const C = { ink: '#294d49', muted: '#4d6359', green: '#316c5f', gold: '#a36c35', goldText: '#885729', paper: '#fffdf4', line: '#cedbcf' };
+const C = { ink: '#233e39', muted: '#506359', green: '#285d50', gold: '#bd8550', goldText: '#80572f', paper: '#fffefa', line: '#dce2d8' };
 
 function leaderboardLayout(width, height) {
   const compact = height < 420, heroH = compact ? 96 : 126;
@@ -50,18 +50,6 @@ function paintLeaderboard(ctx, model, avatar) {
     ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
     ctx.lineWidth = width; ctx.strokeStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
   };
-  // Match the main canvas's upper-left light without crossing domain boundaries.
-  const edges = (x, y, width, height, radius, dark = false) => {
-    const inset = 1.5, r = Math.max(0, Math.min(radius, width / 2, height / 2) - inset);
-    const left = x + inset, right = x + width - inset, top = y + inset, bottom = y + height - inset;
-    ctx.save(); ctx.lineWidth = .9; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(left, bottom - r); ctx.lineTo(left, top + r);
-    ctx.arcTo(left, top, left + r, top, r); ctx.lineTo(right - r, top);
-    ctx.strokeStyle = dark ? '#c6dec18a' : '#fffef1dc'; ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(right, top + r); ctx.lineTo(right, bottom - r);
-    ctx.arcTo(right, bottom, right - r, bottom, r); ctx.lineTo(left + r, bottom);
-    ctx.strokeStyle = dark ? '#183e3966' : '#718a7163'; ctx.stroke(); ctx.restore();
-  };
   const circle = (x, y, radius, fill) => { ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); };
   const star = (x, y, size, color) => {
     ctx.beginPath(); for (let i = 0; i < 10; i++) {
@@ -71,17 +59,14 @@ function paintLeaderboard(ctx, model, avatar) {
     ctx.closePath(); ctx.fillStyle = color; ctx.fill();
   };
   const button = (label, x, y, width, height, action, disabled = false, primary = false) => {
-    round(x, y, width, height, 10, disabled ? '#e4ebe2' : primary ? C.green : C.paper,
+    round(x, y, width, height, 13, disabled ? '#e8eee7' : primary ? C.green : C.paper,
       disabled ? '#d8e2d6' : primary ? C.green : C.line);
-    text(label, x + width / 2, y + height / 2, 12, disabled ? '#869b8e' : primary ? C.paper : C.green, 'center', '600');
+    text(label, x + width / 2, y + height / 2, 13, disabled ? C.muted : primary ? C.paper : C.green, 'center', '600');
     if (!disabled) hits.push({ x, y: y - 4, w: width, h: height + 8, action });
   };
 
   // A personal scorecard anchors the page even when only one friend is present.
-  round(1, 3, w - 2, ui.heroH, 19, '#476d5920');
   round(0, 0, w, ui.heroH, 19, C.green);
-  edges(0, 0, w, ui.heroH, 19, true);
-  circle(w - 14, 15, 33, '#ffffff08');
   const portrait = ui.compact ? 30 : 38;
   const myIndex = rows.findIndex(row => row.isMe);
   avatar(self && self.avatarUrl, 17, 15, portrait);
@@ -133,8 +118,9 @@ function paintLeaderboard(ctx, model, avatar) {
         ctx.scale(1 - .016 * landing, 1 - .026 * landing);
         ctx.translate(-listWidth / 2, -y - rh / 2);
       }
-      round(0, y, listWidth, rh, 13, row.isMe ? moving ? '#eaf1d9' : '#f2f4e2' : C.paper,
-        row.isMe ? moving ? '#77965d' : '#9fba9b' : '#dce4d6', row.isMe && moving ? 2 : 1);
+      if (row.isMe) round(0, y, listWidth, rh, 13, moving ? '#e1ede2' : '#e8eee7',
+        moving ? C.green : '#cbd9cc', moving ? 2 : 1);
+      else line([[44, y + rh + 4], [listWidth - 12, y + rh + 4]], C.line);
       if (row.isMe) round(0, y + 13, 3, rh - 26, 1.5, C.green);
       if (row.rank <= 3) {
         const cy = y + rh / 2, colors = [
@@ -173,7 +159,6 @@ function paintLeaderboard(ctx, model, avatar) {
     if (showHint) {
       const contentEnd = Math.max(ui.listTop + contentHeight - scroll,
         floatingSelf ? motion.rowY + ui.rowHeight : -Infinity);
-      round(0, contentEnd + 14, w, 68, 13, '#e8eee2');
       star(27, contentEnd + 37, 9, '#8da985');
       text(fitted('每一封送达，都让星光更近', w - 64, 12, '600'), 48, contentEnd + 35, 12, C.green, 'left', '600');
       text(fitted('同玩好友同步成绩后，也会出现在这里', w - 64, 11), 48, contentEnd + 56, 11, C.muted);
@@ -181,7 +166,7 @@ function paintLeaderboard(ctx, model, avatar) {
   } else if (status === 'loading') {
     for (let i = 0; i < Math.min(2, ui.capacity); i++) {
       const y = ui.listTop + i * ui.stride;
-      round(0, y, w, ui.rowHeight, 13, '#f8faf0', C.line);
+      line([[60, y + ui.rowHeight + 4], [w - 12, y + ui.rowHeight + 4]], C.line);
       circle(31, y + ui.rowHeight / 2, 15, '#dfe9dc');
       round(60, y + 18, w * .38, 7, 3, '#d9e4d6');
       round(60, y + 33, w * .24, 6, 3, '#e3ebdf');

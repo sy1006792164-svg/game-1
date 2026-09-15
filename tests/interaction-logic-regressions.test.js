@@ -72,12 +72,12 @@ test('level and collection star guidance discloses tools as well as relighting',
   assert.equal(stars(CAMPAIGN[19], { turn: CAMPAIGN[19].par, itemsUsed: 1 }), 2);
   assert.equal(stars(CAMPAIGN[19], { turn: CAMPAIGN[19].par, revived: true }), 2);
   drawLevels(r, game);
-  const cardLabels = texts.filter(text => text.startsWith('三星 '));
-  assert.ok(cardLabels.length > 0);
-  assert.ok(cardLabels.every(text => /道具/.test(text) && /续灯/.test(text) && !text.includes('…')));
+  const guidance = texts.filter(text => text.startsWith('三星：'));
+  assert.equal(guidance.length, 1, 'one readable rule above the cards avoids repeating small print on every route');
+  assert.ok(guidance.every(text => /目标拍数/.test(text) && /道具/.test(text) && /续灯/.test(text) && !text.includes('…')));
   texts.length = 0; game.levelBrowser = { mode: 'replay' };
   drawLevels(r, game);
-  assert.ok(texts.some(text => /待摘星/.test(text) && /道具/.test(text) && /续灯/.test(text)));
+  assert.ok(texts.some(text => /三星/.test(text) && /目标拍数/.test(text) && /道具/.test(text) && /续灯/.test(text) && !text.includes('…')));
   texts.length = 0; game.page = 'collection'; game.modal = { kind: 'stamp-detail', stampId: album.next.id };
   drawStampDetail(r, game, 1000);
   assert.ok(texts.some(text => /三星/.test(text) && /道具/.test(text) && /续灯/.test(text)));

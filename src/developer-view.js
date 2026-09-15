@@ -11,9 +11,12 @@ function developmentLevelNumber(value) {
 }
 
 function drawDeveloperPicker(r, game) {
-  const modal = game.modal, x = 36, w = 318, h = 472, y = Math.max(24, (r.H - h) / 2);
+  const touchHeight = Math.max(CONTROL.compactHeight, 44 / (r.scale || 1));
+  const stride = touchHeight + 8, actionsY = 176 + stride * 4 + 14;
+  const actionHeight = Math.max(CONTROL.height, touchHeight);
+  const modal = game.modal, x = 36, w = 318, h = actionsY + actionHeight + 22, y = Math.max(24, (r.H - h) / 2);
   r.scrim('#294d498f');
-  r.panel(x, y, w, h, { fill: C.panel, stroke: C.line, accent: C.gold, radius: 22 });
+  r.panel(x, y, w, h, { fill: C.panel, stroke: C.line, radius: 22 });
   r.text('开发选关', x + 24, y + 34, 22, C.ink, 'left', '700');
   r.text('输入 1–' + CAMPAIGN.length + ' 关，直接开始试玩', x + 24, y + 61, 12, C.muted);
   r.round(x + 22, y + 82, w - 44, 56, 12, '#e8eee0', '#bdcfb8');
@@ -21,13 +24,13 @@ function drawDeveloperPicker(r, game) {
   r.text(modal.digits || '关卡编号', 195, y + 110, modal.digits ? 28 : 16, modal.digits ? C.ink : C.muted, 'center', '600');
   r.text(modal.error || '开发存档与正式存档独立', 195, y + 155, 11, modal.error ? C.goldText : C.muted, 'center');
   ['1', '2', '3', '4', '5', '6', '7', '8', '9', '清空', '0', '退格'].forEach((key, index) => {
-    r.button(key, x + 22 + index % 3 * 94, y + 176 + Math.floor(index / 3) * 52, 86, CONTROL.compactHeight,
+    r.button(key, x + 22 + index % 3 * 94, y + 176 + Math.floor(index / 3) * stride, 86, touchHeight,
       () => game.developmentKey(key === '清空' ? 'Delete' : key === '退格' ? 'Backspace' : key),
-      { style: 'secondary', size: key.length === 1 ? 18 : 13 });
+      { style: key.length === 1 ? 'quiet' : 'text', size: key.length === 1 ? 18 : 13 });
   });
-  r.button('开始试玩', x + 22, y + 398, 174, CONTROL.height, () => game.developmentKey('Enter'),
+  r.button('开始试玩', x + 22, y + actionsY, 174, actionHeight, () => game.developmentKey('Enter'),
     { style: 'primary', disabled: developmentLevelNumber(modal.digits) === null });
-  r.button('取消', x + 206, y + 398, 90, CONTROL.height, () => game.developmentKey('Escape'), { style: 'text', size: 15 });
+  r.button('取消', x + 206, y + actionsY, 90, actionHeight, () => game.developmentKey('Escape'), { style: 'text', size: 15 });
   return { x, y, w, h };
 }
 

@@ -11,13 +11,13 @@ const TARGET_PAGES = new Set(['startup', 'publication', 'home', 'levels', 'game'
 // increasing the opacity of every distant layer.
 const TREATMENTS = Object.freeze({
   startup: Object.freeze({ wash: .1, depth: 1, near: .92, mist: 1, ribbons: 1, pieces: 6, motes: 5 }),
-  home: Object.freeze({ wash: .02, depth: 1, near: 1, mist: .9, ribbons: 1.08, pieces: 8, motes: 6 }),
-  levels: Object.freeze({ wash: .66, depth: .82, near: .88, mist: .72, ribbons: .84, pieces: 7, motes: 4 }),
-  game: Object.freeze({ wash: .08, depth: .66, near: .78, mist: 0, ribbons: 0, pieces: 0, motes: 0 }),
+  home: Object.freeze({ wash: .5, depth: .78, near: .48, mist: .35, ribbons: .35, pieces: 3, motes: 2 }),
+  levels: Object.freeze({ wash: .93, depth: .4, near: .18, mist: .2, ribbons: .12, pieces: 2, motes: 1 }),
+  game: Object.freeze({ wash: .52, depth: .5, near: .32, mist: 0, ribbons: 0, pieces: 0, motes: 0 }),
   publication: Object.freeze({ wash: .8, depth: .48, near: .22, mist: .4, ribbons: 0, pieces: 0, motes: 2 }),
-  collection: Object.freeze({ wash: .72, depth: .64, near: .58, mist: .5, ribbons: 0, pieces: 0, motes: 4 }),
-  leaderboard: Object.freeze({ wash: .74, depth: .6, near: .52, mist: .44, ribbons: 0, pieces: 0, motes: 4 }),
-  quiet: Object.freeze({ wash: .87, depth: .25, near: 0, mist: .3, ribbons: 0, pieces: 0, motes: 2 })
+  collection: Object.freeze({ wash: .94, depth: .32, near: .15, mist: .15, ribbons: 0, pieces: 0, motes: 1 }),
+  leaderboard: Object.freeze({ wash: .94, depth: .3, near: .14, mist: .12, ribbons: 0, pieces: 0, motes: 1 }),
+  quiet: Object.freeze({ wash: .97, depth: .2, near: 0, mist: .1, ribbons: 0, pieces: 0, motes: 0 })
 });
 
 function atmosphereTreatment(page) {

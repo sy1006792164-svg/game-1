@@ -141,12 +141,14 @@ test('authorization recovery keeps privacy retry and friend-consent actions sepa
   consent.action(); assert.deepEqual(friend.events.at(-1), ['friend-open']);
 });
 
-test('browser unavailable page is truthful and returns home from the header', () => {
+test('browser unavailable page is truthful and provides a direct return to the real route', () => {
   const h = harness({ authorization: { enabled: false, status: 'unavailable', message: '请在微信小游戏中授权并查看排行榜' } });
   assert.ok(h.labels.includes('浏览器中可以完整体验解谜旅程'));
   assert.ok(h.labels.includes('请在微信小游戏中授权并查看排行榜'));
   assert.equal(h.hits.length, 0);
-  assert.deepEqual(h.buttons, []);
+  assert.deepEqual(h.buttons.map(button => button.label), ['继续送信']);
+  h.buttons[0].action();
+  assert.deepEqual(h.events.at(-1), ['primary']);
   assert.equal(h.events.some(event => ['draw', 'resize'].includes(event[0])), false);
   h.calls.find(call => call.method === 'header').args[2]();
   assert.deepEqual(h.events.at(-1), ['home']);
@@ -164,7 +166,9 @@ test('all ranking states keep content and actions inside the 700-point safe layo
     const footer = h.calls.find(call => call.method === 'label' && call.args[2] === H - 18);
     assert.ok(footer, 'every ranking state keeps its footer note');
     assert.equal(footer.args[2], H - 18, 'only a note remains below the full-height ranking');
-    assert.equal(h.buttons.some(button => /继续送信|定位我/.test(button.label)), false);
+    assert.equal(h.buttons.some(button => /定位我/.test(button.label)), false);
+    assert.equal(h.buttons.some(button => button.label === '继续送信'),
+      variant.authorization && variant.authorization.status === 'unavailable' || false);
     for (const button of h.buttons) {
       assert.ok(button.x >= 0 && button.x + button.w <= 390);
       assert.ok(button.y >= 0 && button.y + button.h < H - 38, button.label + ' must stay clear of the footer note');

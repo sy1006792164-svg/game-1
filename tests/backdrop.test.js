@@ -102,8 +102,11 @@ test('every real page keeps atmosphere while dense and gameplay pages remain qui
     assert.ok(treatment.depth > 0 && treatment.near > 0, page + ' keeps both atmosphere layers');
   }
   assert.ok(atmosphereTreatment('home').near > atmosphereTreatment('collection').near);
-  assert.ok(atmosphereTreatment('game').near >= .7, 'gameplay atmosphere remains perceptible at normal viewing size');
-  assert.ok(atmosphereTreatment('levels').wash < atmosphereTreatment('publication').wash);
+  assert.ok(atmosphereTreatment('game').near < atmosphereTreatment('home').near,
+    'the board keeps more visual priority than decorative gameplay carriers');
+  for (const page of ['levels', 'collection', 'leaderboard']) {
+    assert.ok(atmosphereTreatment(page).wash >= .9, page + ' keeps a quiet surface beneath dense text');
+  }
   assert.equal(atmosphereTreatment('game').ribbons, 0, 'ambient direction cannot imitate a wind-tile hint');
   assert.equal(atmosphereTreatment('game').pieces, 0, 'gameplay uses undirected light and mist carriers');
   assert.equal(atmosphereTreatment('game').mist, 0, 'gameplay does not use horizontally travelling mist');
@@ -166,7 +169,7 @@ test('low quality preserves broad depth while reducing distant mist geometry', (
 
 test('near atmosphere is composited after the paper wash and before page content', () => {
   const { events, renderer } = draw(screens[0], 'levels');
-  const wash = events.findIndex(event => event.type === 'rectangle' && event.style === C.paper && event.alpha === .66);
+  const wash = events.findIndex(event => event.type === 'rectangle' && event.style === C.paper && event.alpha === atmosphereTreatment('levels').wash);
   const nearLight = events.findIndex(event => event.type === 'path' && event.style === chapterMood(0).light);
   assert.ok(wash >= 0 && nearLight > wash);
   assert.equal(renderer.hits.length, 1, 'decorative layers do not create hit targets');

@@ -99,10 +99,10 @@ function drawDeliveryIntro(r, modal, now, age) {
   const height = Math.min(472, r.H - 48), ui = { x: 22, y: Math.max(24, (r.H - height) / 2), w: 346, h: height };
   const x = 195, y = ui.y + Math.min(229, height * .485);
   r.scrim('#2c423daa');
-  drawPostalPaper(r, ui.x, ui.y, ui.w, ui.h, { radius: 20 });
-  r.text('山 间 邮 政', x, ui.y + 31, 11, C.goldText, 'center', '600');
+  r.round(ui.x, ui.y, ui.w, ui.h, 20, C.panel, C.line);
+  r.text('投递完成', x, ui.y + 31, 13, C.green, 'center', '600');
   r.text('信已送达', x, ui.y + 70, 28, C.ink, 'center', '700');
-  r.label(frame.title, x, ui.y + 103, 294, 13, C.muted, 'center');
+  r.label(frame.title, x, ui.y + 103, 294, 14, C.muted, 'center');
   const c = r.ctx;
   c.save(); c.beginPath(); c.rect(ui.x + 18, ui.y + 125, ui.w - 36, Math.max(0, ui.h - 234)); c.clip();
   if (frame.index < 2) drawArrival(r, frame, x, y);
@@ -111,17 +111,18 @@ function drawDeliveryIntro(r, modal, now, age) {
     if (frame.index === 3) drawResultStars(r, modal.stars, y + 83, (frame.age - 1400) * 1.4);
   } else drawRewards(r, modal, frame, x, y);
   c.restore();
-  const progressY = ui.y + ui.h - 93;
+  const progressY = ui.y + ui.h - 101;
   PHASES.forEach((phase, index) => {
     const markX = x - 64 + index * 32;
-    if (index < PHASES.length - 1) r.line([[markX + 6, progressY], [markX + 26, progressY]], '#cfc2a3', 1);
-    r.circle(markX, progressY, index === frame.index ? 4 : 2.5, index <= frame.index ? C.goldText : '#d0c5aa');
+    if (index < PHASES.length - 1) r.line([[markX + 6, progressY], [markX + 26, progressY]], C.line, 1);
+    r.circle(markX, progressY, index === frame.index ? 4 : 2.5, index <= frame.index ? C.green : C.line);
   });
   if (!r.deliveryPresentation || r.deliveryPresentation.modal !== modal) {
     r.deliveryPresentation = { modal, skip: () => { skipDelivery(modal); r.hits = []; } };
   }
-  r.button('跳过演出 · 查看回执', 69, ui.y + ui.h - 74, 252, CONTROL.compactHeight,
-    r.deliveryPresentation.skip, { style: 'text', size: 12, color: C.muted });
+  const buttonHeight = Math.max(CONTROL.height, 44 / (r.scale || 1));
+  r.button('查看回执', 46, ui.y + ui.h - 24 - buttonHeight, 298, buttonHeight,
+    r.deliveryPresentation.skip, { style: 'primary', icon: 'check' });
   return ui;
 }
 

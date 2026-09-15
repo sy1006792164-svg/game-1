@@ -93,7 +93,7 @@ function openJourney(game) {
         text: '第 ' + candidate.levelId + ' 封 · 查看挑战', primary: index === 0, icon: 'route',
         action: () => game.openRoutePlan(CAMPAIGN[candidate.levelId - 1])
       })),
-      { text: '去邮票册看目标', icon: 'stamp', action: () => game.openPage('collection') },
+      { text: '邮票目标', icon: 'stamp', action: () => game.openPage('collection') },
       { text: '返回', textOnly: true, action: () => { game.modal = old; game.renderer.hits = []; game.syncMusic(); } }
     ] };
   game.renderer.hits = []; game.syncMusic();

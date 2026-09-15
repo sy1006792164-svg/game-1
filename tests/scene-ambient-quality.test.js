@@ -56,17 +56,26 @@ function boardFrame(now, options = {}, ready = false, moving = false) {
   return record;
 }
 
-test('the next-stamp orbit shares paused decorative time and disappears in low quality', () => {
+test('the next stamp keeps its real collection status readable without orbiting decoration', () => {
   const stamp = getAlbum({ completed: {} }).next;
   const frame = options => {
     const record = recorder(options);
     drawStampArt(record.r, stamp, { x: 24, y: 24, w: 106, h: 144 }, { next: true });
+    assert.equal(record.r.hits.length, 0, 'artwork never adds competing interaction targets');
+    assert.equal(record.r.ctx.globalAlpha, 1, 'stamp painting restores the incoming opacity');
     return record.commands;
   };
-  assert.deepEqual(frame({ now: 1000, ambientNow: 1000 }), frame({ now: 60000, ambientNow: 1000 }));
-  const quiet = frame({ now: 1000, reducedMotion: true });
-  assert.deepEqual(quiet, frame({ now: 60000, effectsQuality: 'low' }));
-  assert.ok(quiet.length < frame({ now: 1000, ambientNow: 1000 }).length);
+  const first = frame({ now: 1000, ambientNow: 1000 });
+  for (const options of [{ now: 60000, ambientNow: 1000 }, { now: 60000, ambientNow: 60000 },
+    { now: 1000, reducedMotion: true }, { now: 60000, effectsQuality: 'low' }])
+    assert.deepEqual(first, frame(options), 'the next-stamp badge and requirement stay still across time and quality settings');
+  const labels = first.filter(command => command[0] === 'fillText').map(command => command[1]);
+  const required = ['下一枚', stamp.name, '还差 ' + stamp.remaining + ' 星'];
+  const rows = required.map(value => labels.find(label => label[0] === value));
+  assert.ok(rows.every(Boolean), 'the next badge, real name and remaining stars must all be visible');
+  assert.ok(rows[0][2] < rows[1][2] && rows[1][2] < rows[2][2], 'state, title and requirement occupy distinct rows');
+  for (const [, x, y] of labels) assert.ok(x >= 0 && x <= 106 && y > 0 && y < 144, 'labels remain inside the stamp');
+  assert.equal(labels.some(label => label[0] === '已收藏'), false, 'an unearned next stamp cannot claim to be collected');
 });
 
 test('low quality and reduced motion freeze all board scenery, including ready-office decoration', () => {

@@ -1,9 +1,9 @@
 'use strict';
 
-const { CAMPAIGN, PER_CHAPTER } = require('./levels');
+const { CAMPAIGN } = require('./levels');
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
-const { insideRect } = require('./board-projection');
+const { drawLevelCard } = require('./level-card-view');
 const { campaignRecord } = require('./campaign-progress');
 const { drawChapterDirectory } = require('./chapter-view');
 const { drawChapterMap } = require('./chapter-map');
@@ -15,73 +15,6 @@ const { CARD_HEIGHT, ROW_HEIGHT, CHAPTER_HEADER, levelBrowserMode, replayLevels,
   navigateLevelBrowser } = require('./level-navigation');
 
 const clamp = value => Math.max(0, Math.min(1, value));
-
-function drawLetterCard(r, x, y, w, h, unlocked, next, held) {
-  r.panel(x, y, w, h, { fill: held && unlocked ? '#e5ecde' : next ? '#fff7e5' : unlocked ? C.panel : '#e4ebe1',
-    stroke: next ? '#cba477' : C.line, accent: next ? C.gold : null, radius: 13, flat: !next });
-  r.line([[x + 17, y + h - 42], [x + w - 17, y + h - 42]], next ? '#d5b98b' : '#b6cab9', .8, [3, 4]);
-  if (next) r.circle(x + 136, y + 24, 13, '#f6e6c6', '#c8a476');
-}
-
-function drawLevelCard(r, game, level, record, index, rect, viewport, current, saved) {
-  const scroll = game.levelScroll, now = Number.isFinite(r.pageNow) ? r.pageNow : r.now, c = r.ctx;
-  if (!scroll.revealed.has(index)) {
-    if (scroll.revealed.size >= 64) scroll.revealed.delete(scroll.revealed.keys().next().value);
-    const entering = now - scroll.enteredAt < 200 && !scroll.touching && !scroll.dragged && scroll.wheelTarget === null;
-    scroll.revealed.set(index, entering ? now + index % PER_CHAPTER * 26 : now - 320);
-  }
-  if (scroll.touching || scroll.dragged || scroll.wheelTarget !== null) scroll.revealed.set(index, Math.min(scroll.revealed.get(index), now - 320));
-  const progress = clamp((now - scroll.revealed.get(index)) / 320);
-  const ease = r.reducedMotion || r.effectsQuality === 'low' ? 1 : 1 - Math.pow(1 - progress, 3);
-  const { x, w, h } = rect, y = rect.y + (1 - ease) * 10;
-  const unlocked = game.unlocked(index), next = level.id === current.id;
-  const inProgress = saved && saved.levelId === level.id, highlighted = next || inProgress;
-  const held = game.pointer && !game.pointer.dragging && insideRect(viewport, game.pointer.x, game.pointer.y) && insideRect(rect, game.pointer.x, game.pointer.y);
-  c.save(); c.globalAlpha *= ease;
-  const scale = held ? .975 : 1;
-  c.translate(x + w / 2, y + h / 2); c.scale(scale, scale); c.translate(-x - w / 2, -y - h / 2);
-  drawLetterCard(r, x, y, w, h, unlocked, highlighted, held);
-  r.text(String(level.id).padStart(3, '0'), x + 17, y + 24, 14, unlocked ? C.green : C.muted, 'left', '600');
-  if (inProgress) r.text('进行中', x + 62, y + 24, 11, C.goldText, 'left', '600');
-  else {
-    const difficulty = level.difficulty || difficultyProfile(level);
-    r.label(level.experience ? level.experience.phaseName : difficulty.name, x + 62, y + 24, 55, 11,
-      unlocked && level.experience && level.experience.chapterFinale ? C.goldText : C.muted);
-  }
-  const idle = unlocked && !record && highlighted && !held && !scroll.touching &&
-    Math.abs(scroll.velocity) < 4 && scroll.wheelTarget === null && progress === 1 &&
-    now - scroll.enteredAt > 800 && now - scroll.activeAt > 800 && !r.reducedMotion && r.effectsQuality !== 'low';
-  const time = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
-  const phase = (time + index * 719) % 6200 / 820;
-  const lift = idle && phase < 1 ? Math.sin(phase * Math.PI) ** 2 : 0;
-  if (highlighted && unlocked && !record) {
-    // A traveling dash on the envelope fold leads toward its opening action.
-    // Keep every highlight inside the card, so adjacent locked routes stay clear.
-    const routePhase = idle ? (time % 4200) / 4200 : .5;
-    const length = 12, start = x + 18 + routePhase * (w - 48);
-    const alpha = Math.round((idle ? Math.sin(routePhase * Math.PI) : .8) * 220).toString(16).padStart(2, '0');
-    r.line([[start, y + h - 42], [Math.min(x + w - 17, start + length), y + h - 42]], C.gold + alpha, 1.6);
-  }
-  c.save(); c.translate(x + 136, y + 25 - lift * 2);
-  c.rotate(lift * Math.sin(phase * Math.PI * 2) * .12);
-  r.actionIcon(unlocked ? record ? 'check' : 'letter' : 'lock', 0, 0, unlocked ? C.gold : '#74897a');
-  c.restore();
-  r.label(level.title, x + 17, y + 52, 132, 16, unlocked ? C.ink : C.muted, 'left', '600');
-  r.label('三星目标 · ' + level.par + ' 拍内', x + 17, y + 76, 132, 11, C.muted);
-  const feature = level.letterOrder ? '编号收信 · 按序投递' : Object.keys(level.supplies || {}).length ? '沿途驿站 · 免费补给'
-    : level.experience ? level.experience.themeName : '不用道具或续灯';
-  r.label(feature, x + 17, y + 92, 132, 11, C.muted);
-  if (record) {
-    for (let star = 0; star < 3; star++) r.icon('star', x + 23 + star * 21, y + h - 24, 14, star < record.stars ? C.gold : C.line);
-    r.text(record.bestTurns + ' 拍', x + 125, y + h - 24, 11, C.muted, 'right');
-  } else r.text(inProgress ? '继续投递' : unlocked ? '开始投递' : '先送达上一封', x + 17, y + h - 23, 12, highlighted ? C.goldText : unlocked ? C.green : C.muted, 'left', highlighted ? '600' : '400');
-  if (unlocked) r.actionIcon('arrow-right', x + 145, y + h - 24, highlighted ? C.gold : C.green);
-  c.restore();
-  const action = () => unlocked ? game.selectLevel(level.id) : game.toast('送达上一封信后开启');
-  action.focusId = 'level:' + level.id;
-  r.hit(x, y, w, h, action,
-    (px, py) => insideRect(viewport, px, py));
-}
 
 function drawReplayLevels(r, game, profile, progress, current, saved, viewport) {
   const levels = replayLevels(game), offset = game.levelScroll.offset;
@@ -123,6 +56,7 @@ function drawLevels(r, game) {
   }
   scroll.update(now);
   drawLevelHeader(r, game, progress, mode);
+  r.round(24, 151, 342, CONTROL.compactHeight, 14, C.soft);
   [['all', '邮路地图'], ['replay', '待摘星'], ['chapters', '章节目录']].forEach(([key, title], index) => {
     r.button(title, 24 + index * 117, 151, 108, CONTROL.compactHeight, () => {
       if (key === mode) return;
