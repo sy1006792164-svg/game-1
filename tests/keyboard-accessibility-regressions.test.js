@@ -76,17 +76,11 @@ test('Enter continues the completed route and restarts a failed route without a 
   const settled = JSON.stringify(h.game.profile());
   h.draw(399);
   h.key('Enter');
-  assert.equal(h.game.level.id, 1, 'the final move still owns input before presentation controls are available');
+  assert.equal(h.game.level.id, 1, 'the final move still owns input before result controls are available');
   h.draw(1);
-  assert.ok(h.game.renderer.hits.some(hit => hit.action === h.game.renderer.deliveryPresentation.skip));
-  h.key('Enter');
-  assert.equal(h.game.level.id, 1, 'skipping the delivery opens its receipt, never the next route');
-  assert.equal(JSON.stringify(h.game.profile()), settled, 'skipping cannot award the delivery twice');
-  h.key('Enter');
-  assert.equal(h.game.level.id, 1, 'a second key cannot activate receipt buttons before they are drawn');
-  h.draw();
   const primary = h.game.modal.buttons.find(button => button.primary);
   assert.ok(h.game.renderer.hits.some(hit => hit.action === primary.action));
+  assert.equal(JSON.stringify(h.game.profile()), settled, 'showing the result cannot award the delivery twice');
   h.key('Enter');
   assert.equal(h.game.level.id, 2);
   assert.equal(h.game.modal, null);
@@ -106,25 +100,19 @@ test('Enter continues the completed route and restarts a failed route without a 
   assert.deepEqual(h.game.actions, []);
 });
 
-test('Escape only skips a visible delivery and keyboard focus cannot activate stale presentation actions', t => {
+test('Escape leaves a completed result open and keyboard focus targets its persistent actions', t => {
   const h = harness(); t.after(() => h.destroy()); h.start();
   for (const action of h.game.level.solution) h.act(action);
   const modal = h.game.modal, settled = JSON.stringify(h.game.profile());
   h.key('Escape');
   assert.equal(h.game.modal, modal);
-  assert.equal(h.game.renderer.deliveryPresentation, undefined);
   h.draw(400);
   const { focusedTarget } = require('../src/keyboard-focus');
   h.key('Tab');
-  assert.equal(focusedTarget(h.game).label, '查看回执');
+  assert.equal(focusedTarget(h.game).label, modal.progressLine);
   h.key('Escape');
   assert.equal(h.game.modal, modal);
   assert.equal(h.game.level.id, 1);
-  assert.deepEqual(h.game.renderer.hits, []);
-  h.key('Escape');
-  assert.equal(h.game.level.id, 1);
-  h.draw();
-  assert.equal(h.game.renderer.deliveryPresentation, null);
   assert.equal(JSON.stringify(h.game.profile()), settled);
   h.key('Enter');
   assert.equal(h.game.level.id, 2);
@@ -161,20 +149,6 @@ test('visible reduced-motion results accept Enter immediately and failure ads re
   assert.equal(requested, 0, 'board and cancel keys cannot choose an ad');
   h.key('Enter');
   assert.equal(requested, 1);
-});
-
-test('Escape and Enter both preserve local data when closing the reset confirmation', t => {
-  const h = harness(); t.after(() => h.destroy()); h.start(); h.act('right');
-  h.game.openPage('settings');
-  const before = JSON.stringify([...h.saved]);
-  for (const key of ['Escape', 'Enter']) {
-    h.game.resetPrompt();
-    assert.equal(h.game.modal.kind, 'reset-confirm');
-    h.key(key);
-    assert.equal(h.game.modal, null);
-    assert.equal(h.game.page, 'settings');
-    assert.equal(JSON.stringify([...h.saved]), before, 'a keyboard dismissal cannot select the destructive action');
-  }
 });
 
 test('Escape cancels a pause restart without changing the route, held supplies or saved progress', t => {

@@ -367,30 +367,6 @@ class Game {
     this.lastFrame = -Infinity;
     return enabled;
   }
-  resetPrompt() {
-    if (this.page !== 'settings' || this.hidden || this.busy || this.modal) return false;
-    const version = this.development ? '开发环境' : '正式版本';
-    this.modal = {
-      kind: 'reset-confirm', title: '确认清除本机数据？', kicker: '仅此设备 · 无法撤销',
-      lines: [
-        '将清除' + version + '在这台设备上的通关记录、邮票、引导状态、当前路线和体验设置。',
-        '好友排行榜中已经上传的成绩不属于本机存档，不会随之删除。'
-      ],
-      buttons: [
-        { text: '保留本机数据', primary: true, action: () => { this.modal = null; this.syncMusic(); } },
-        { text: '确认清除本机数据', action: () => {
-          this.store.reset();
-          this.state = null; this.previousState = null; this.level = null; this.actions = []; this.reviveHistory = [];
-          this.undosUsed = 0; this.mechanicGuide = null; this.guideEnabled = false; this.pendingAction = null;
-          this.home(); this.syncMusic(true);
-          this.toast(this.store.getStatus().persisted ? '本机数据已清除，体验设置已恢复默认'
-            : '本次运行数据已重置，但本机存档未能完全清除');
-        } }
-      ]
-    };
-    this.syncMusic();
-    return true;
-  }
   persist() {
     if (this.state && this.state.status !== 'won') this.store.saveRun({ mode: this.mode, levelId: this.level.id, revision: this.level.revision || '1', actions: this.actions.slice(), reviveHistory: this.reviveHistory.slice(), undosUsed: this.undosUsed,
       itemRewards: { ...this.itemRewards },
@@ -626,7 +602,6 @@ class Game {
     if (rewards.length) lines.push(rewards.length > 1 ? '收到 ' + rewards.length + ' 枚新邮票' : '收到新邮票「' + rewards[0].name + '」');
     this.modal = {
       kind: 'win', title: '信已送达', stars: rating,
-      delivery: { levelId: this.level.id, title: this.level.title, rewards },
       progressLine: '今日邮程 ' + Math.min(this.journey().points, this.journey().target) + '/' + this.journey().target +
         (this.journey().earnedDays > journeyBefore.earnedDays ? ' · 获得日邮戳' : this.journey().points > journeyBefore.points ? ' · +' + (this.journey().points - journeyBefore.points) : ' · 本关今日已记'),
       progressAction: () => this.openJourney(),

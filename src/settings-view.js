@@ -1,7 +1,6 @@
 'use strict';
 
 const { C } = require('./theme');
-const { CONTROL } = require('./controls');
 const { togglePosition } = require('./ui-motion');
 
 const ROWS = Object.freeze([
@@ -54,29 +53,11 @@ function drawSettingGroup(r, game, title, rows, settings, y) {
   return rowY;
 }
 
-function storageMessage(game) {
-  if (game.store.getStatus().persisted) {
-    return '通关记录、邮票、引导状态、当前路线和体验设置保存在这台设备。清理缓存或更换设备后无法同步找回。';
-  }
-  return '当前存储状态异常。原存档会尽量保留，新变化可能仅在本次运行有效；恢复后游戏会自动重试保存。';
-}
-
 function drawSettings(r, game) {
   r.header('体验设置', '声音、反馈与动态效果', () => game.home());
   const settings = game.profile().settings;
-  let y = drawSettingGroup(r, game, '声音', ROWS.slice(0, 2), settings, 92);
-  y = drawSettingGroup(r, game, '反馈与动态', ROWS.slice(2), settings, y + 16) + 22;
-
-  const lines = r.wrapLines(storageMessage(game), 306, 13);
-  const panelH = 42 + lines.length * 20;
-  r.round(42, y, 306, 1, 0, C.line);
-  r.text('本机数据', 42, y + 21, 15, C.ink, 'left', '600');
-  lines.forEach((line, index) => r.text(line, 42, y + 46 + index * 20, 13,
-    game.store.getStatus().persisted ? C.muted : C.dangerText));
-  const actionHeight = Math.max(CONTROL.compactHeight, 44 / (r.scale || 1));
-  r.button('清除这台设备的数据', 24, y + panelH + 10, 342, actionHeight,
-    () => game.resetPrompt(), { style: 'text', size: 13, color: C.dangerText });
-  r.text('清除后无法恢复', 195, y + panelH + actionHeight + 26, 12, C.muted, 'center');
+  const y = drawSettingGroup(r, game, '声音', ROWS.slice(0, 2), settings, 92);
+  drawSettingGroup(r, game, '反馈与动态', ROWS.slice(2), settings, y + 16);
 }
 
 module.exports = { drawSettings, ROWS };

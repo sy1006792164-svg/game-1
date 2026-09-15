@@ -37,26 +37,4 @@ function drawEchoTimeline(r, game, rect) {
   c.restore();
 }
 
-// Mark the earliest arrival at each tile. A wait can queue the same tile more
-// than once; listing all its beats prevents duplicate markers from overlapping.
-function drawEchoMarkers(r, forecast, projection) {
-  const groups = new Map(), { point, halfW, halfH } = projection, c = r.ctx;
-  for (const entry of forecast) {
-    if (entry.cell === null) continue;
-    const group = groups.get(entry.cell);
-    if (group) { group.beats.push(entry.beat); group.seal ||= entry.seal; }
-    else groups.set(entry.cell, { beats: [entry.beat], seal: entry.seal });
-  }
-  c.save();
-  for (const [cell, group] of groups) {
-    const [x, y] = point(cell), label = group.beats.join('·');
-    const size = Math.max(9, Math.min(11, halfW * .43));
-    const width = Math.max(size + 6, label.length * size * .48 + 8);
-    const height = size + 4, left = x - width / 2, top = y + halfH * .42 - height / 2;
-    r.round(left, top, width, height, height / 2, group.seal ? C.blueText : C.panel, C.blueText);
-    r.text(label, x, top + height / 2, size, group.seal ? C.white : C.blueText, 'center', '700');
-  }
-  c.restore();
-}
-
-module.exports = { ECHO_TIMELINE_HEIGHT, getEchoForecast, drawEchoTimeline, drawEchoMarkers };
+module.exports = { ECHO_TIMELINE_HEIGHT, getEchoForecast, drawEchoTimeline };

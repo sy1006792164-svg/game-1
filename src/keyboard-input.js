@@ -40,13 +40,7 @@ function handleGameKey(game, key) {
       }
       return true;
     }
-    const delivery = game.renderer.deliveryPresentation;
-    if ((key === 'Enter' || key === 'Escape') && delivery && delivery.modal === game.modal &&
-        game.renderer.currentModal === game.modal && game.renderer.hits.some(hit => hit.action === delivery.skip)) {
-      activateModalButton(game, { action: delivery.skip });
-      return true;
-    }
-    if (key === 'Enter' && ['help', 'pause', 'win', 'fail', 'reset-confirm', 'restart-confirm', 'journey', 'route-plan'].includes(game.modal.kind)) {
+    if (key === 'Enter' && ['help', 'pause', 'win', 'fail', 'restart-confirm', 'journey', 'route-plan'].includes(game.modal.kind)) {
       // Result actions become available after the final move is presented.
       // Use the actual painted control so reduced motion and restored results
       // keep exactly the same activation timing as pointer input.
@@ -72,8 +66,6 @@ function handleGameKey(game, key) {
       } else if (game.modal.kind === 'help') {
         activateModalButton(game, buttons[0]);
       } else if (game.modal.kind === 'pause' && game.page === 'game') game.pause();
-      // This dialog deliberately makes "keep local data" its primary action.
-      else if (game.modal.kind === 'reset-confirm') activateModalButton(game, primary);
     }
     return true;
   }

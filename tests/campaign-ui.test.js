@@ -405,7 +405,8 @@ test('returning home from a delivery retains settled scores and retries a failed
     game.actions = level.solution.slice(); game.state = replay(level, game.actions);
     assert.equal(game.state.status, 'won'); game.victory();
     assert.equal(game.modal.kind, 'win');
-    assert.equal(game.modal.delivery.rewards.length > 0, firstDelivery, 'new stamp art remains part of the delivery');
+    assert.equal(game.modal.lines.some(line => /收到(?: \d+ 枚)?新邮票/.test(line)), firstDelivery,
+      'only a first delivery reports the newly settled stamp reward');
     assert.equal(game.modal.buttons.length, 3, 'receipt navigation stays consistent when a stamp is earned');
     const settled = game.profile().completed[level.id], journey = game.journey();
     const home = game.modal.buttons.find(button => button.text === '返回邮局');

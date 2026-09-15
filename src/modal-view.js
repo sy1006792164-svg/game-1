@@ -5,7 +5,6 @@ const { CONTROL, buttonLayout } = require('./controls');
 const { drawResultStars } = require('./result-effects');
 const { layoutHelp, drawHelp } = require('./help-view');
 const { drawItemArt } = require('./item-view');
-const { drawDeliveryIntro } = require('./delivery-presentation');
 
 function actionRows(r, modal, width, touchHeight) {
   const gap = 10, half = (width - gap) / 2;
@@ -20,7 +19,7 @@ function actionRows(r, modal, width, touchHeight) {
   const rows = [];
   for (let index = 0; index < modal.buttons.length; index++) {
     const button = modal.buttons[index], next = modal.buttons[index + 1];
-    const pair = modal.kind !== 'reset-confirm' && !button.primary && next && !next.primary &&
+    const pair = !button.primary && next && !next.primary &&
       !isExit(button) && !isExit(next) &&
       button.text.length <= 9 && next.text.length <= 9;
     const buttons = pair ? [layout(button, half), layout(next, half)] : [layout(button, width)];
@@ -119,16 +118,6 @@ function modalLayout(r, modal) {
 }
 
 function drawModal(r, modal, now, resultAge = null) {
-  const delivery = drawDeliveryIntro(r, modal, now, resultAge);
-  if (delivery) { r.helpNavigation = null; return delivery; }
-  if (r.deliveryPresentation) {
-    // A finger pressed on the ceremony must not release onto a freshly
-    // uncovered next-route button when the ceremony finishes on its own.
-    if (r.pointer) r.pointer.cancelled = true;
-    r.deliveryPresentation = null;
-  }
-  // A skipped or completed ceremony reveals the complete receipt immediately.
-  if (modal.kind === 'win' && modal.delivery) resultAge = null;
   const c = r.ctx, age = Number.isFinite(r.modalAt) ? Math.max(0, now - r.modalAt) : 1000, ui = modalLayout(r, modal);
   r.helpNavigation = ui.navigation ? { ...ui.navigation, modal } : null;
   const result = modal.kind === 'win' || modal.kind === 'fail';
@@ -192,8 +181,7 @@ function drawModal(r, modal, now, resultAge = null) {
       { style: 'text', icon: 'chevron', disabled: nav.page === nav.count - 1 });
   }
   ui.buttons.forEach(button => r.button(button.text, button.x, ui.y + button.y, button.w, button.h, button.action,
-    { style: button.style, icon: button.icon,
-      ...(modal.kind === 'reset-confirm' && !button.primary ? { color: C.dangerText } : {}) }));
+    { style: button.style, icon: button.icon }));
   c.restore();
   return ui;
 }

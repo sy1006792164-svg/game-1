@@ -3,7 +3,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { drawSettings, ROWS } = require('../src/settings-view');
-const { CONTROL } = require('../src/controls');
 const { GAME_NAME, VERSION } = require('../src/config');
 
 function harness(options = {}) {
@@ -29,15 +28,14 @@ function harness(options = {}) {
   };
   const game = {
     platform: { kind: options.kind || 'wechat', reducedMotion: options.systemReduced === true },
-    store: { getStatus: () => ({ persisted: options.persisted !== false }) },
     profile: () => ({ settings }), toastUntil: 0,
-    home: () => events.push('home'), toggle: key => events.push(key), resetPrompt: () => events.push('reset'),
+    home: () => events.push('home'), toggle: key => events.push(key),
   };
   drawSettings(r, game);
   return { r, calls, hits, buttons, events, game, labels: calls.filter(call => call.method === 'text').map(call => call.args[0]) };
 }
 
-test('settings view exposes four persisted choices with full-row touch targets', () => {
+test('settings view exposes only four persisted choices with full-row touch targets', () => {
   for (const H of [700, 844]) {
     const h = harness({ H });
     assert.deepEqual(ROWS.map(row => row.key), ['sound', 'music', 'haptics', 'reducedMotion']);
@@ -47,22 +45,18 @@ test('settings view exposes four persisted choices with full-row touch targets',
     assert.ok(toggleHits.every(hit => hit.x >= 0 && hit.x + hit.w <= 390 && hit.w >= 44 && hit.h >= 44));
     toggleHits.forEach(hit => hit.action());
     assert.deepEqual(h.events, ['sound', 'music', 'haptics', 'reducedMotion']);
-    const clear = h.buttons.find(button => button.label === '清除这台设备的数据');
-    assert.ok(clear);
-    assert.equal(clear.h, CONTROL.compactHeight);
-    assert.ok(clear.y >= 0 && clear.y + clear.h < H - 18);
-    clear.action(); assert.equal(h.events.at(-1), 'reset');
+    assert.equal(h.buttons.length, 0, 'settings has no local-data reset action');
+    assert.doesNotMatch(h.labels.join('\n'), /本机数据|清除这台设备的数据|清除后无法恢复/);
     h.calls.find(call => call.method === 'header').args[2](); assert.equal(h.events.at(-1), 'home');
     assert.equal(h.labels.some(label => String(label).includes(GAME_NAME) || String(label).includes(VERSION)), false,
       'settings does not render product or version metadata');
   }
 });
 
-test('settings view explains platform limits, system motion preference and failed persistence truthfully', () => {
-  const h = harness({ kind: 'browser', systemReduced: true, persisted: false });
+test('settings view explains platform limits and the system motion preference', () => {
+  const h = harness({ kind: 'browser', systemReduced: true });
   assert.ok(h.labels.includes('当前平台不支持硬件振动'));
   assert.ok(h.labels.includes('手动关闭 · 系统仍保持开启'));
-  assert.match(h.labels.join(''), /原存档会尽量保留.*新变化可能仅在本次运行有效/);
-  assert.equal(h.hits.length, 4, 'three supported toggles and the clear button remain actionable');
+  assert.equal(h.hits.length, 3, 'only the three supported toggles are actionable');
   assert.equal(h.events.includes('haptics'), false);
 });

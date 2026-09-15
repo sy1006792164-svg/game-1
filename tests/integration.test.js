@@ -1693,27 +1693,6 @@ test('disabling haptics stops only hardware vibration and retains visual collect
   }
 });
 
-test('clearing local data requires confirmation and accurately resets the current environment only', () => {
-  const h = harness();
-  h.game.store.recordWin(1, 3, 4); h.start(); h.game.toggle('sound');
-  h.game.openPage('settings');
-  assert.equal(h.game.resetPrompt(), true);
-  assert.equal(h.game.profile().totalWins, 1, 'opening the confirmation does not clear anything');
-  assert.match(h.game.modal.lines.join(''), /正式版本.*通关记录.*体验设置/);
-  assert.match(h.game.modal.lines.join(''), /排行榜.*不会随之删除/);
-  h.game.modal.buttons[0].action();
-  assert.equal(h.game.profile().totalWins, 1, 'the primary cancellation keeps local data');
-  h.game.resetPrompt(); h.game.modal.buttons[1].action();
-  assert.equal(h.game.page, 'home');
-  assert.equal(h.game.savedRun(), null);
-  assert.deepEqual(h.game.profile(), {
-    version: 1, completed: {}, daily: {},
-    settings: { sound: true, music: true, haptics: true, reducedMotion: false }, totalWins: 0,
-  });
-  assert.match(h.game.toastText, /本机数据已清除.*恢复默认/);
-  h.destroy();
-});
-
 test('real turn events select distinct sounds without replaying outcomes after undo or review', () => {
   const h = harness(); h.start(); h.soundCalls.length = 0;
   h.act('up');
@@ -1734,7 +1713,7 @@ test('real turn events select distinct sounds without replaying outcomes after u
   assert.equal(h.soundCalls.length, count, 'opening the result does not replay its jingle');
 });
 
-test('delivery presentation preserves earned stars and saves, fits small screens and then exposes original result actions', t => {
+test('delivery results preserve earned stars and saves, fit small screens and expose actions immediately', t => {
   for (const [waits, earned] of [[0, 3], [1, 2], [3, 1]]) {
     const h = harness({ guide: waits === 0, metrics: { width: 320, height: 568, pixelRatio: 2, safeTop: 70, safeBottom: 20 } });
     t.after(() => h.destroy());
@@ -1755,15 +1734,17 @@ test('delivery presentation preserves earned stars and saves, fits small screens
     h.draw(1);
     assert.equal(ages.at(-1), 0);
     assert.ok(bounds.y >= 0 && bounds.y + bounds.h <= renderer.H, 'the result fits the smallest supported phone');
-    assert.equal(renderer.hits.length, 1, 'the first visible delivery frame offers one explicit skip action');
-    assert.equal(renderer.hits[0].action, renderer.deliveryPresentation.skip);
-    assert.deepEqual(h.game.modal.delivery.rewards.map(stamp => stamp.id), h.game.album().stamps.filter(stamp => stamp.owned).map(stamp => stamp.id),
-      'the ceremony receives the real newly earned stamp payload');
-    for (const ms of [120, 330, 750, 3800]) h.draw(ms);
-    assert.ok(h.game.modal.buttons.every(button => renderer.hits.some(hit => hit.action === button.action)), 'every original action returns after the ceremony');
+    assert.ok(h.game.modal.buttons.every(button => renderer.hits.some(hit => hit.action === button.action)),
+      'the first visible result exposes every persistent action');
+    assert.ok(renderer.hits.some(hit => hit.action === h.game.modal.progressAction), 'daily progress remains available from the result');
+    const resultActions = new Set([h.game.modal.progressAction, ...h.game.modal.buttons.map(button => button.action)]);
+    assert.ok(renderer.hits.every(hit => resultActions.has(hit.action)), 'there is no transient receipt action');
+    assert.ok(h.game.modal.lines.some(line => /收到(?: \d+ 枚)?新邮票/.test(line)), 'newly settled stamps remain disclosed in the result');
+    for (const ms of [120, 330, 750, 1000]) h.draw(ms);
+    assert.ok(h.game.modal.buttons.every(button => renderer.hits.some(hit => hit.action === button.action)), 'result actions stay available');
     const next = renderer.hits.find(hit => hit.action === h.game.modal.buttons[0].action);
     assert.deepEqual(clone({ state: h.game.state, profile: h.game.profile(), actions: h.game.actions, data: Array.from(h.data) }), snapshot);
-    assert.equal(h.soundCalls.length, soundCount, 'drawing and finishing the animation do not replay feedback');
+    assert.equal(h.soundCalls.length, soundCount, 'drawing the result does not replay feedback');
 
     const icons = [], icon = renderer.icon.bind(renderer);
     renderer.icon = (...args) => { icons.push(args); icon(...args); };
@@ -1780,28 +1761,6 @@ test('delivery presentation preserves earned stars and saves, fits small screens
     h.draw(1);
     assert.equal(ages.length, resultDraws, 'no result overlay survives into the next level');
   }
-});
-
-test('a pointer held across automatic delivery completion cannot activate a newly uncovered result action', t => {
-  const h = harness(); t.after(() => h.destroy()); h.start();
-  CAMPAIGN[0].solution.forEach(action => h.act(action));
-  h.draw(400);
-  const modal = h.game.modal, renderer = h.game.renderer, skip = renderer.hits[0];
-  const snapshot = clone({ profile: h.game.profile(), data: Array.from(h.data) });
-  const x = renderer.ox + (skip.x + skip.w / 2) * renderer.scale;
-  const y = renderer.oy + (skip.y + skip.h / 2) * renderer.scale;
-  h.game.pointerEvent(x, y, 'start');
-  const held = h.game.pointer;
-  h.draw(2800);
-  assert.equal(held.cancelled, true, 'automatic presentation replacement invalidates the old press');
-  h.game.pointerEvent(x, y, 'end');
-  assert.equal(h.game.modal, modal); assert.equal(h.game.level.id, 1);
-  assert.deepEqual(clone({ profile: h.game.profile(), data: Array.from(h.data) }), snapshot);
-  const next = renderer.hits.find(hit => hit.action === modal.buttons[0].action);
-  const nx = renderer.ox + (next.x + next.w / 2) * renderer.scale;
-  const ny = renderer.oy + (next.y + next.h / 2) * renderer.scale;
-  h.game.pointerEvent(nx, ny, 'start'); h.game.pointerEvent(nx, ny, 'end');
-  assert.equal(h.game.level.id, 2, 'a new intentional press still advances normally');
 });
 
 test('failed result effects keep the original turn time across review, ads and backgrounding', async t => {

@@ -11,8 +11,7 @@ const { chapterMood } = require('./chapter-atmosphere');
 const { drawHomeDelivery } = require('./page-atmosphere');
 const { drawGuideTargets } = require('./guide-view');
 const { drawHomeArchitecture } = require('./world-art');
-const { getRoutePreview, drawRoutePreview } = require('./route-preview');
-const { drawEchoMarkers } = require('./echo-timeline');
+const { drawRoutePreview } = require('./route-preview');
 const { drawSupplyStation, drawSupplyPickup } = require('./supply-station');
 const { drawArtSprite, drawPaving } = require('./art-sprites');
 const { drawActionPreview } = require('./action-preview');
@@ -377,9 +376,6 @@ function drawBoard(r, game, now, rect, guide) {
     } });
   });
   actors.sort((a, b) => a.y - b.y).forEach(actor => actor.draw());
-  if (!itemTargets && !game.reviewing && s.status === 'playing' && (!guide || guide.interactive)) {
-    drawEchoMarkers(r, getRoutePreview(target, game).forecast, p);
-  }
   drawGuideTargets(r, guide, p, time);
   if (!itemTargets) drawDestination(r, game, time, p, options, enterOffice);
   drawEffects(target, game, now, point, hw * 1.7, options);

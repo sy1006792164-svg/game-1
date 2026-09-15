@@ -9,8 +9,6 @@ const { drawEmblemLight, drawStampFinish } = require('../src/keepsake-effects');
 const { drawModal } = require('../src/modal-view');
 const { drawStampDetail } = require('../src/stamp-detail-view');
 const { getAlbum } = require('../src/stamp-album');
-const { DELIVERY_MS, deliveryFrame, skipDelivery } = require('../src/delivery-presentation');
-const { C } = require('../src/theme');
 
 function recorder(options = {}) {
   const paints = [], stack = [], texts = [];
@@ -150,57 +148,19 @@ test('stamp paging renews only its artwork reflection and preserves all control 
   }
 });
 
-test('delivery phases only read the settled result and skip never runs a reward or navigation action', () => {
-  const rewards = getAlbum({ completed: { 1: { stars: 3, bestTurns: 8 } } }).stamps.filter(stamp => stamp.owned);
+test('a completed delivery shows its persistent result and actions without a transient receipt step', () => {
   let actions = 0;
-  const modal = { kind: 'win', title: '信已送达', stars: 3, lines: ['新邮票已收入收藏册'],
-    delivery: { levelId: 1, title: '第一封信', rewards },
+  const modal = { kind: 'win', title: '信已送达', stars: 3, lines: ['收到新邮票「山间的问候」'],
     buttons: [{ text: '下一封信', primary: true, action: () => actions++ }] };
   const before = JSON.stringify(modal);
-  assert.deepEqual([0, 480, 950, 1400, 2100].map(age => deliveryFrame(modal, age).index), [0, 1, 2, 3, 4]);
-  for (const age of [0, 240, 480, 740, 950, 1200, 1400, 1700, 2100, 2450, DELIVERY_MS - 1]) {
+  for (const age of [0, 240, 1000, 2800]) {
     const record = recorder(); const bounds = drawModal(record.r, modal, 1000 + age, age);
+    const text = record.texts.map(entry => entry.value).join('|');
     assert.equal(record.stack.length, 0);
+    assert.match(text, /信已送达/); assert.match(text, /收到新邮票/);
+    assert.ok(record.r.hits.some(hit => hit.action === modal.buttons[0].action));
     assert.ok(record.r.hits.every(hit => hit.w >= 44 && hit.h >= 44 && hit.y >= bounds.y && hit.y + hit.h <= bounds.y + bounds.h));
-    assert.equal(record.r.hits.length, 1, 'the presentation exposes one explicit skip action');
-    assert.equal(actions, 0, 'drawing does not settle or navigate');
+    assert.equal(actions, 0, 'drawing cannot settle or navigate');
   }
-  const record = recorder(); drawModal(record.r, modal, 1240, 240);
-  record.r.hits[0].action(); skipDelivery(modal);
-  assert.equal(deliveryFrame(modal, 240), null);
-  assert.equal(actions, 0);
-  assert.equal(JSON.stringify(modal), before, 'skipping and painting leave the result payload untouched');
-  record.r.hits = []; drawModal(record.r, modal, 1240, 240);
-  assert.ok(record.r.hits.some(hit => hit.action === modal.buttons[0].action), 'the original next action returns after skip');
-});
-
-test('delivery remains complete in reduced motion or when reopened and reveals only actually awarded stamps', () => {
-  for (const rewards of [[], getAlbum({ completed: { 1: { stars: 1, bestTurns: 8 } } }).stamps.filter(stamp => stamp.owned)]) {
-    const modal = { kind: 'win', title: '信已送达', stars: 1, lines: [], delivery: { levelId: 1, title: '第一封信', rewards }, buttons: [] };
-    assert.equal(deliveryFrame(modal, 100, true), null);
-    assert.equal(deliveryFrame(modal, null), null);
-    assert.equal(deliveryFrame(modal, DELIVERY_MS), null);
-    const record = recorder(); drawModal(record.r, modal, 3450, 2450);
-    const texts = record.texts.map(text => text.value).join('|');
-    assert.equal(texts.includes('收到 1 枚新邮票'), rewards.length === 1);
-    assert.equal(texts.includes('投递成绩已记入这段邮路'), rewards.length === 0);
-  }
-});
-
-test('the delivery-to-receipt handoff cancels a finger held across the automatic transition', () => {
-  const modal = { kind: 'win', title: '信已送达', stars: 3, lines: [],
-    delivery: { levelId: 1, title: '第一封信', rewards: [] },
-    buttons: [{ text: '下一封信', primary: true, action() {} }] };
-  const record = recorder();
-  drawModal(record.r, modal, 1000, 0);
-  assert.equal(record.r.deliveryPresentation.modal, modal);
-  assert.ok(record.r.hits.some(hit => hit.action === record.r.deliveryPresentation.skip));
-  const pointer = { x: 195, y: record.r.hits[0].y + 22 };
-  record.r.pointer = pointer; record.r.hits = [];
-  drawModal(record.r, modal, 1000 + DELIVERY_MS, DELIVERY_MS);
-  assert.equal(pointer.cancelled, true);
-  assert.equal(record.r.deliveryPresentation, null);
-  assert.ok(record.r.hits.some(hit => hit.action === modal.buttons[0].action));
-  const earnedStars = record.paints.filter(paint => paint.color === C.yellow);
-  assert.ok(earnedStars.length >= 3, 'all awarded stars are visible on the complete receipt');
+  assert.equal(JSON.stringify(modal), before, 'painting leaves the settled result payload untouched');
 });

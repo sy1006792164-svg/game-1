@@ -7,7 +7,7 @@ const OBJECTIVE_PULSE_MS = 480;
 const FEEDBACK_ENTER_MS = 160;
 const FEEDBACK_FADE_MS = 260;
 const RESULT_DELAY_MS = 400;
-const RESULT_ANIMATION_MS = 2800;
+const RESULT_ANIMATION_MS = 1200;
 const PICKUP = Object.freeze({ delay: MOVE_MS * .6, duration: 650 });
 const EVENT_TIMINGS = Object.freeze({
   move: Object.freeze({ delay: MOVE_MS * .7, duration: 540 - MOVE_MS * .7 }),
