@@ -49,8 +49,8 @@ function drawObjectives(r, game, now, feedback) {
       r.ctx.restore();
     }
     drawUiIcon(r, objective.complete ? 'check' : objective.icon, anchor.x, anchor.y, objective.color, 21);
-    r.label(objective.label, left + 42, 95, 66, 10, C.muted);
-    const size = (index ? 23 : 25) + pulse * .8;
+    r.label(objective.label, left + 42, 95, 66, 11, C.muted);
+    const size = (index ? 21 : 25) + pulse * .8;
     r.text(objective.value, left + 42, 116, size, objective.color, 'left', '600');
     r.font(size, '600');
     const numberWidth = r.ctx.measureText(String(objective.value)).width;

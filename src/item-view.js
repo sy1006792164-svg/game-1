@@ -79,14 +79,15 @@ function drawItemTray(r, game, layout) {
     const muted = !offer.eligible && !selected;
     const pointer = r.pointer, pressed = canInspect && pointer && !pointer.dragging &&
       pointer.x >= x && pointer.x <= x + w && pointer.y >= y && pointer.y <= y + h;
-    const face = selected ? '#e2eddb' : pressed ? '#e5ebdc' : muted ? '#f0f1e7' : tone.face;
-    drawPaperPlaque(r, x, y + 3, w, h - 3, 7, false, '#aab9a785');
-    drawPaperPlaque(r, x, y, w, h - 3, 7, false, face, selected ? C.green : muted ? '#c5cec0' : tone.line);
-    r.line([[x + 8, y + 2], [x + w - 9, y + 2]], '#fffdf3b8', .8);
+    const face = selected ? tone.face : pressed ? C.soft : C.raised;
+    if (selected) drawPaperPlaque(r, x, y + 3, w, h - 3, 7, false, '#aab9a785');
+    drawPaperPlaque(r, x, y, w, h - 3, 7, false, face, selected ? C.green : C.line);
     drawItemArt(r, item.id, x + (compact ? 17 : 20), y + (compact ? 18 : 21), compact ? 20 : 24, muted);
-    r.text(item.name, x + (compact ? 31 : 38), y + 16, compact ? 11 : 12, muted ? '#68796d' : C.ink, 'left', '600');
-    if (locked) r.icon('lock', x + w - 12, y + (compact ? 29 : 15), 10, '#7a897b');
-    else r.label('×' + remaining, x + w - 9, y + (compact ? 29 : 16), compact ? 38 : 28, compact ? 9 : 11, muted ? '#68796d' : tone.ink, 'right', '600');
+    const nameInset = compact ? 31 : 38;
+    r.label(item.name, x + nameInset, y + 16, w - nameInset - 8, compact ? 12 : 13,
+      muted ? C.muted : C.ink, 'left', '600');
+    if (locked) r.icon('lock', x + w - 12, y + 30, 10, C.muted);
+    else r.label('×' + remaining, x + w - 9, y + 30, 38, 10, C.muted, 'right', '600');
     const video = !selected && !locked && offer.eligible && remaining === 0;
     let detail = selected ? '请点亮起的目标' : locked ? '第 ' + item.unlock + ' 关开启' :
       item.id === 'bridge' && !(game.level.bridges || []).length ? '本关没有纸桥' :
@@ -101,11 +102,12 @@ function drawItemTray(r, game, layout) {
         !(game.level.bridges || []).length ? '本关没有纸桥' : (game.level.bridges || []).some(cell => !(game.state.bridges || []).includes(cell)) ? '靠近断桥再修' : '纸桥完好';
     }
     if (video && !compact) {
-      r.round(x + 9, y + 36, 13, 10, 2, null, tone.ink);
-      const c = r.ctx; c.beginPath(); c.moveTo(x + 14, y + 38); c.lineTo(x + 18, y + 41); c.lineTo(x + 14, y + 44); c.closePath();
+      r.round(x + 9, y + 40, 13, 10, 2, null, tone.ink);
+      const c = r.ctx; c.beginPath(); c.moveTo(x + 14, y + 42); c.lineTo(x + 18, y + 45); c.lineTo(x + 14, y + 48); c.closePath();
       c.fillStyle = tone.ink; c.fill();
     }
-    r.label(detail, x + w / 2 + (video && !compact ? 9 : 0), y + (compact ? 44 : 41), w - (video && !compact ? 34 : 14), 10, muted ? '#68796d' : tone.ink, 'center');
+    r.label(detail, x + w / 2 + (video && !compact ? 9 : 0), y + 45,
+      w - (video && !compact ? 34 : 14), 11, selected ? C.green : C.muted, 'center');
     // Locked and temporarily unavailable tools stay inspectable, explaining their rule.
     if (canInspect) {
       const action = Object.assign(() => game.selectItem(item.id), { itemId: item.id });

@@ -10,7 +10,7 @@ const { STAMPS } = require('../src/stamp-album');
 const { levelListLayout, levelProgressOffset } = require('../src/level-view');
 const { collectionLayout } = require('../src/collection-view');
 const { locateNextStamp } = require('../src/collection-view');
-const { navigateLevelBrowser, replayLevels, levelBrowserLayout } = require('../src/level-navigation');
+const { navigateLevelBrowser, replayLevels, levelBrowserLayout, DIRECTORY_ROW } = require('../src/level-navigation');
 const { visibleStamps, setCollectionFilter } = require('../src/stamp-collection');
 const { openStampDetail, stampDetailKey } = require('../src/stamp-detail-view');
 
@@ -250,7 +250,7 @@ test('chapter navigation covers the final partial chapter and returns to its rea
   const texts = h.draw();
   assert.ok(texts.includes('来信 997–999'));
   assert.ok(texts.includes('送达 0/3'));
-  const cards = h.game.renderer.hits.filter(hit => hit.w === 342 && hit.h === 84);
+  const cards = h.game.renderer.hits.filter(hit => hit.w === 342 && hit.h === DIRECTORY_ROW - 12);
   assert.ok(cards.length <= 8, 'only visible directory rows have hit regions');
   cards[cards.length - 1].action();
   assert.equal(h.game.levelBrowser.mode, 'all');

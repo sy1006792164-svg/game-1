@@ -17,12 +17,17 @@ function settingStatus(game, row, enabled, supported) {
   return (enabled ? '已开启 · ' : '已关闭 · ') + row.detail;
 }
 
-function drawToggle(r, game, row, y) {
-  const enabled = game.profile().settings[row.key];
+function settingLayout(r, game, row, settings) {
+  const enabled = settings[row.key];
   const supported = row.key !== 'haptics' || game.platform.kind === 'wechat';
-  r.panel(24, y, 342, 62, { fill: C.panel, stroke: C.line, radius: 13 });
+  const lines = r.wrapLines(settingStatus(game, row, enabled, supported), 232, 11);
+  return { row, enabled, supported, lines, height: 64 + (lines.length - 1) * 17 };
+}
+
+function drawToggle(r, game, entry, y) {
+  const { row, enabled, supported, lines, height } = entry;
   r.text(row.title, 42, y + 20, 14, C.ink, 'left', '600');
-  r.text(settingStatus(game, row, enabled, supported), 42, y + 43, 11, C.muted);
+  lines.forEach((line, index) => r.text(line, 42, y + 43 + index * 17, 11, C.muted));
   r.ctx.save();
   if (!supported) r.ctx.globalAlpha *= .45;
   const active = supported && enabled, change = game.settingChange;
@@ -43,7 +48,21 @@ function drawToggle(r, game, row, y) {
   }
   if (r.effectsQuality !== 'low') r.round(knobX - 5, y + 23, 7, 1.2, .6, '#ffffff');
   r.ctx.restore();
-  if (supported) r.hit(24, y, 342, 62, () => game.toggle(row.key));
+  if (supported) r.hit(24, y, 342, height, () => game.toggle(row.key), undefined, row.title);
+}
+
+function drawSettingGroup(r, game, title, rows, settings, y) {
+  const entries = rows.map(row => settingLayout(r, game, row, settings));
+  const height = entries.reduce((total, entry) => total + entry.height, 0);
+  r.text(title, 42, y + 10, 12, C.muted, 'left', '600');
+  let rowY = y + 28;
+  r.panel(24, rowY, 342, height, { fill: C.panel, stroke: C.line, radius: 13, flat: true });
+  entries.forEach((entry, index) => {
+    if (index) r.round(42, rowY, 306, .7, 0, C.line);
+    drawToggle(r, game, entry, rowY);
+    rowY += entry.height;
+  });
+  return rowY;
 }
 
 function storageMessage(game) {
@@ -55,15 +74,18 @@ function storageMessage(game) {
 
 function drawSettings(r, game) {
   r.header('体验设置', '声音、反馈与动态效果', () => game.home());
-  ROWS.forEach((row, index) => drawToggle(r, game, row, 92 + index * 70));
+  const settings = game.profile().settings;
+  let y = drawSettingGroup(r, game, '声音', ROWS.slice(0, 2), settings, 92);
+  y = drawSettingGroup(r, game, '反馈与动态', ROWS.slice(2), settings, y + 16) + 22;
 
-  const y = 382, lines = r.wrapLines(storageMessage(game), 306, 12);
+  const lines = r.wrapLines(storageMessage(game), 306, 12);
   const panelH = 48 + lines.length * 19;
-  r.panel(24, y, 342, panelH, { fill: C.raised, stroke: C.line, radius: 13 });
+  r.panel(24, y, 342, panelH, { fill: C.raised, stroke: C.line, radius: 13, flat: true });
   r.text('本机数据', 42, y + 21, 13, C.ink, 'left', '600');
   lines.forEach((line, index) => r.text(line, 42, y + 47 + index * 19, 12, C.muted));
-  r.button('清除这台设备的数据', 24, y + panelH + 12, 342, CONTROL.compactHeight,
-    () => game.resetPrompt(), { style: 'quiet' });
+  r.button('清除这台设备的数据', 24, y + panelH + 10, 342, CONTROL.compactHeight,
+    () => game.resetPrompt(), { style: 'text', size: 13, color: C.dangerText });
+  r.text('清除后无法恢复', 195, y + panelH + CONTROL.compactHeight + 26, 11, C.muted, 'center');
 }
 
 module.exports = { drawSettings, ROWS };

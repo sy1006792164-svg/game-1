@@ -28,11 +28,16 @@ function paintLeaderboard(ctx, model, avatar) {
   const text = (value, x, y, size = 13, color = C.ink, align = 'left', weight) => {
     font(size, weight); ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillStyle = color; ctx.fillText(String(value), x, y);
   };
-  const fitted = (value, maxWidth, size) => {
-    font(size); const chars = Array.from(String(value));
+  const fitted = (value, maxWidth, size, weight) => {
+    font(size, weight); const chars = Array.from(String(value));
     if (ctx.measureText(chars.join('')).width <= maxWidth) return chars.join('');
     while (chars.length && ctx.measureText(chars.join('') + '…').width > maxWidth) chars.pop();
     return chars.join('') + '…';
+  };
+  const number = (value, x, y, maxWidth, size, color, align = 'center') => {
+    font(size, '600');
+    const measured = ctx.measureText(String(value)).width;
+    text(value, x, y, measured > maxWidth ? size * maxWidth / measured : size, color, align, '600');
   };
   const round = (x, y, width, height, radius, fill, stroke, strokeWidth = 1) => {
     const r = Math.min(radius, width / 2, height / 2);
@@ -65,9 +70,10 @@ function paintLeaderboard(ctx, model, avatar) {
     }
     ctx.closePath(); ctx.fillStyle = color; ctx.fill();
   };
-  const button = (label, x, y, width, height, action, disabled = false) => {
-    round(x, y, width, height, 10, disabled ? '#e4ebe2' : C.paper, disabled ? '#d8e2d6' : C.line);
-    text(label, x + width / 2, y + height / 2, 12, disabled ? '#869b8e' : C.green, 'center', '600');
+  const button = (label, x, y, width, height, action, disabled = false, primary = false) => {
+    round(x, y, width, height, 10, disabled ? '#e4ebe2' : primary ? C.green : C.paper,
+      disabled ? '#d8e2d6' : primary ? C.green : C.line);
+    text(label, x + width / 2, y + height / 2, 12, disabled ? '#869b8e' : primary ? C.paper : C.green, 'center', '600');
     if (!disabled) hits.push({ x, y: y - 4, w: width, h: height + 8, action });
   };
 
@@ -75,14 +81,14 @@ function paintLeaderboard(ctx, model, avatar) {
   round(1, 3, w - 2, ui.heroH, 19, '#476d5920');
   round(0, 0, w, ui.heroH, 19, C.green);
   edges(0, 0, w, ui.heroH, 19, true);
-  round(8, 8, w - 16, ui.heroH - 16, 13, null, '#83aa934d');
-  circle(w - 14, 15, 33, '#ffffff08'); star(w - 23, 19, 15, '#c0d8b222');
+  circle(w - 14, 15, 33, '#ffffff08');
   const portrait = ui.compact ? 30 : 38;
   const myIndex = rows.findIndex(row => row.isMe);
   avatar(self && self.avatarUrl, 17, 15, portrait);
-  text(fitted(self && self.nickname || '我的邮路', w - (hasChange ? 135 : 22) - (17 + portrait + 12), 15), 17 + portrait + 12, 27, 15, C.paper, 'left', '600');
+  const nameWidth = w - (hasChange ? 141 : 22) - (17 + portrait + 12);
+  text(fitted(self && self.nickname || '我的邮路', nameWidth, 15, '600'), 17 + portrait + 12, 27, 15, C.paper, 'left', '600');
   const personal = self ? self.rank ? '我的名次  ' + self.rank : '我的最佳成绩' : '完成一关，留下你的成绩';
-  text(personal, 17 + portrait + 12, 47, 10, '#e2ecdc');
+  text(fitted(personal, nameWidth, 11), 17 + portrait + 12, 47, 11, '#e2ecdc');
   if (hasChange) {
     const up = change.direction === 'up', delta = Math.abs(change.toRank - change.fromRank);
     round(w - 129, 13, 116, 42, 11, up ? '#f7e5af24' : '#e3ece124', up ? '#e1ca8e55' : '#b5cbb555');
@@ -96,19 +102,20 @@ function paintLeaderboard(ctx, model, avatar) {
       ctx.restore();
     } else text(change.fromRank + ' → ' + change.toRank, w - 71, 43, 10, '#e2ecdc', 'center');
   }
-  const numbersY = ui.compact ? 68 : 85, labelsY = ui.compact ? 85 : 108;
+  const numbersY = ui.compact ? 67 : 83, labelsY = ui.compact ? 86 : 108;
   const values = [self ? self.stars : '—', self ? self.completed : '—', self ? self.turns : '—'];
   ['总星数', '已通关', '最佳总步数'].forEach((label, i) => {
-    const x = (i + .5) * w / 3;
-    if (i) line([[i * w / 3, numbersY - 9], [i * w / 3, labelsY + 1]], '#a4c5ac33');
-    text(values[i], x, numbersY, i === 0 ? 24 : 20, i === 0 ? '#ffe2a6' : C.paper, 'center', '600');
-    text(label, x, labelsY, 10, '#dce9d8', 'center');
+    const x = [.195, .515, .82][i] * w;
+    if (i === 1) line([[w * .385, numbersY - 10], [w * .385, labelsY + 1]], '#a4c5ac40');
+    number(values[i], x, numbersY, w * (i === 1 ? .22 : .32), i === 0 ? ui.compact ? 26 : 30 : 18,
+      i === 0 ? '#ffe2a6' : C.paper);
+    text(label, x, labelsY, 11, '#dce9d8', 'center');
   });
 
-  text('好友成绩', 4, ui.heroH + 28, 14, C.ink, 'left', '600');
-  if (rows.length) text(rows.length + ' 人', 75, ui.heroH + 28, 11, C.muted);
+  text('好友成绩', 4, ui.heroH + 28, 16, C.ink, 'left', '600');
+  if (rows.length) text(rows.length + ' 人', 84, ui.heroH + 28, 11, C.muted);
   const busy = status === 'loading' || refreshing;
-  if ((status === 'error' || sync.status === 'error' || /未成功|未能|未读取/.test(notice)) && !busy) button('重试', w - 73, ui.heroH + 10, 71, 32, 'retry');
+  if ((status === 'error' || sync.status === 'error' || /未成功|未能|未读取/.test(notice)) && !busy) button('重试', w - 73, ui.heroH + 10, 71, 32, 'retry', false, !rows.length);
   else if (busy) text('更新中…', w - 4, ui.heroH + 28, 11, C.muted, 'right');
   else if (maxScroll > 0) text('上下滑动', w - 4, ui.heroH + 28, 10, C.muted, 'right');
 
@@ -126,10 +133,8 @@ function paintLeaderboard(ctx, model, avatar) {
         ctx.scale(1 - .016 * landing, 1 - .026 * landing);
         ctx.translate(-listWidth / 2, -y - rh / 2);
       }
-      round(1, y + 2, listWidth - 2, rh, 13, '#5c805714');
       round(0, y, listWidth, rh, 13, row.isMe ? moving ? '#eaf1d9' : '#f2f4e2' : C.paper,
-        row.isMe ? moving ? '#77965d' : '#9fba9b' : '#d6dfcf', row.isMe && moving ? 2 : 1);
-      edges(0, y, listWidth, rh, 13);
+        row.isMe ? moving ? '#77965d' : '#9fba9b' : '#dce4d6', row.isMe && moving ? 2 : 1);
       if (row.isMe) round(0, y + 13, 3, rh - 26, 1.5, C.green);
       if (row.rank <= 3) {
         const cy = y + rh / 2, colors = [
@@ -144,14 +149,15 @@ function paintLeaderboard(ctx, model, avatar) {
         circle(22, cy - 3, 11, colors[0]); circle(22, cy - 3, 9, colors[1]);
         ctx.beginPath(); ctx.arc(22, cy - 3, 7.5, 3.6, 5.2); ctx.strokeStyle = C.paper; ctx.lineWidth = 1; ctx.stroke();
         text(row.rank, 22, cy - 2, 11, colors[2], 'center', '600');
-      } else text(fitted(row.rank, 30, 12), 22, y + rh / 2, 12, C.muted, 'center');
+      } else number(row.rank, 22, y + rh / 2, 30, 12, C.muted);
       const size = ui.compact ? 32 : 38;
       avatar(row.avatarUrl, 44, y + (rh - size) / 2, size);
       const nameX = ui.compact ? 87 : 94;
-      text(fitted((row.isMe ? '我 · ' : '') + row.nickname, listWidth - nameX - 79, 13), nameX, y + rh / 2 - 11, 13, C.ink, 'left', '600');
-      text(fitted(row.completed + ' 关 · ' + row.turns + ' 步', listWidth - nameX - 15, 10), nameX, y + rh / 2 + 12, 10, C.muted);
+      const detailWidth = listWidth - nameX - 82;
+      text(fitted((row.isMe ? '我 · ' : '') + row.nickname, detailWidth, 14, '600'), nameX, y + rh / 2 - 11, 14, C.ink, 'left', '600');
+      text(fitted(row.completed + ' 关 · ' + row.turns + ' 步', detailWidth, 11), nameX, y + rh / 2 + 12, 11, C.muted);
       star(listWidth - 17, y + rh / 2 - 10, 6, C.gold);
-      text(row.stars, listWidth - 28, y + rh / 2 - 10, 18, C.gold, 'right', '600');
+      number(row.stars, listWidth - 28, y + rh / 2 - 10, 53, 20, C.goldText, 'right');
       ctx.restore();
     };
     const floatingSelf = moving && myIndex >= 0 && Number.isFinite(motion.rowY);
@@ -167,10 +173,10 @@ function paintLeaderboard(ctx, model, avatar) {
     if (showHint) {
       const contentEnd = Math.max(ui.listTop + contentHeight - scroll,
         floatingSelf ? motion.rowY + ui.rowHeight : -Infinity);
-      round(0, contentEnd + 14, w, 68, 13, '#e0e9dc');
+      round(0, contentEnd + 14, w, 68, 13, '#e8eee2');
       star(27, contentEnd + 37, 9, '#8da985');
-      text('每一封送达，都让星光更近', 48, contentEnd + 35, 12, C.green, 'left', '600');
-      text('同玩好友同步成绩后，也会出现在这里', 48, contentEnd + 56, 10, C.muted);
+      text(fitted('每一封送达，都让星光更近', w - 64, 12, '600'), 48, contentEnd + 35, 12, C.green, 'left', '600');
+      text(fitted('同玩好友同步成绩后，也会出现在这里', w - 64, 11), 48, contentEnd + 56, 11, C.muted);
     }
   } else if (status === 'loading') {
     for (let i = 0; i < Math.min(2, ui.capacity); i++) {

@@ -2,7 +2,7 @@
 
 const { CAMPAIGN, PER_CHAPTER } = require('./levels');
 
-const CARD_HEIGHT = 126, ROW_HEIGHT = 140, CHAPTER_HEADER = 44, DIRECTORY_ROW = 96;
+const CARD_HEIGHT = 144, ROW_HEIGHT = 158, CHAPTER_HEADER = 44, DIRECTORY_ROW = 108;
 const CHAPTER_HEIGHT = CHAPTER_HEADER + Math.ceil(PER_CHAPTER / 2) * ROW_HEIGHT + 20;
 const MODES = ['all', 'replay', 'chapters'];
 const replayCache = new WeakMap();

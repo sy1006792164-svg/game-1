@@ -105,10 +105,12 @@ class Renderer {
   }
   panel(x, y, w, h, options) {
     const style = options || {}, radius = style.radius == null ? 16 : style.radius;
-    this.round(x + 1, y + 5, w - 2, h, radius, '#55745c13');
-    this.round(x, y + 2, w, h, radius, '#9cac967a');
+    if (!style.flat) {
+      this.round(x + 1, y + 5, w - 2, h, radius, '#55745c13');
+      this.round(x, y + 2, w, h, radius, '#9cac967a');
+    }
     this.round(x, y, w, h, radius, style.fill || C.panel, style.stroke || C.line);
-    drawSurfaceEdges(this, x, y, w, h, radius);
+    if (!style.flat) drawSurfaceEdges(this, x, y, w, h, radius);
     if (style.accent) this.line([[x + 18, y + 1], [x + Math.min(w - 18, 66), y + 1]], style.accent, 1.5);
   }
   line(points, color, width, dash) {
@@ -206,9 +208,10 @@ class Renderer {
     this.circle(x, y, radius, null, color || C.muted); this.circle(x, y, radius - 5, null, color || C.muted);
     this.text('风 · 邮', x, y - 7, 10, color || C.muted, 'center'); this.text(label, x, y + 9, 10, color || C.muted, 'center');
   }
-  header(title, subtitle, back) {
-    this.button('', 16, 10, 44, CONTROL.compactHeight, back, { style: 'quiet', icon: 'back' });
-    this.label(title, 69, 29, 291, 19, C.ink, 'left', '600'); this.label(subtitle, 69, 53, 291, 10, C.muted);
+  header(title, subtitle, back, options = {}) {
+    this.button('', 24, 10, 44, CONTROL.compactHeight, back, { style: 'text', icon: 'back' });
+    this.label(title, 80, 29, 286 - (options.actionWidth || 0), 22, C.ink, 'left', '700');
+    this.label(subtitle, 80, 56, 286, 12, C.muted);
     this.line([[24, 77], [366, 77]], C.line, .7);
   }
   scrim(color) {
@@ -223,8 +226,11 @@ class Renderer {
     const safeTop = metrics.safeTop || 0, safeBottom = metrics.safeBottom || 0;
     this.safeBottom = safeBottom;
     const available = metrics.height - safeTop - safeBottom;
-    this.scale = Math.min(metrics.width / 390, available / 700);
-    this.H = available / this.scale; this.ox = (metrics.width - 390 * this.scale) / 2; this.oy = safeTop;
+    const status = game.store.getStatus(), statusHeight = status.persisted ? 0 : 32;
+    this.scale = Math.min(metrics.width / 390, available / (700 + statusHeight));
+    // Keep persistent storage feedback below page content and its touch targets.
+    this.H = available / this.scale - statusHeight;
+    this.ox = (metrics.width - 390 * this.scale) / 2; this.oy = safeTop;
     // Content respects safe areas; scenery spans the canvas.
     this.viewport = { x: -this.ox / this.scale, y: -safeTop / this.scale,
       w: metrics.width / this.scale, h: metrics.height / this.scale };
@@ -308,9 +314,11 @@ class Renderer {
       lines.forEach((line, i) => this.text(line, 195, y + 19 + i * 18, 13, C.ink, 'center'));
       c.restore();
     }
-    const status = game.store.getStatus();
     const footerToast = game.toastUntil > now && game.page !== 'game' && !game.modal;
-    if (!status.persisted && !footerToast) { this.round(18, this.H - 28, 354, 22, 5, C.peach); this.text('存储不可用：当前进度仅在本次运行保留', 195, this.H - 17, 11, C.ink, 'center'); }
+    if (!status.persisted && !footerToast) {
+      this.round(18, this.H + 6, 354, 22, 5, C.peach);
+      this.text('存储不可用：当前进度仅在本次运行保留', 195, this.H + 17, 11, C.ink, 'center');
+    }
   }
   home(game, now) { drawHome(this, game, now); }
   levels(game) { drawLevels(this, game); }

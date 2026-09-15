@@ -16,13 +16,10 @@ const { CARD_HEIGHT, ROW_HEIGHT, CHAPTER_HEADER, CHAPTER_HEIGHT, levelBrowserMod
 const clamp = value => Math.max(0, Math.min(1, value));
 
 function drawLetterCard(r, x, y, w, h, unlocked, next, held) {
-  r.panel(x, y, w, h, { fill: held && unlocked ? '#e5ecde' : next ? '#fff7e5' : unlocked ? C.panel : '#dce5dc',
-    stroke: next ? '#cba477' : C.line, accent: next ? C.gold : unlocked ? C.green : null, radius: 13 });
-  r.round(x + 6, y + 6, w - 12, h - 12, 8, null, next ? '#e7d4af' : unlocked ? '#e1e7d9' : '#d0dbd0');
+  r.panel(x, y, w, h, { fill: held && unlocked ? '#e5ecde' : next ? '#fff7e5' : unlocked ? C.panel : '#e4ebe1',
+    stroke: next ? '#cba477' : C.line, accent: next ? C.gold : null, radius: 13, flat: !next });
   r.line([[x + 17, y + h - 42], [x + w - 17, y + h - 42]], next ? '#d5b98b' : '#b6cab9', .8, [3, 4]);
-  r.circle(x + 136, y + 26, 14, next ? '#dfbf8e55' : '#78977d1c');
-  r.circle(x + 136, y + 24, 13, next ? '#f6e6c6' : unlocked ? '#e6eee0' : '#d3dfd2', next ? '#c8a476' : '#abc1ae');
-  if (unlocked) r.line([[x + w - 29, y + 15], [x + w - 20, y + 15]], '#fffdf4', 1.4);
+  if (next) r.circle(x + 136, y + 24, 13, '#f6e6c6', '#c8a476');
 }
 
 function drawLevelCard(r, game, level, record, index, rect, viewport, current, saved) {
@@ -43,11 +40,11 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   const scale = held ? .975 : 1;
   c.translate(x + w / 2, y + h / 2); c.scale(scale, scale); c.translate(-x - w / 2, -y - h / 2);
   drawLetterCard(r, x, y, w, h, unlocked, highlighted, held);
-  r.text(String(level.id).padStart(3, '0'), x + 17, y + 26, 22, unlocked ? C.green : '#74897a', 'left', '600');
-  if (inProgress) r.text('进行中', x + 77, y + 26, 10, C.goldText);
+  r.text(String(level.id).padStart(3, '0'), x + 17, y + 24, 14, unlocked ? C.green : C.muted, 'left', '600');
+  if (inProgress) r.text('进行中', x + 62, y + 24, 11, C.goldText, 'left', '600');
   else {
     const difficulty = level.difficulty || difficultyProfile(level);
-    r.label(difficulty.name, x + 74, y + 26, 48, 9, unlocked && difficulty.tier >= 4 ? C.goldText : C.muted);
+    r.label(difficulty.name, x + 62, y + 24, 55, 11, unlocked && difficulty.tier >= 4 ? C.goldText : C.muted);
   }
   const idle = unlocked && !record && highlighted && !held && !scroll.touching &&
     Math.abs(scroll.velocity) < 4 && scroll.wheelTarget === null && progress === 1 &&
@@ -67,12 +64,13 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   c.rotate(lift * Math.sin(phase * Math.PI * 2) * .12);
   r.actionIcon(unlocked ? record ? 'check' : 'letter' : 'lock', 0, 0, unlocked ? C.gold : '#74897a');
   c.restore();
-  r.label(level.title, x + 17, y + 53, 132, 14, unlocked ? C.ink : C.muted, 'left', '500');
-  r.label('三星 ' + level.par + '拍内·无道具/续灯', x + 17, y + 72, 132, 10, C.muted);
+  r.label(level.title, x + 17, y + 52, 132, 16, unlocked ? C.ink : C.muted, 'left', '600');
+  r.label('三星目标 · ' + level.par + ' 拍内', x + 17, y + 76, 132, 11, C.muted);
+  r.text('不用道具或续灯', x + 17, y + 92, 11, C.muted);
   if (record) {
     for (let star = 0; star < 3; star++) r.icon('star', x + 23 + star * 21, y + h - 24, 14, star < record.stars ? C.gold : C.line);
-    r.text(record.bestTurns + ' 拍', x + 125, y + h - 24, 10, C.muted, 'right');
-  } else r.text(inProgress ? '继续投递' : unlocked ? '开始投递' : '先送达上一封', x + 17, y + h - 23, 11, highlighted ? C.goldText : unlocked ? C.green : C.muted);
+    r.text(record.bestTurns + ' 拍', x + 125, y + h - 24, 11, C.muted, 'right');
+  } else r.text(inProgress ? '继续投递' : unlocked ? '开始投递' : '先送达上一封', x + 17, y + h - 23, 12, highlighted ? C.goldText : unlocked ? C.green : C.muted, 'left', highlighted ? '600' : '400');
   if (unlocked) r.actionIcon('arrow-right', x + 145, y + h - 24, highlighted ? C.gold : C.green);
   c.restore();
   const action = () => unlocked ? game.selectLevel(level.id) : game.toast('送达上一封信后开启');
@@ -89,8 +87,8 @@ function drawAllLevels(r, game, profile, current, saved, viewport, contentHeight
   for (let chapter = first; chapter <= last; chapter++) {
     const baseY = viewport.y + chapter * CHAPTER_HEIGHT - scroll.offset;
     if (baseY + 34 > viewport.y && baseY < viewport.y + viewport.h) {
-      r.label(chapterNames[chapter], 25, baseY + 18, 248, 20, C.ink, 'left', '600');
-      r.text('第 ' + (chapter + 1) + ' 章', 365, baseY + 19, 10, C.muted, 'right');
+      r.label(chapterNames[chapter], 25, baseY + 18, 248, 17, C.ink, 'left', '600');
+      r.text('第 ' + (chapter + 1) + ' 章', 365, baseY + 19, 11, C.muted, 'right');
     }
     const end = Math.min(CAMPAIGN.length, (chapter + 1) * PER_CHAPTER);
     for (let index = chapter * PER_CHAPTER; index < end; index++) {
@@ -112,11 +110,11 @@ function drawReplayLevels(r, game, profile, progress, current, saved, viewport) 
     r.text(untouched ? '先送达一封来信' : inaccessible ? '暂无可重投的来信' : '已送达的来信都已三星', 195, y + 37, 17, C.ink, 'center', '600');
     const description = untouched ? '已送达但不足三星的来信会收在这里。' : inaccessible ? '先送达前一封，即可重访对应来信。' :
       progress.perfectCount === CAMPAIGN.length ? '所有来信已三星送达，随时可以重温旅程。' : '下一段旅程，还有新的星光等你。';
-    r.text(description, 195, y + 68, 11, C.muted, 'center');
+    r.text(description, 195, y + 68, 12, C.muted, 'center');
     r.button('回到主线进度', 98, y + 96, 194, CONTROL.height, () => game.scrollToProgress(), { style: 'primary', icon: 'route' });
     return;
   }
-  r.text(levels.length + ' 封待摘星 · 目标拍内送达，不用道具或续灯', 25, viewport.y + 18 - offset, 11, C.muted);
+  r.text(levels.length + ' 封来信，等待补齐星光', 25, viewport.y + 18 - offset, 13, C.ink, 'left', '600');
   const firstRow = Math.max(0, Math.floor((offset - CHAPTER_HEADER) / ROW_HEIGHT));
   const lastRow = Math.min(Math.ceil(levels.length / 2) - 1, Math.floor((offset + viewport.h - CHAPTER_HEADER) / ROW_HEIGHT));
   for (let row = firstRow; row <= lastRow; row++) {

@@ -70,8 +70,8 @@ function drawHelp(r, layout, x, y) {
   layout.blocks.forEach(block => {
     const top = y + block.y;
     r.icon(block.icon, x + 8, top + 9, 16, block.color);
-    r.text(block.title, x + 23, top + 9, 14, block.color, 'left', '600');
-    block.lines.forEach((line, i) => r.text(line, x, top + 33 + i * 22, 14, C.ink));
+    r.text(block.title, x + 23, top + 9, 16, C.ink, 'left', '600');
+    block.lines.forEach((line, i) => r.text(line, x, top + 33 + i * 22, 14, C.muted));
   });
 }
 

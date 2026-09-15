@@ -6,7 +6,7 @@ const C = Object.freeze({
   line: '#bbcfc1', muted: '#4d6359', orange: '#ba694e', peach: '#f2e1ce',
   blue: '#368f9d', bluePale: '#deeeed', white: '#fffdf4', yellow: '#e9b871',
   panel: '#fbfaf1', raised: '#f5f6ec', gold: '#bc7e47', dark: '#294d49',
-  blueText: '#246b76', goldText: '#885729',
+  blueText: '#246b76', goldText: '#885729', dangerText: '#934c3c',
 });
 
 module.exports = { C };

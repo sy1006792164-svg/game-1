@@ -11,9 +11,9 @@ function drawLevelHeader(r, game, progress, mode) {
 
   const developerPicker = game.development && mode === 'chapters';
   const width = developerPicker ? 212 : 342;
-  r.label('已送达 ' + progress.completedCount + ' 封', 25, 105, width, 16, C.ink, 'left', '500');
+  r.label('已送达 ' + progress.completedCount + ' 封', 25, 105, width, 18, C.ink, 'left', '600');
   r.label('收集 ' + progress.stars + ' 星光 · ' + progress.perfectCount + ' 封三星来信',
-    25, 132, width, 11, C.muted);
+    25, 132, width, 12, C.muted);
   if (developerPicker) {
     r.button('输入关卡号', 250, 96, 116, CONTROL.compactHeight,
       () => game.openDevelopmentPicker(), { style: 'text', size: 12, icon: 'grid' });

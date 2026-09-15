@@ -47,7 +47,7 @@ function drawControls(r, game, layout, now, feedback) {
   if (guide) drawGuideCard(r, game, guide, hintY);
   else if (!drawItemAimHint(r, game, layout) && !drawContextFeedback(r, feedback, layout, now)) {
     r.panel(24, hintY, 342, hintHeight, { radius: 13, fill: warning ? '#fbebdf' : ready ? '#e6f0e2' : '#f8faf1',
-      stroke: warning ? '#d6af95' : ready ? '#9cbd9c' : C.line });
+      stroke: warning ? '#d6af95' : ready ? '#9cbd9c' : C.line, flat: true });
     if (ready) r.icon('check', 44, hintY + hintHeight / 2, 16, C.green);
     const textY = hintY + hintHeight / 2 - (hintLines.length - 1) * 9;
     hintLines.forEach((line, index) => r.text(line, ready ? 209 : 195, textY + index * 18, 12, warning ? '#955d42' : ready ? '#316c5f' : C.muted, 'center'));
@@ -63,12 +63,12 @@ function drawControls(r, game, layout, now, feedback) {
     r.button('重新学一遍', 24, buttonY, 165, CONTROL.height, () => game.restartGuide(), { style: 'primary', icon: 'restart', disabled: !canAct });
   } else {
     r.button('撤回（' + remaining + '）', 24, buttonY, 165, CONTROL.height, () => game.undo(), {
-      style: guide && guide.control === 'undo' ? 'primary' : 'secondary', icon: 'undo',
+      style: guide && guide.control === 'undo' ? 'primary' : 'quiet', icon: 'undo',
       feedbackAt: undoFeedback && undoFeedback.at, disabled: !canUndo || layout.aiming || !!guide && guide.kind === 'mechanic'
     });
   }
   if (layout.aiming) r.button('取消选取', 201, buttonY, 165, CONTROL.height, () => game.cancelItem(), {
-    style: 'primary', icon: 'close', disabled: !canAct
+    style: 'text', icon: 'close', color: C.muted, disabled: !canAct
   });
   else if (guide && guide.kind === 'mechanic') r.button(guide.buttonLabel, 201, buttonY, 165, CONTROL.height, () => game.advanceMechanicGuide(), {
     style: 'primary', icon: 'arrow-right', disabled: !canAct
@@ -97,22 +97,22 @@ function drawGame(r, game, now) {
   const atmosphereNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   const showGuideEntry = !layout.guide && game.canShowGuide() && game.state.status === 'playing' && !game.reviewing;
   const showChallenge = !showGuideEntry && !layout.guide && !game.reviewing && game.level.id >= 4 && typeof game.openRoutePlan === 'function';
-  r.label(game.level.title, 24, 32, showGuideEntry ? 138 : showChallenge ? 184 : 254, 24, C.ink, 'left', '600');
-  if (showChallenge) r.button(difficultyProfile(game.level).name, 216, 18, 66, CONTROL.compactHeight,
-    () => game.openRoutePlan(), { style: 'quiet', size: 11, disabled: !!game.modal || game.busy || game.state.status !== 'playing' });
+  r.label(game.level.title, 24, 32, showGuideEntry ? 138 : showChallenge ? 184 : 254, 22, C.ink, 'left', '700');
+  if (showChallenge) r.button(difficultyProfile(game.level).name, 216, 10, 66, CONTROL.compactHeight,
+    () => game.openRoutePlan(), { style: 'text', size: 12, disabled: !!game.modal || game.busy || game.state.status !== 'playing' });
   // The subtitle sits below the complete 44px guide/pause targets. Its former
   // baseline crossed the guide button on the first level.
-  if (game.reviewing) r.text('路线回顾', 24, 69, 11, C.muted);
-  else if (game.development && !game.state.itemsUsed && !game.state.revived) r.text('开发试玩 · 独立存档', 24, 69, 10, '#925e37');
+  if (game.reviewing) r.text('路线回顾', 24, 69, 12, C.muted);
+  else if (game.development && !game.state.itemsUsed && !game.state.revived) r.text('开发试玩 · 独立存档', 24, 69, 12, C.goldText);
   else {
     const status = routeStatus(game);
-    r.label(status.text, 24, 69, 342, 11, status.warning ? C.goldText : C.muted);
+    r.label(status.text, 24, 69, 342, 12, status.warning ? C.goldText : C.muted);
   }
-  if (showGuideEntry) r.button('操作引导', 174, 18, 104, CONTROL.compactHeight, () => game.showGuide(), {
-    style: 'quiet', icon: 'route', disabled: !!game.modal || game.busy
+  if (showGuideEntry) r.button('操作引导', 174, 10, 104, CONTROL.compactHeight, () => game.showGuide(), {
+    style: 'text', icon: 'route', disabled: !!game.modal || game.busy
   });
-  r.button(game.reviewing ? '结果' : '暂停', 290, 18, 76, CONTROL.compactHeight, () => game.pause(), {
-    style: 'quiet', icon: game.reviewing ? 'route' : 'pause', disabled: !!game.modal || game.busy || (!game.reviewing && game.state.status !== 'playing')
+  r.button(game.reviewing ? '结果' : '暂停', 290, 10, 76, CONTROL.compactHeight, () => game.pause(), {
+    style: 'text', icon: game.reviewing ? 'route' : 'pause', disabled: !!game.modal || game.busy || (!game.reviewing && game.state.status !== 'playing')
   });
   drawObjectives(r, game, now, feedback);
   // Gameplay ambience is clipped to the dynamic board band and painted beneath

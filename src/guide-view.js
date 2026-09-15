@@ -40,7 +40,7 @@ function drawGuideCard(r, game, guide, y) {
   }
   // The full 44px hit target sits inside the card, clear of both title and body.
   r.button('跳过', 284, y + 14, 64, CONTROL.compactHeight, () => game.dismissGuide(), {
-    style: 'quiet', disabled: !!game.modal || game.busy
+    style: 'text', disabled: !!game.modal || game.busy
   });
   ui.bodyLines.forEach((line, index) => r.text(line, 42, y + ui.bodyY + index * 21, 14, C.ink));
   const footerY = y + ui.footerY;

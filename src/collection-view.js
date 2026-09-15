@@ -29,28 +29,29 @@ function locateNextStamp(game) {
 
 function drawSummary(r, game, album) {
   const next = album.next, contentX = 151, contentWidth = 195, contentRight = contentX + contentWidth;
-  r.panel(24, 94, 342, 114, { fill: C.panel, stroke: C.line, accent: C.gold, radius: 18 });
-  r.text(album.ownedCount, 41, 129, 36, C.gold, 'left', '600');
-  r.text('/ ' + album.stamps.length, 91, 136, 14, C.muted);
-  r.text('枚已收藏', 42, 165, 10, C.muted);
-  r.text(album.stars + ' 星的旅程', 42, 187, 9, C.muted);
+  r.panel(24, 94, 342, 114, { fill: C.panel, stroke: C.line, radius: 16, flat: true });
+  r.text('已收藏', 42, 116, 11, C.muted);
+  r.text(album.ownedCount, 41, 146, 28, C.ink, 'left', '600');
+  r.text('/ ' + album.stamps.length, 81, 149, 13, C.muted);
+  r.text('累计星光', 42, 172, 11, C.muted);
+  r.text(album.stars + ' 星', 42, 190, 12, C.green, 'left', '600');
   r.line([[130, 112], [130, 188]], '#cbd6c4', 1, [2, 4]);
   if (next) {
     const held = !game.modal && game.pointer && insideRect({ x: 139, y: 100, w: 220, h: 101 }, game.pointer.x, game.pointer.y);
-    r.round(139, 101, 219, 99, 12, held ? '#efe0bd' : '#f5ecd7', held ? '#c59c65' : '#dfcba8');
+    r.round(139, 101, 219, 99, 12, held ? '#efe0bd' : '#f8efdc', held ? '#c59c65' : null);
   }
-  r.text(next ? '下一枚收藏 · 定位邮票' : '全套珍藏已集齐', contentX, 114, 10, next ? C.goldText : C.green);
-  r.label(next ? next.name : '沿途的风，都在这里', contentX, 140, contentWidth - (next ? 32 : 0), 16, C.ink, 'left', '600');
+  r.text(next ? '下一枚收藏' : '全套珍藏已集齐', contentX, 116, 11, next ? C.goldText : C.green);
+  r.label(next ? next.name : '沿途的风，都在这里', contentX, 141, contentWidth - (next ? 32 : 0), 18, C.ink, 'left', '600');
   if (next) {
-    r.text('还差 ' + next.remaining + ' 星', contentX, 163, 11, C.muted);
-    r.text('本段 ' + next.stageCurrent + ' / ' + next.stageGoal, contentRight, 163, 10, C.goldText, 'right');
+    r.text('还差 ' + next.remaining + ' 星', contentX, 164, 12, C.goldText, 'left', '600');
+    r.text('去看看', contentRight, 164, 11, C.muted, 'right');
     r.meter(contentX, 179, contentWidth, next.stageCurrent, next.stageGoal, C.gold);
     drawProgressGlint(r, contentX, 179, contentWidth, next.stageCurrent, next.stageGoal);
-    r.text('累计 ' + next.current + ' / ' + next.goal + ' 星', contentX, 194, 9, C.muted);
+    r.text('本段 ' + next.stageCurrent + ' / ' + next.stageGoal + ' 星', contentX, 194, 11, C.muted);
     r.actionIcon('arrow-right', contentRight - 10, 140, C.gold);
     r.hit(139, 100, 220, 101, () => locateNextStamp(game));
   } else {
-    r.text('每一次抵达，都成为珍藏', contentX, 165, 10, C.muted);
+    r.text('每一次抵达，都成为珍藏', contentX, 165, 12, C.muted);
     r.meter(contentX, 187, contentWidth, album.ownedCount, album.stamps.length, C.green);
   }
 }
@@ -102,7 +103,7 @@ function drawFilters(r, game, album) {
   FILTERS.forEach((filter, index) => {
     const count = filter.id === 'all' ? album.stamps.length : filter.id === 'owned' ? album.ownedCount : album.stamps.length - album.ownedCount;
     r.button(filter.label + ' ' + count, 24 + index * 116, 217, 110, CONTROL.compactHeight,
-      () => setCollectionFilter(game, filter.id), { style: 'tab', selected: current === filter.id, size: 12 });
+      () => setCollectionFilter(game, filter.id), { style: 'tab', selected: current === filter.id, size: 13 });
   });
 }
 
@@ -110,7 +111,7 @@ function drawEmpty(r, game, viewport) {
   const owned = collectionFilter(game) === 'owned', y = viewport.y;
   r.icon(owned ? 'stamp' : 'star', 195, y + 28, 30, C.gold);
   r.text(owned ? '第一枚邮票，正在路上' : '沿途邮票已全部收藏', 195, y + 67, 17, C.ink, 'center', '600');
-  r.text(owned ? '主线累计获得 1 星，就会自动收入邮票册。' : '翻开已收藏，读读每一枚邮票的短笺。', 195, y + 94, 11, C.muted, 'center');
+  r.text(owned ? '主线累计获得 1 星，就会自动收入邮票册。' : '翻开已收藏，读读每一枚邮票的短笺。', 195, y + 94, 12, C.muted, 'center');
   r.button(owned ? '去选一封信' : '查看已收藏', 85, y + 116, 220, CONTROL.height,
     owned ? () => game.openLevelBrowser('all') : () => setCollectionFilter(game, 'owned'), { style: 'primary', icon: owned ? 'route' : 'stamp' });
 }
@@ -129,12 +130,12 @@ function drawCollection(r, game) {
   r.header('沿途邮票册', '把每一次抵达，慢慢收集起来', () => game.home());
   drawSummary(r, game, album);
   drawFilters(r, game, album);
-  r.text('旅程纪念', 24, 287, 14, C.ink, 'left', '600');
+  r.text('旅程纪念', 24, 287, 16, C.ink, 'left', '600');
   if (typeof game.journey === 'function') {
     const journey = game.journey();
     r.button('日邮戳 ' + journey.earnedDays + ' · 今日邮程', 190, 265, 176, CONTROL.compactHeight,
-      () => game.openJourney(), { style: 'quiet', size: 11 });
-  } else r.text('轻触邮票 · 读纪念短笺', 365, 287, 10, C.muted, 'right');
+      () => game.openJourney(), { style: 'text', size: 12 });
+  } else r.text('轻触邮票 · 读纪念短笺', 365, 287, 11, C.muted, 'right');
   const c = r.ctx;
   c.save(); c.beginPath(); c.rect(viewport.x, viewport.y, viewport.w, viewport.h); c.clip();
   const first = Math.max(0, Math.floor((scroll.offset - 6) / 160)) * 3;

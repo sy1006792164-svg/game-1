@@ -12,11 +12,12 @@ const { drawEmblemLight } = require('./keepsake-effects');
 // their own space, including when a longer label wraps onto another line.
 function measureModal(r, modal, navigation = null, helpHeight = 0) {
   const x = 22, w = 346, inset = 24, width = w - inset * 2;
-  const titleSize = 20, titleHeight = 28, lineHeight = 22;
-  let cursor = modal.sections ? 24 : modal.kind === 'item' ? 76 : 96;
+  const titleSize = 22, titleHeight = 30, lineHeight = 22;
+  const result = modal.kind === 'win' || modal.kind === 'fail';
+  let cursor = modal.sections ? 24 : result ? 96 : 76;
   const kickerY = modal.kicker ? cursor + 5 : null;
   if (modal.kicker) cursor += 22;
-  const title = r.wrapLines(modal.title, width, titleSize, '600');
+  const title = r.wrapLines(modal.title, width, titleSize, '700');
   const titleY = cursor + titleHeight / 2;
   cursor += title.length * titleHeight;
   let starsY = null;
@@ -34,7 +35,7 @@ function measureModal(r, modal, navigation = null, helpHeight = 0) {
   });
   let progress = null;
   if (modal.progressLine) {
-    const style = { style: 'quiet', icon: 'stamp', trailing: 'chevron', size: 12,
+    const style = { style: 'text', icon: 'stamp', trailing: 'chevron', size: 12,
       disabled: typeof modal.progressAction !== 'function' };
     const layout = buttonLayout(r, modal.progressLine, width, style);
     cursor += 12;
@@ -48,14 +49,13 @@ function measureModal(r, modal, navigation = null, helpHeight = 0) {
     cursor += CONTROL.compactHeight;
   }
   if (modal.buttons.length) cursor += navigation ? 14 : progress ? 12 : 24;
-  const styles = modal.buttons.map(button => button.primary ? 'primary' : button.textOnly ? 'quiet' : 'secondary');
-  const buttonHeight = Math.max(CONTROL.height, ...modal.buttons.map((button, index) => {
-    const layout = buttonLayout(r, button.text, width, { style: styles[index], icon: button.icon });
-    return layout.lines.length * layout.lineHeight + 24;
-  }));
   const buttons = modal.buttons.map((button, index) => {
-    if (index) cursor += 10;
-    const result = { ...button, x: x + inset, y: cursor, w: width, h: buttonHeight, style: styles[index] };
+    const style = button.primary ? 'primary' : button.textOnly ? 'text' : 'secondary';
+    const layout = buttonLayout(r, button.text, width, { style, icon: button.icon });
+    const buttonHeight = Math.max(button.primary ? CONTROL.height : CONTROL.compactHeight,
+      layout.lines.length * layout.lineHeight + 20);
+    if (index) cursor += 8;
+    const result = { ...button, x: x + inset, y: cursor, w: width, h: buttonHeight, style };
     cursor += buttonHeight;
     return result;
   });
@@ -103,11 +103,10 @@ function drawModal(r, modal, now, resultAge = null) {
   r.round(ui.x - 2, ui.y + 3, ui.w + 4, ui.h, 23, '#e6e8d7', '#c1cbb6');
   r.round(ui.x, ui.y, ui.w, ui.h, 23, '#fffdf4', '#c6d0bd');
   drawSurfaceEdges(r, ui.x, ui.y, ui.w, ui.h, 23);
-  r.round(ui.x + 8, ui.y + 8, ui.w - 16, ui.h - 16, 18, null, '#e4e8d9');
   r.line([[ui.x + 42, ui.y + 2], [ui.x + ui.w - 42, ui.y + 2]], accent, 2);
   // Small cancellation marks turn the result into a paper receipt without
   // adding height or moving its text and actions on compact screens.
-  if (!ui.help && modal.kind !== 'item') [ui.x + 48, ui.x + ui.w - 89].forEach(left => {
+  if (result) [ui.x + 48, ui.x + ui.w - 89].forEach(left => {
     for (let line = 0; line < 3; line++) {
       const y = ui.y + 46 + line * 6;
       r.line([[left, y + 2], [left + 12, y], [left + 26, y + 2], [left + 40, y]], '#c7d4be', 1);
@@ -123,18 +122,20 @@ function drawModal(r, modal, now, resultAge = null) {
     drawItemArt(r, modal.itemId, 195, ui.y + 40, 29);
     drawEmblemLight(r, 195, ui.y + 40, 24, age, itemAccent);
   } else if (!ui.help) {
-    r.circle(195, ui.y + 52, 29, '#f5ecd5', '#d6c5a5');
-    r.circle(195, ui.y + 52, 23, '#fffaf0', '#e6d8bb');
-    r.icon(help ? 'echo' : 'wind', 195, ui.y + 52, 28, help ? C.blue : C.gold);
-    drawEmblemLight(r, 195, ui.y + 52, 29, age, help ? C.blue : C.gold);
+    r.circle(195, ui.y + 40, 22, C.raised, C.line);
+    r.icon(help ? 'echo' : 'wind', 195, ui.y + 40, 24, help ? C.blue : C.gold);
+    drawEmblemLight(r, 195, ui.y + 40, 22, age, help ? C.blue : C.gold);
   }
-  if (modal.kicker) r.label(modal.kicker, 195, ui.y + ui.kickerY, ui.width, 10, C.muted, 'center');
-  ui.title.forEach((line, i) => r.text(line, 195, ui.y + ui.titleY + i * ui.titleHeight, ui.titleSize, C.ink, 'center', '600'));
+  if (modal.kicker) r.label(modal.kicker, 195, ui.y + ui.kickerY, ui.width, 11, C.muted, 'center');
+  ui.title.forEach((line, i) => r.text(line, 195, ui.y + ui.titleY + i * ui.titleHeight, ui.titleSize, C.ink, 'center', '700'));
   if (ui.starsY != null) drawResultStars(r, modal.stars, ui.y + ui.starsY, resultAge);
   if (ui.help) drawHelp(r, ui.help, ui.x + 24, ui.y + ui.helpY);
-  ui.paragraphs.forEach(paragraph => paragraph.lines.forEach((line, i) => {
-    r.text(line, help ? ui.x + 24 : 195, ui.y + paragraph.y + i * ui.lineHeight, 13, C.muted, help ? 'left' : 'center');
-  }));
+  const left = help || ui.paragraphs.some(paragraph => paragraph.lines.length > 1);
+  ui.paragraphs.forEach((paragraph, index) => {
+    const color = result && index === 0 ? C.ink : C.muted;
+    paragraph.lines.forEach((line, i) => r.text(line, left ? ui.x + 24 : 195,
+      ui.y + paragraph.y + i * ui.lineHeight, 13, color, left ? 'left' : 'center'));
+  });
   if (ui.progress || ui.buttons.length || ui.navigation) {
     const separatorY = ui.y + (ui.progress ? ui.progress.y - 6 : (ui.navigation ? ui.navigation.y : ui.buttons[0].y) - 12);
     r.line([[ui.x + 24, separatorY], [ui.x + ui.w - 24, separatorY]], '#d1d8c3', 1, [2, 5]);
@@ -148,10 +149,10 @@ function drawModal(r, modal, now, resultAge = null) {
   if (ui.navigation) {
     const nav = ui.navigation, y = ui.y + nav.y;
     r.button('上一页', ui.x + 24, y, 104, CONTROL.compactHeight, nav.previous,
-      { style: 'quiet', icon: 'back', disabled: nav.page === 0 });
+      { style: 'text', icon: 'back', disabled: nav.page === 0 });
     r.text((nav.page + 1) + ' / ' + nav.count, 195, y + CONTROL.compactHeight / 2, 12, C.muted, 'center');
     r.button('下一页', ui.x + ui.w - 128, y, 104, CONTROL.compactHeight, nav.next,
-      { style: 'quiet', icon: 'chevron', disabled: nav.page === nav.count - 1 });
+      { style: 'text', icon: 'chevron', disabled: nav.page === nav.count - 1 });
   }
   ui.buttons.forEach(button => r.button(button.text, button.x, ui.y + button.y, button.w, button.h, button.action,
     { style: button.style, icon: button.icon }));

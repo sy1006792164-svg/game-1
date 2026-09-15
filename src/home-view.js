@@ -11,8 +11,8 @@ const { decorativeTime } = require('./page-feedback');
 function layout(height) {
   const top = Math.max(0, (height - 844) / 2);
   const heroY = 142 + top, heroH = Math.min(386, height - 410 - top);
-  const routeY = heroY + heroH + 32, buttonY = routeY + 48;
-  return { top, heroY, heroH, routeY, buttonY, linksY: buttonY + CONTROL.height + 28 };
+  const routeY = heroY + heroH + 28, buttonY = routeY + 50;
+  return { top, heroY, heroH, routeY, buttonY, linksY: buttonY + CONTROL.height + 22 };
 }
 
 function departure(next, saved, completed) {
@@ -43,14 +43,14 @@ function drawLinks(r, game, y) {
   links.forEach((item, index) => {
     const x = startX + index * (width + gap);
     r.button(item.title, x, y, width, CONTROL.compactHeight, item.action,
-      { style: 'quiet', icon: item.icon, size: 13 });
+      { style: 'text', icon: item.icon, size: 13, color: C.muted });
   });
 }
 
 function drawSettingsShortcut(r, game) {
   const size = CONTROL.compactHeight;
   r.button('', 390 - 16 - size, 10, size, size, () => game.openPage('settings'),
-    { style: 'quiet', icon: 'settings' });
+    { style: 'text', icon: 'settings', color: C.muted });
 }
 
 function drawDepartureTrail(r, y, quietMotion) {
@@ -77,8 +77,8 @@ function drawHome(r, game, now) {
   drawVignette(r, sceneNow, { x: 5, y: ui.heroY, w: 380, h: ui.heroH },
     { reducedMotion: quietMotion, mood, deliveryStory: r.effectsQuality !== 'low' });
   drawDepartureTrail(r, ui.routeY - 13, quietMotion);
-  r.label(route.detail, 195, ui.routeY + 6, 324, 12, C.ink, 'center', '600');
-  r.text(saved ? '路线已留好，随时接着走' : '你拾起信笺 · 回声收集邮票', 195, ui.routeY + 28, 10, C.muted, 'center');
+  r.label(route.detail, 195, ui.routeY + 6, 324, 14, C.ink, 'center', '600');
+  r.text(saved ? '路线已留好，随时接着走' : '你拾起信笺 · 回声收集邮票', 195, ui.routeY + 28, 11, C.muted, 'center');
   if (!quietMotion) {
     const breath = (1 + Math.sin(sceneNow / 1200)) / 2;
     const alpha = Math.round(12 + breath * 16).toString(16).padStart(2, '0');
@@ -87,11 +87,12 @@ function drawHome(r, game, now) {
   }
   r.button(route.title, 42, ui.buttonY, 306, CONTROL.height, () => game.primary(), { style: 'primary' });
   drawLinks(r, game, ui.linksY);
-  const footerY = ui.linksY + CONTROL.compactHeight + 32;
+  const footerY = ui.linksY + CONTROL.compactHeight + 31;
   if (typeof game.journey === 'function') {
     const journey = game.journey();
+    r.line([[90, footerY - 28], [300, footerY - 28]], C.line, .7);
     r.button(journey.done ? '今日已盖章 · 累计 ' + journey.earnedDays + ' 枚日邮戳' : '今日邮程 ' + journey.points + ' / ' + journey.target + ' · 查看目标',
-      42, footerY - 22, 306, CONTROL.compactHeight, () => game.openJourney(), { style: 'quiet', icon: 'stamp', size: 12 });
+      42, footerY - 22, 306, CONTROL.compactHeight, () => game.openJourney(), { style: 'text', size: 11, color: C.muted });
   } else r.text(completed ? '已送达 ' + completed + ' 封信 · 每一程都算数' : '不必赶路，想好了再出发', 195, footerY, 10, C.muted, 'center');
   drawSettingsShortcut(r, game);
 }

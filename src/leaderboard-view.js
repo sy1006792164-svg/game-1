@@ -10,12 +10,12 @@ const CONTENT_Y = 94;
 const DISABLED_REMINDER_STATES = Object.freeze(['checking', 'requesting', 'banned', 'disabled']);
 
 function drawIntro(r, game) {
-  r.header('好友排行', '总星数优先 · 同星比较通关与步数', () => game.home());
   const subscription = game.rankMessageSubscription && game.rankMessageSubscription.getState();
   const authorization = game.rankingAuthorization.getState();
   const friend = game.friendLeaderboard && game.friendLeaderboard.getState();
   const showReminder = subscription && !['accepted', 'unavailable'].includes(subscription.status) &&
     friend && (authorization.enabled || authorization.canDisplay) && ['ready', 'preview'].includes(friend.status);
+  r.header('好友排行', '总星数优先 · 同星比较通关与步数', () => game.home(), { actionWidth: showReminder ? 52 : 0 });
   if (showReminder) {
     const status = subscription.status;
     const disabled = DISABLED_REMINDER_STATES.includes(status);
@@ -25,20 +25,25 @@ function drawIntro(r, game) {
 }
 
 function drawStatusCard(r, box) {
-  // The list uses the full page; a consent or error card keeps its readable size.
-  r.panel(box.x, box.y, box.w, Math.min(470, box.h), { fill: C.panel, stroke: C.line, radius: 22 });
-  const top = box.y;
-  r.circle(195, top + 65, 36, C.soft);
-  r.circle(195, top + 65, 27, C.raised);
-  r.actionIcon('community', 195, top + 65, C.green);
-  r.icon('star', 147, top + 48, 12, C.gold);
-  r.icon('star', 240, top + 84, 9, C.gold);
-  return top;
+  const height = Math.min(446, box.h), compact = height < 380;
+  r.panel(box.x, box.y, box.w, height, { fill: C.panel, stroke: C.line, radius: 22 });
+  if (!compact) {
+    r.circle(195, box.y + 49, 29, C.soft);
+    r.actionIcon('community', 195, box.y + 49, C.green);
+    r.icon('star', 235, box.y + 61, 8, C.gold);
+  }
+  const buttonY = box.y + Math.min(280, height - 126);
+  return { titleY: box.y + (compact ? 28 : 105), subtitleY: box.y + (compact ? 58 : 137),
+    detailY: box.y + (compact ? 80 : 159), messageY: box.y + (compact ? 108 : 193),
+    buttonY, secondaryY: buttonY + 60, noteY: box.y + height - 30 };
 }
 
-function drawMessage(r, message, y, warning) {
-  r.wrapLines(message, 294, 12).slice(0, 4).forEach((line, index) =>
-    r.text(line, 195, y + index * 20, 12, warning ? C.goldText : C.muted, 'center'));
+function drawMessage(r, message, ui, warning) {
+  const lines = r.wrapLines(message, 294, 12);
+  const limit = Math.max(1, Math.floor((ui.buttonY - ui.messageY - 16) / 20) + 1);
+  lines.slice(0, limit).forEach((line, index) =>
+    r.label(line + (index === limit - 1 && lines.length > limit ? '…' : ''), 195,
+      ui.messageY + index * 20, 294, 12, warning ? C.goldText : C.muted, 'center'));
 }
 
 function drawFooter(r, note, warning) {
@@ -55,22 +60,23 @@ function drawSkeletonLine(r, x, y, w, h, offset = 0) {
 }
 
 function drawRankPlaceholder(r, game, box) {
-  r.round(box.x, box.y, box.w, 126, 19, C.green);
+  const compact = box.h < 420, heroH = compact ? 96 : 126, stride = compact ? 64 : 76;
+  r.round(box.x, box.y, box.w, heroH, 19, C.green);
   r.round(box.x + 19, box.y + 1.5, box.w - 38, 1, .5, '#c6dec18a');
-  r.round(box.x + 19, box.y + 123.5, box.w - 38, 1, .5, '#183e3966');
-  r.circle(55, box.y + 37, 19, '#dce9d8');
-  r.text('我的邮路', 88, box.y + 31, 15, C.white, 'left', '600');
+  r.circle(55, box.y + 31, compact ? 15 : 19, '#dce9d8');
+  r.text('我的邮路', 88, box.y + 29, 15, C.white, 'left', '600');
   ['总星数', '已通关', '最佳总步数'].forEach((label, i) => {
-    const x = box.x + (i + .5) * box.w / 3;
-    r.text('—', x, box.y + 84, 21, C.white, 'center');
-    r.text(label, x, box.y + 109, 10, '#dce9d8', 'center');
+    const x = box.x + [.195, .515, .82][i] * box.w;
+    r.text('—', x, box.y + (compact ? 65 : 82), i ? 18 : 28, i ? C.white : '#ffe2a6', 'center', '600');
+    r.text(label, x, box.y + (compact ? 85 : 107), 11, '#dce9d8', 'center');
   });
-  r.text('好友成绩', 22, box.y + 154, 14, C.ink, 'left', '600');
-  r.label('正在连接微信', box.x + box.w - 7, box.y + 154, 150, 10, C.muted, 'right');
-  for (let i = 0; i < 3; i++) {
-    const y = box.y + 176 + i * 76;
-    r.panel(box.x, y, box.w, 64, { fill: C.panel, stroke: C.line, radius: 13 });
-    r.circle(49, y + 32, 17, C.soft);
+  r.text('好友成绩', 22, box.y + heroH + 28, 16, C.ink, 'left', '600');
+  r.label('正在连接微信', box.x + box.w - 7, box.y + heroH + 28, 150, 11, C.muted, 'right');
+  const count = Math.min(3, Math.max(0, Math.floor((box.h - heroH - 52 - 20) / stride)));
+  for (let i = 0; i < count; i++) {
+    const y = box.y + heroH + 52 + i * stride;
+    r.panel(box.x, y, box.w, stride - 8, { fill: C.panel, stroke: C.line, radius: 13, flat: true });
+    r.circle(49, y + (stride - 8) / 2, 17, C.soft);
     drawSkeletonLine(r, 80, y + 20, 116, 7, i * 170);
     drawSkeletonLine(r, 80, y + 38, 73, 6, i * 170 + 80);
     drawSkeletonLine(r, box.x + box.w - 61, y + 27, 38, 8, i * 170 + 140);
@@ -90,16 +96,16 @@ function drawFriends(r, game, box) {
   } else {
     const unavailable = state.status === 'unavailable';
     const warning = ['denied', 'error'].includes(state.status);
-    const top = drawStatusCard(r, box);
+    const ui = drawStatusCard(r, box);
     const title = unavailable ? '在微信里，与好友相逢' : state.status === 'error' ? '来信暂时没有送达' : '和好友一起收集星光';
-    r.text(title, 195, top + 121, 20, C.ink, 'center', '600');
-    r.text(unavailable ? '好友成绩由微信提供' : '看看彼此走过的邮路与收集的星星', 195, top + 156, 12, C.muted, 'center');
-    drawMessage(r, state.message || (unavailable ? '请在微信小游戏中打开好友排行' : '允许好友互动后，即可查看好友成绩'), top + 202, warning);
+    r.label(title, 195, ui.titleY, 306, 22, C.ink, 'center', '700');
+    r.label(unavailable ? '好友成绩由微信提供' : '看看彼此走过的邮路与收集的星星', 195, ui.subtitleY, 306, 12, C.muted, 'center');
+    drawMessage(r, state.message || (unavailable ? '请在微信小游戏中打开好友排行' : '允许好友互动后，即可查看好友成绩'), ui, warning);
     if (!unavailable) {
       r.button(state.status === 'denied' ? '去授权' : state.status === 'error' ? '重新打开好友榜' : '查看好友榜',
-        92, top + 302, 206, 48, () => game.openFriendLeaderboard(), { style: 'primary' });
+        92, ui.buttonY, 206, 48, () => game.openFriendLeaderboard(), { style: 'primary' });
     }
-    r.text(unavailable ? '这段邮路，可以先由你独自探索' : '随时可以返回，继续自己的旅程', 195, top + 412, 11, C.muted, 'center');
+    r.label(unavailable ? '这段邮路，可以先由你独自探索' : '随时可以返回，继续自己的旅程', 195, ui.noteY, 306, 11, C.muted, 'center');
   }
   const syncError = state.syncStatus === 'error';
   const auth = game.rankingAuthorization.getState();
@@ -111,22 +117,21 @@ function drawAuthorization(r, game, box, state) {
   const auth = game.rankingAuthorization;
   const unavailable = state.status === 'unavailable';
   const warning = ['denied', 'error'].includes(state.status);
-  const top = drawStatusCard(r, box);
+  const ui = drawStatusCard(r, box);
   const title = unavailable ? '好友排行，在微信里相见' : '开启好友排行';
-  r.text(title, 195, top + 121, 20, C.ink, 'center', '600');
-  r.text(unavailable ? '浏览器中可以完整体验解谜旅程' : '好友头像与昵称由微信好友榜提供', 195, top + 156, 12, C.muted, 'center');
-  if (!unavailable) r.text('确认隐私授权后，再申请好友互动权限', 195, top + 179, 11, C.muted, 'center');
-  drawMessage(r, state.message || '首次使用时，请完成微信隐私授权', top + 216, warning);
+  r.label(title, 195, ui.titleY, 306, 22, C.ink, 'center', '700');
+  r.label(unavailable ? '浏览器中可以完整体验解谜旅程' : '好友头像与昵称由微信好友榜提供', 195, ui.subtitleY, 306, 12, C.muted, 'center');
+  if (!unavailable) r.label('确认隐私授权后，再申请好友互动权限', 195, ui.detailY, 306, 11, C.muted, 'center');
+  drawMessage(r, state.message || '首次使用时，请完成微信隐私授权', ui, warning);
 
-  const buttonY = top + 302;
   auth.updateButton(null);
   if (!unavailable && ['idle', 'denied', 'error'].includes(state.status)) {
-    r.button(state.status === 'error' ? '重试' : '确认并查看好友榜', 55, buttonY, 280, 48, () => auth.open(), { style: 'primary' });
+    r.button(state.status === 'error' ? '重试' : '确认并查看好友榜', 55, ui.buttonY, 280, 48, () => auth.open(), { style: 'primary' });
   }
   if (!unavailable) {
-    r.button('隐私保护指引', 45, top + 375, 144, 38, () => auth.openContract(), { style: 'quiet' });
-    r.button('暂不授权', 201, top + 375, 144, 38, () => game.home(), { style: 'quiet' });
-  } else r.text('星光与本地进度，会留在你的旅途中', 195, top + 375, 11, C.muted, 'center');
+    r.button('隐私保护指引', 45, ui.secondaryY, 144, 44, () => auth.openContract(), { style: 'text', size: 12 });
+    r.button('暂不授权', 201, ui.secondaryY, 144, 44, () => game.home(), { style: 'text', size: 12 });
+  } else r.label('星光与本地进度，会留在你的旅途中', 195, ui.noteY, 306, 11, C.muted, 'center');
   drawFooter(r, '拒绝授权不影响单人游玩与本地存档');
 }
 

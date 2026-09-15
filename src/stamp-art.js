@@ -13,14 +13,14 @@ function drawStampArt(r, stamp, rect, { next = false, held = false, scrolling = 
   c.save(); c.translate(rect.x, rect.y); c.scale(rect.w / w, rect.h / h);
   drawStampPaper(r, rect, owned, next, held);
   r.round(6, 6, w - 12, h - 12, 2, null, owned ? '#d9dfc6' : next ? '#e2c796' : '#c9d7c6');
-  r.text(String(stamp.index + 1).padStart(2, '0'), 13, 17, 9, C.muted);
+  r.text(String(stamp.index + 1).padStart(2, '0'), 13, 18, 10, C.muted);
   if (next) {
     const label = '下一枚', padding = 5;
-    r.font(9);
+    r.font(10, '600');
     const badgeWidth = c.measureText(label).width + padding * 2, badgeX = w - 11 - badgeWidth;
-    r.round(badgeX, 9, badgeWidth, 17, 5, '#f5dfb5');
-    r.text(label, badgeX + badgeWidth / 2, 17.5, 9, C.goldText, 'center');
-  } else r.text(owned ? '已收藏' : '待收藏', w - 14, 17, 9, C.muted, 'right');
+    r.round(badgeX, 9, badgeWidth, 18, 5, '#f5dfb5');
+    r.text(label, badgeX + badgeWidth / 2, 18, 10, C.goldText, 'center', '600');
+  } else r.text(owned ? '已收藏' : '待收藏', w - 14, 18, 10, C.muted, 'right');
   r.circle(middle, 65, 28, owned ? '#7f967521' : next ? '#b8874220' : '#8da18d15');
   r.circle(middle, 62, 28, owned ? '#eff1df' : next ? '#f9e6bd' : '#d9e5d5', owned ? '#c3d0b1' : next ? '#d7b777' : '#b6cbb6');
   c.beginPath(); c.arc(middle, 62, 27, Math.PI * .88, Math.PI * 1.78);
@@ -51,8 +51,8 @@ function drawStampArt(r, stamp, rect, { next = false, held = false, scrolling = 
     c.restore();
   }
   r.line([[18, 94], [w - 18, 94]], owned ? '#c9d2b6' : next ? '#d5b98b' : '#bbceb9', .8);
-  r.label(stamp.name, middle, 110, w - 18, 12, owned ? C.ink : next ? '#92643c' : C.muted, 'center', '600');
-  r.label(owned ? '累计 ' + stamp.target + ' 星' : '还差 ' + (stamp.goal - stamp.current) + ' 星', middle, 130, w - 18, 9.5, next ? C.goldText : C.muted, 'center');
+  r.label(stamp.name, middle, 110, w - 18, 13, owned ? C.ink : next ? C.goldText : C.muted, 'center', '600');
+  r.label(owned ? '累计 ' + stamp.target + ' 星' : '还差 ' + (stamp.goal - stamp.current) + ' 星', middle, 130, w - 18, 11, next ? C.goldText : C.muted, 'center');
   c.restore();
 }
 
