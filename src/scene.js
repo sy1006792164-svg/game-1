@@ -11,7 +11,11 @@ const { chapterMood } = require('./chapter-atmosphere');
 const { drawHomeDelivery } = require('./page-atmosphere');
 const { drawGuideTargets } = require('./guide-view');
 const { drawHomeArchitecture } = require('./world-art');
-const { drawRoutePreview } = require('./route-preview');
+const { getRoutePreview, drawRoutePreview } = require('./route-preview');
+const { drawEchoMarkers } = require('./echo-timeline');
+const { drawSupplyStation, drawSupplyPickup } = require('./supply-station');
+const { drawArtSprite, drawPaving } = require('./art-sprites');
+const { drawActionPreview } = require('./action-preview');
 const { drawWindRune, drawBridgeFlutter, lampFrame, drawLampFlame } = require('./prop-motion');
 const { selectedItemTargets, drawItemTarget, drawItemEffects } = require('./item-view');
 
@@ -56,6 +60,11 @@ function hitProp(r, x, y, width, height, radius, angle, action) {
 }
 
 function tree(r, x, y, size, now, distant, mood = chapterMood(0), wind = windState(now), trunkWidth = size * .16) {
+  if (!distant && r.artAssets && r.artAssets.ready) {
+    const c = r.ctx, sway = r.reducedMotion || r.effectsQuality === 'low' ? 0 : Math.sin(now / 1900 + x) * .013;
+    c.save(); c.translate(x, y); c.rotate(sway);
+    drawArtSprite(r, 'tree', 0, 0, size * .91, size * 1.08); c.restore(); return;
+  }
   const slowSway = distant ? .01 : .012;
   // Wind is continuous scenery; taking another turn must not restart its sway.
   const gustSway = distant ? .008 + wind.gust * .025 : .015 + wind.strength * .012 + wind.gust * .045;
@@ -92,6 +101,12 @@ function grass(r, x, y, size, now, color, wind = windState(now)) {
 }
 
 function postOffice(r, x, y, size, now, ready) {
+  if (r.artAssets && r.artAssets.ready) {
+    if (ready) glow(r, x, y - size * .42, size * .65, COLOR.gold, .1);
+    drawArtSprite(r, 'office', x, y + size * .12, size * 1.48, size * 1.56);
+    if (ready) r.icon('letter', x + size * .48, y - size * 1.32, size * .28, COLOR.gold);
+    return;
+  }
   const c = r.ctx; c.save(); c.translate(x, y); c.scale(size / 44, size / 44);
   polygon(r, [[-18, 0], [20, -9], [42, 1], [9, 13]], '#597c6633');
   ellipse(r, 2, 2, 23, 7, '#597c6619');
@@ -132,6 +147,13 @@ function postOffice(r, x, y, size, now, ready) {
 }
 
 function lantern(r, x, y, size, now, action) {
+  if (r.artAssets && r.artAssets.ready) {
+    const flame = lampFrame(r, now, x * .13);
+    glow(r, x - size * .13, y - size * .98, size * .48, COLOR.gold, .1 + flame.warmth * .1);
+    drawArtSprite(r, 'lantern', x, y + size * .15, size * .92, size * 1.58);
+    hitProp(r, x, y - size * .55, size * .78, size * 1.4, size * .16, 0, action);
+    return;
+  }
   const c = r.ctx; c.save(); c.translate(x, y); c.scale(size / 24, size / 24);
   const sway = Math.sin(now / 870 + x) * .06;
   const flame = lampFrame(r, now, x * .13);
@@ -186,6 +208,11 @@ function groundDetail(r, game, now, cell, p) {
       diamond(r, x, y - .7, hw - 2, hh - 1.5, '#eac798', '#f4dbaf');
       for (let i = -1; i <= 1; i++) floorLine(r, p, x, y, [[i * hw * .38 - hw * .31, i * hh * .38], [i * hw * .38 + hw * .31, i * hh * .38 - hh * .65]], '#b99769', 1.2);
       drawBridgeFlutter(r, x, y - .7, hw, hh, now, cell);
+      if (s.player === cell) {
+        floorLine(r, p, x, y, [[-hw * .55, -hh * .18], [-hw * .24, 0], [-hw * .06, -hh * .2],
+          [hw * .13, hh * .06], [hw * .42, -hh * .06]], '#a66548', 1.4);
+        r.text('离开即断', x, y + hh * .5, Math.max(6.5, Math.min(9, hw * .3)), '#87573e', 'center', '600');
+      }
     } else {
       diamond(r, x, y, hw - 1.5, hh - 1, '#244947', '#537869');
       floorLine(r, p, x, y, [[-hw * .7, -1], [-hw * .36, 3], [-hw * .2, -3]], '#b6a27b', 2);
@@ -202,13 +229,14 @@ function floorLine(r, p, x, y, offsets, color, width) {
   r.line(offsets.map(([dx, dy]) => [x + dx, y + dy]), color, width);
 }
 
-function floatingMail(r, x, y, size, now, cell, seal, action) {
+function floatingMail(r, x, y, size, now, cell, seal, action, deliveryOrder) {
   const c = r.ctx, bob = Math.sin(now / 670 + cell * .7) * 2.2;
   const floatY = y - size * .5 + bob, angle = Math.sin(now / 1500 + cell) * .09;
   ellipse(r, x, y + 1, size * .38, size * .12, seal ? '#659d9a38' : '#ae824530');
   drawCollectibleAura(r, x, y, size, now, cell, seal);
   glow(r, x, y - 10, size * .52, seal ? COLOR.teal : COLOR.gold, .055);
   c.save(); c.translate(x, floatY); c.rotate(angle);
+  if (deliveryOrder && !deliveryOrder.next) c.globalAlpha *= .65;
   if (seal) {
     r.round(-size * .36, -size * .43, size * .72, size * .86, 2, '#79c6c9', '#d0f0e5');
     r.line([[-size * .28, size * .35], [size * .28, size * .35], [size * .28, -size * .32]], '#397d8077', .75);
@@ -221,6 +249,16 @@ function floatingMail(r, x, y, size, now, cell, seal, action) {
     r.circle(0, 1, size * .095, '#bd7146');
   }
   c.restore();
+  if (deliveryOrder) {
+    const radius = Math.max(6, size * .3), bx = x + size * .4, by = floatY - size * .28;
+    r.circle(bx, by, radius, deliveryOrder.next ? '#956437' : '#f4eedb', deliveryOrder.next ? '#fff1c8' : '#aa9c78');
+    r.text(deliveryOrder.number, bx, by, Math.max(8, size * .4), deliveryOrder.next ? '#ffffff' : '#776448', 'center', '600');
+    if (deliveryOrder.next) {
+      const width = Math.max(28, size * 1.4);
+      r.round(x - width / 2, y + size * .17, width, 12, 6, '#fbefc9', '#c59d66');
+      r.text('下一封', x, y + size * .17 + 6, 8, '#80582e', 'center', '600');
+    }
+  }
   hitProp(r, x, floatY, size * (seal ? .72 : 20 / 24), size * (seal ? .86 : 14 / 24),
     seal ? 2 : size * 3 / 24, angle, action);
 }
@@ -232,6 +270,7 @@ function drawBoard(r, game, now, rect, guide) {
   const time = quietScenery ? 0 : Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   const wind = windState(time, quietScenery);
   const l = game.level, s = game.state;
+  const nextLetter = l.letterOrder && l.letterOrder.find(cell => s.letters.includes(cell));
   const view = options.reducedMotion
     ? { scale: game.camera.zoom, panX: game.camera.panX, panY: game.camera.panY }
     : game.camera.frame(now);
@@ -278,8 +317,10 @@ function drawBoard(r, game, now, rect, guide) {
   for (const cell of ordered) {
     const [x, y] = point(cell), wall = walls.has(cell);
     diamond(r, x, y, hw - .8, hh - .7, wall ? (cell % 3 ? '#9db792' : '#acc09a') : cell % 3 ? COLOR.stone : COLOR.stoneLight, null, wall ? 4 : 0, true);
+    if (!wall) drawPaving(r, x, y, hw - 1, hh - 1);
     if (wall) {
       if (cell % 3 === 0) actors.push({ y: y + 2, draw: () => {
+        if (drawArtSprite(r, 'rocks', x, y + 2, hw * .94, hw * .8)) return;
         polygon(r, [[x - 8, y - 3], [x - 5, y - 10], [x + 2, y - 12], [x + 8, y - 5], [x + 4, y]], '#d5d7bb');
         polygon(r, [[x + 2, y - 12], [x + 8, y - 5], [x + 4, y], [x, y - 4]], '#a3b29a');
         r.line([[x + 2, y - 11.5], [x, y - 4], [x + 4, y - .5]], '#7f967a99', .7);
@@ -300,7 +341,7 @@ function drawBoard(r, game, now, rect, guide) {
           hitPostOffice(r, { x, y, size: hw * 1.2, now: time }, enterOffice);
         } });
       }
-      if (!itemTargets && !game.reviewing && s.status === 'playing' && adjacent.has(cell) && (!guide || guide.visual.tapCell === cell)) {
+      if (!itemTargets && !game.reviewing && s.status === 'playing' && adjacent.has(cell) && (!guide || guide.interactive || guide.visual.tapCell === cell)) {
         diamond(r, x, y, hw - 3, hh - 2, '#f4d49b66', null);
         floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#c69755', 1.45);
         ellipse(r, x, y + hh * .43, hw * .12, hh * .14, '#b68b52');
@@ -308,8 +349,15 @@ function drawBoard(r, game, now, rect, guide) {
       if (itemTargets && itemTargets.has(cell)) drawItemTarget(r, game.selectedItem, p, cell, time);
       const selectProp = !game.reviewing && s.status === 'playing' ? cellAction(cell) : null;
       if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, time, selectProp) });
-      if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false, selectProp) });
+      if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false, selectProp,
+        l.letterOrder ? { number: l.letterOrder.indexOf(cell) + 1, next: cell === nextLetter } : null) });
       if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, time, cell, true, selectProp) });
+      if (s.supplies && s.supplies.includes(cell)) actors.push({ y: y + 1, draw: () => {
+        const size = hw * .88;
+        drawSupplyStation(r, x, y, size, l.supplies[cell]);
+        hitProp(r, x, y - size * .18, size * 1.12, size * .61, 3, 0, selectProp);
+        hitProp(r, x, y - size * .76, size * .7, size * .68, 3, 0, selectProp);
+      } });
     }
     // The courier remains visual only; uncovered floor tiles keep their normal actions.
     r.hit(x - hw, y - hh, hw * 2, hh * 2, cellAction(cell), (hx, hy) => p.contains(cell, hx, hy));
@@ -319,6 +367,7 @@ function drawBoard(r, game, now, rect, guide) {
   drawActorTrails(r, game, now, point, hw * 1.7, options);
   [true, false].forEach(ghost => {
     const frame = actorFrame(game, now, point, ghost, options), shared = ghost && s.echo === s.player;
+    frame.celebrating = s.status === 'won';
     if (!frame.alpha) return;
     if (shared) frame.x += hw * .28;
     actors.push({ y: frame.y + (ghost ? 2.5 : 3), draw: () => {
@@ -328,10 +377,15 @@ function drawBoard(r, game, now, rect, guide) {
     } });
   });
   actors.sort((a, b) => a.y - b.y).forEach(actor => actor.draw());
+  if (!itemTargets && !game.reviewing && s.status === 'playing' && (!guide || guide.interactive)) {
+    drawEchoMarkers(r, getRoutePreview(target, game).forecast, p);
+  }
   drawGuideTargets(r, guide, p, time);
   if (!itemTargets) drawDestination(r, game, time, p, options, enterOffice);
   drawEffects(target, game, now, point, hw * 1.7, options);
   drawItemEffects(r, game, now, p);
+  drawSupplyPickup(r, game, now, p);
+  drawActionPreview(r, game, p);
   c.restore();
 }
 
@@ -379,7 +433,10 @@ function drawBackdrop(r, now, chapter, options = {}) {
 function drawVignette(r, now, rect, options = {}) {
   const quietScenery = options.reducedMotion || r.reducedMotion || options.quality === 'low' || r.effectsQuality === 'low';
   if (quietScenery) now = 0;
-  const c = r.ctx, scale = Math.min(rect.w / 350, rect.h / 285), x = rect.x + rect.w / 2, y = rect.y + rect.h * .53;
+  // Contain the complete cached island (-180, -172, 360, 300), including
+  // the post office roof, in short portrait and startup scene bands.
+  const c = r.ctx, scale = Math.min(rect.w / 360, rect.h / 300), x = rect.x + rect.w / 2;
+  const y = rect.y + (rect.h - 300 * scale) / 2 + 172 * scale;
   c.save(); c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip(); c.translate(x, y); c.scale(scale, scale);
   drawHomeArchitecture(r, now, { ...options, reducedMotion: quietScenery });
   r.line([[-28, 36], [-9, 45], [11, 35], [26, 27]], '#5a9f9c99', 1.3, [2, 5]);

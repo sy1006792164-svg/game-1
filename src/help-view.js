@@ -8,13 +8,19 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
   const videoAvailable = platformKind === 'wechat' && options.canRevive === true;
   const sections = [
     { title: '移动与等待', icon: 'arrow-right', color: C.green,
-      text: '点相邻亮格移动；点脚下格或「等一拍」等待。\n每次消耗 1 拍，思考时不扣拍。\n撤回会退回上一步，剩余次数见按钮。' },
+      text: '轻点相邻亮格移动；点脚下格或「等一拍」等待。\n长按亮格或等待按钮，预览这一步；松手取消。\n预览不耗拍，再轻点一次才行动。\n移动和等待消耗 1 拍，思考时不扣拍。\n撤回会退回上一步，灯灭后仍可撤回。' },
     { title: '你收信，回声收票', icon: 'echo', color: C.blueText,
       text: '你收橙色信笺，回声收蓝色邮票。\n停在蓝票格后，再移动或等待 3 次，\n回声就会到那里收票。' },
+    { title: '提前看见三拍回声', icon: 'echo', color: C.blueText,
+      text: '棋盘上的 1、2、3 是回声未来三拍的落点。\n同格等候会合并编号；青色标记表示将盖好蓝票。\n上方三个圆点对应三拍，有邮票图标时将盖票。\n使用道具不会推进回声。' },
     { title: '收齐后，抵达邮局', icon: 'home', color: C.green,
       text: '信笺、邮票全收齐，抵达邮局即通关。' }
   ];
   if (level) {
+    if (level.letterOrder) sections.push({ title: '顺序来信', icon: 'letter', color: C.goldText,
+      text: '按信笺上的编号依次收取，发亮的是下一封。\n提前走到后面的信不会收取，需稍后再来。\n纸鸢也只能取当前这一封；蓝票规则不变。' });
+    if (Object.keys(level.supplies || {}).length) sections.push({ title: '补给驿站', icon: 'lamp', color: C.green,
+      text: '首次落在补给箱上，免费领取图示道具 1 份。\n领到后点下方道具使用，无需观看视频。\n每处每局领取一次；重开后可重新拾取。\n领取不影响三星，使用后本次最高二星。' });
     const mechanics = [];
     if (Object.keys(level.winds).length) mechanics.push('风口：走入后推 1 格，不额外扣拍；\n遇墙停下，不连推，等待不触发。');
     if ((level.bridges || []).length) mechanics.push('纸桥：离开即碎，回声仍可通过；\n修桥包可修复相邻断桥，修好可再走。');
@@ -24,7 +30,7 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
       text: '灯未灭时，灯油原地补' + SUPPLY_ENERGY + '拍。' +
         (level.id >= 7 ? '\n纸鸢隔空收一封信：直着数最多2格，\n或拐弯数各1格；可隔墙，不收蓝票。' : '') +
         (level.id >= 16 ? '\n修桥包修身旁断桥，上下左右紧挨一格；\n修好后再离开仍会碎。' : '') +
-        '\n道具不耗拍，回声也不前进；最高二星。\n点道具看说明，再选亮起的目标。' });
+        '\n道具不耗拍，回声也不前进；最高二星。\n部分关卡的驿站可免费领取。\n点道具看说明，再选亮起的目标。' });
     if (level.id >= 4) sections.push({ title: '灯油与续灯', icon: 'oil', color: C.goldText,
       text: '灯灭后已有灯油，优先用油补' + SUPPLY_ENERGY + '拍。' +
         (videoAvailable ? '\n没有灯油时，可完整看视频续灯' + SUPPLY_ENERGY + '拍。' : '\n无法续灯时，可免费重新挑战。') +
@@ -34,7 +40,7 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
     if (level.id >= 4) sections.push({ title: videoAvailable ? '按需看视频获取' : '道具获取与保留', icon: 'play', color: C.goldText,
       text: (videoAvailable ? '在微信内，自愿完整看1个视频获1份道具。\n未看完、加载失败或取消，都不会发放。' :
         '当前环境没有可用的视频补给。\n已有道具仍可使用，无道具也能通关。') +
-        '\n仅本次路线有效，重试或切关会清空。\n撤回道具会退回效果、返还已领取的1份，\n再次使用这份无需看视频。\n不会自动弹广告，也不影响无道具通关。' });
+        '\n也可拾取地图驿站中的免费道具。\n仅本次路线有效，重试或切关会清空。\n撤回使用会退回效果并返还道具；\n撤回领取驿站，则道具还原到地图。\n不会自动弹广告，也不影响无道具通关。' });
     sections.push({ title: '一程关联所有成长', icon: 'stamp', color: C.green,
       text: '主线送达解锁下一封，星光推进邮票收藏与好友排行。\n每日同一关首次送达获1至3邮程，满6记日邮戳。\n日邮戳累计保留，道具通关同样计邮程。\n首页「今日邮程」会推荐新关与待摘星邮路。' });
     const two = level.par + STAR_TWO_MARGIN, assisted = reviveCount > 0 || options.itemsUsed > 0;

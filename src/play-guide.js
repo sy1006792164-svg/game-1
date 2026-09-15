@@ -38,7 +38,7 @@ function guideStep(game, now) {
     total: 4, action: action || null, control: action === 'wait' ? 'wait' : null,
     visual: { focus, tapCell: focus ? cell : null, echo, player: s.player,
       label: kind === 'home' ? '点邮局' : collecting ? '点信封' : '点这里' },
-    tip: '每次行动扣 1 拍，不操作不扣拍。'
+    tip: '轻点行动；长按亮格预览，松手不走。'
   };
   if (!action) {
     lesson.control = game.canUndo() ? 'undo' : 'restart';
@@ -83,6 +83,10 @@ function playHint(game, now) {
   if (!l || !s) return '';
   if (game.reviewing) return game.failureHint();
   if (s.status === 'won') return '信已送达。';
+  if (l.letterOrder && s.letters.length && s.energy > 3) {
+    const next = l.letterOrder.find(cell => s.letters.includes(cell));
+    return '顺序来信 · 先收第 ' + (l.letterOrder.indexOf(next) + 1) + ' 封信，再按编号继续；蓝票仍交给回声。';
+  }
   if (s.status === 'failed') return '灯火已耗尽。' + game.failureHint();
   if (game.blockedAt != null && now - game.blockedAt < 1400) return '这边不通，点亮起的相邻地砖试试。';
   if (!s.letters.length && !s.seals.length) return '收集完成，' + (s.energy <= 3 ? '只剩 ' + s.energy + ' 拍，' : '') + '前往亮起的邮局。';
@@ -105,13 +109,14 @@ function playHint(game, now) {
   if (lowLight) return lowLight + '移动和等待都会耗灯；留好回邮局的路。';
   if (s.turn === 0) {
     if (l.id <= 3) return '点亮起的相邻地砖移动，先走过蓝票。';
+    if (l.experience) return l.experience.guidance;
     if (game.mode === 'campaign' && l.id >= 301) return l.lights.length
       ? '没有富余拍数，纸桥离开就碎，先排好路线。'
       : '没有灯火补给，也没有富余拍数。先排好整条邮路。';
     if ((l.bridges || []).length) return '纸桥离开后就会碎，先想好哪一段只走一次。';
     if (l.lights.length) return '沿路的风灯可以补 3 拍，收信时顺路点亮。';
     if (Object.keys(l.winds).length) return '箭头会再推你一格，留意实际落点。';
-    return '收橙色信笺，让晚三拍的回声收蓝票。';
+    return '轻点亮格移动，长按预览；松手不会行动。';
   }
   const queued = pending.filter(item => item.turns !== null);
   if (queued.length) return '你已经过蓝票，再走 ' + Math.min(...queued.map(item => item.turns)) + ' 拍，回声就会到达。';

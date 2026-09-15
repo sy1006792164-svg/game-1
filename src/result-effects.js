@@ -34,7 +34,7 @@ function drawDelivery(r, x, y, age) {
   if (seal) {
     c.save(); c.globalAlpha *= seal;
     const radius = 10 * (.6 + seal * .4);
-    r.circle(x + 22, y + 19, radius, C.green, C.white);
+    r.circle(x + 22, y + 19, radius, '#b57052', '#fff8e8');
     r.icon('check', x + 22, y + 19, radius * 1.3, C.white);
     c.restore();
   }
@@ -69,11 +69,12 @@ function drawFadingLamp(r, x, y, age) {
 }
 
 function drawResultHeader(r, kind, ui, age) {
-  const c = r.ctx, won = kind === 'win', x = ui.x + ui.w / 2, y = ui.y + 52;
+  const c = r.ctx, won = kind === 'win', x = ui.x + ui.w / 2, y = ui.y + (ui.compact ? 35 : 52);
   const elapsed = age === null || r.reducedMotion ? RESULT_ANIMATION_MS : Math.max(0, age);
   c.save();
   // Decoration stays in the existing emblem area, above every title and button.
-  c.beginPath(); c.rect(ui.x + 8, ui.y + 8, ui.w - 16, 82); c.clip();
+  c.beginPath(); c.rect(ui.x + 8, ui.y + 8, ui.w - 16, ui.compact ? 54 : 82); c.clip();
+  if (ui.compact) { c.translate(x, y); c.scale(.72, .72); c.translate(-x, -y); }
   r.circle(x, y, 31, won ? '#f5e9ca' : '#edeade', won ? '#c1ac72' : '#c1c6b4');
   r.circle(x, y, 25, won ? '#fff8e4' : '#f9f8ee', won ? '#ddc994' : '#d9dccc');
   c.beginPath(); c.arc(x, y, 29.5, Math.PI * 1.04, Math.PI * 1.88);

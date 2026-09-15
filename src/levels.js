@@ -2,11 +2,12 @@
 
 const { createState, step } = require('./engine');
 const { strengthenObjectives, difficultyProfile, challengeBrief } = require('./difficulty');
+const { phaseFor, practiceReserve, addCampaignMechanics, campaignExperience } = require('./campaign-design');
 
-// Version 6 keeps all 999 verified shortest routes and adds dispersed objectives
-// to their existing maps. Tighter light starts at the first lesson, with zero
-// reserve from route 19; v5 in-progress routes can finish under their old rules.
-const CONTENT_VERSION = '6';
+// Version 7 preserves every map, v6 objective and verified shortest route.
+// Selected routes add ordered deliveries and optional supply stations. Chapter
+// pacing restores practice room; v5/v6 runs keep their original rules.
+const CONTENT_VERSION = '7';
 const PER_CHAPTER = 6;
 const chapterNames = [
   '初寄微光', '双生回廊', '风过纸巷', '灯火借路', '星夜长信',
@@ -85,8 +86,12 @@ for (const entry of extra.routes) { specs.push(entry.slice(0, 3)); encodedSoluti
 chapterNames.push(...extra.chapters);
 const decode = code => code.split('').map(letter => ({ U: 'up', D: 'down', L: 'left', R: 'right', W: 'wait' })[letter]);
 
-/** Early lessons retain bounded practice room; route 19+ requires exact planning. */
-function reserveFor(index) {
+/** Light grows with route length and eases between each chapter's trials. */
+function reserveFor(index, par = (encodedSolutions[index] || '').length) {
+  return practiceReserve(index, par);
+}
+
+function versionSixReserveFor(index) {
   if (index < 3) return 2;
   if (index < 18) return 1;
   return 0;
@@ -100,8 +105,10 @@ function legacyReserveFor(index) {
   return 0;
 }
 
-/** Undos per run shrink with the chapters, so a mis-tap on a late route costs the lantern. */
-function undoFor(index) {
+/** A correction stays affordable even on long routes and chapter finales. */
+function undoFor(index) { return phaseFor(index).undo; }
+
+function legacyUndoFor(index) {
   if (index < 6) return 3;
   if (index < 18) return 2;
   return 1;
@@ -124,7 +131,8 @@ function budgetFor(level, reserve) {
 
 function parseLevel(spec, index, code, revision = CONTENT_VERSION) {
   const rows = spec[1];
-  const level = { id: index + 1, revision, title: spec[0], chapter: Math.floor(index / PER_CHAPTER), width: rows[0].length, height: rows.length, walls: [], start: 0, exit: 0, letters: [], seals: [], winds: {}, lights: [], bridges: [], budget: 100, par: 100, undo: undoFor(index), brief: spec[2], solution: decode(code === undefined ? encodedSolutions[index] || '' : code) };
+  const legacy = revision === '5' || revision === '6';
+  const level = { id: index + 1, revision, title: spec[0], chapter: Math.floor(index / PER_CHAPTER), width: rows[0].length, height: rows.length, walls: [], start: 0, exit: 0, letters: [], seals: [], winds: {}, lights: [], bridges: [], budget: 100, par: 100, undo: legacy ? legacyUndoFor(index) : undoFor(index), brief: spec[2], solution: decode(code === undefined ? encodedSolutions[index] || '' : code) };
   const windNames = { '^': 'up', 'v': 'down', '<': 'left', '>': 'right' };
   rows.forEach((row, y) => {
     if (row.length !== level.width) throw new Error('Invalid map width: ' + level.id);
@@ -143,8 +151,10 @@ function parseLevel(spec, index, code, revision = CONTENT_VERSION) {
   level.par = level.solution.length || 100;
   if (!level.solution.length) return level;
   if (revision !== '5') level.difficultyAdditions = strengthenObjectives(level);
-  const reserve = revision === '5' ? legacyReserveFor(index) : reserveFor(index);
+  if (!legacy) addCampaignMechanics(level);
+  const reserve = revision === '5' ? legacyReserveFor(index) : revision === '6' ? versionSixReserveFor(index) : reserveFor(index, level.par);
   level.budget = budgetFor(level, reserve === null ? Math.max(4, Math.ceil(level.par * 0.6)) : reserve);
+  if (!legacy) level.experience = campaignExperience(level);
   level.difficulty = difficultyProfile(level);
   if (revision !== '5') level.brief = challengeBrief(level, level.brief);
   return level;
@@ -157,9 +167,10 @@ const legacyLevels = new Map();
 function getLegacyLevel(id, revision) {
   if (!Number.isSafeInteger(id) || id < 1 || id > CAMPAIGN.length) return null;
   if (revision === CONTENT_VERSION) return CAMPAIGN[id - 1];
-  if (revision !== '5') return null;
-  if (!legacyLevels.has(id)) legacyLevels.set(id, parseLevel(specs[id - 1], id - 1, encodedSolutions[id - 1], '5'));
-  return legacyLevels.get(id);
+  if (revision !== '5' && revision !== '6') return null;
+  const key = revision + ':' + id;
+  if (!legacyLevels.has(key)) legacyLevels.set(key, parseLevel(specs[id - 1], id - 1, encodedSolutions[id - 1], revision));
+  return legacyLevels.get(key);
 }
 
 module.exports = { CAMPAIGN, chapterNames, CONTENT_VERSION, PER_CHAPTER, parseLevel, reserveFor, undoFor, getLegacyLevel, SPECS: specs.map(spec => spec[1]) };

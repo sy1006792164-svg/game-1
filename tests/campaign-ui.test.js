@@ -11,6 +11,8 @@ const { levelListLayout, levelProgressOffset } = require('../src/level-view');
 const { collectionLayout } = require('../src/collection-view');
 const { locateNextStamp } = require('../src/collection-view');
 const { navigateLevelBrowser, replayLevels, levelBrowserLayout, DIRECTORY_ROW } = require('../src/level-navigation');
+const { chapterMapNodes } = require('../src/chapter-map');
+const { ART_SIZE } = require('../src/art-assets');
 const { visibleStamps, setCollectionFilter } = require('../src/stamp-collection');
 const { openStampDetail, stampDetailKey } = require('../src/stamp-detail-view');
 
@@ -29,11 +31,12 @@ function harness(options = {}) {
     set(target, key, value) { target[key] = value; return true; }
   });
   const canvas = { width: 780, height: 1560, getContext: () => ctx };
-  const metrics = { width: 390, height: 780, pixelRatio: 2, safeTop: 0, safeBottom: 0 };
+  const metrics = options.metrics || { width: 390, height: 780, pixelRatio: 2, safeTop: 0, safeBottom: 0 };
   const data = new Map();
   const callbacks = {};
   const platform = {
     isDevelopment: options.development === true,
+    createImage: () => ({ width: ART_SIZE, height: ART_SIZE, set src(value) { this.onload(); } }),
     isWeChat: false, canvas, storage: { get: key => data.get(key), set: (key, value) => data.set(key, value), remove: key => data.delete(key) },
     resize: () => metrics, now: () => now, raf: () => 1, cancelRaf: noop, vibrate: noop,
     onResize: fn => { callbacks.resize = fn; }, onPointer: fn => { callbacks.pointer = fn; }, onKey: fn => { callbacks.key = fn; },
@@ -59,7 +62,7 @@ function harness(options = {}) {
   return { game, draw, tap, callbacks, advance(ms) { now += ms; game.loop(); }, pointer(x, y, type) { const r = game.renderer; game.pointerEvent(x * r.scale + r.ox, y * r.scale + r.oy, type); } };
 }
 
-test('all 999 levels form one scrollable list with chapter groups and bounded rendering', () => {
+test('the chapter mail map covers all 999 routes with six real nodes and a final three-node chapter', () => {
   assert.equal(CAMPAIGN.length, 999);
   assert.equal(chapterNames.length, 167);
   const h = harness();
@@ -68,18 +71,24 @@ test('all 999 levels form one scrollable list with chapter groups and bounded re
   assert.ok(texts.includes('已送达 0 封') && texts.includes('共 ' + CAMPAIGN.length + ' 封来信'));
   assert.ok(texts.includes('001'), 'route numbers carry three digits');
   assert.ok(texts.includes('第 1 章'));
-  assert.equal(texts.includes('回到进度'), false);
-  assert.equal(texts.some(text => /上一章|下一章|\d+ \/ \d+ 章/.test(text)), false);
+  assert.ok(texts.includes('邮路地图') && texts.includes('回到进度'));
+  assert.ok(texts.includes('下一章'));
+  assert.equal(texts.includes('上一章'), false);
   const layout = levelListLayout(h.game.renderer.H);
-  h.game.levelScroll.offset = layout.chapterHeight - 200;
+  const run = h.game.store.loadRun();
+  h.tap(hit => hit.x === 262 && hit.w === 104);
   texts = h.draw();
-  assert.ok(texts.includes('006') && texts.includes('007'), 'two chapters meet in the same scroll viewport');
+  assert.ok(texts.includes('007') && !texts.includes('006'), 'chapter paging shows one complete map');
+  assert.equal(h.game.store.loadRun(), run, 'browsing a locked chapter must not start a route');
+  h.tap(hit => hit.x === 24 && hit.w === 104);
+  assert.equal(h.game.levelScroll.offset, 0);
   const seen = new Set();
   for (let chapter = 0; chapter < chapterNames.length; chapter++) {
     h.game.levelScroll.offset = Math.min(chapter * layout.chapterHeight, layout.maxScroll);
     texts = h.draw();
     texts.filter(text => /^\d{3}$/.test(text)).forEach(text => seen.add(Number(text)));
-    assert.ok(h.game.renderer.hits.filter(hit => hit.w === 164).length <= 14, 'only visible cards have drawing and hit regions');
+    const nodes = h.game.renderer.hits.filter(hit => /^level:/.test(hit.action.focusId || ''));
+    assert.equal(nodes.length, chapter === chapterNames.length - 1 ? 3 : 6, 'only the current chapter has route targets');
     assert.ok(h.game.levelScroll.revealed.size <= 64, 'animation history is bounded');
   }
   assert.equal(seen.size, 999);
@@ -93,6 +102,64 @@ test('all 999 levels form one scrollable list with chapter groups and bounded re
   h.tap(hit => hit.x === 141 && hit.y === 151); h.draw();
   h.tap(hit => hit.x === 24 && hit.y === 151);
   assert.equal(h.game.levelScroll.offset, 0);
+});
+
+test('map node targets fit the safe logical viewport and carry real saved stars and lock states', () => {
+  const h = harness();
+  h.game.store.recordWin(1, 2, CAMPAIGN[0].par + 1, 'campaign');
+  h.game.selectLevel(2);
+  h.game.openPage('levels');
+  const texts = h.draw();
+  assert.ok(texts.includes('进行中 · 继续投递'));
+  assert.ok(texts.includes((CAMPAIGN[0].par + 1) + ' 拍 · 2 星'));
+  const locked = h.game.renderer.hits.find(hit => hit.action.focusId === 'level:3');
+  locked.action();
+  assert.equal(h.game.page, 'levels');
+  assert.equal(h.game.store.loadRun().levelId, 2);
+  for (const height of [700, 844, 1100]) {
+    const { viewport } = levelListLayout(height);
+    for (const chapter of [h.game.album().progress.chapters[0], h.game.album().progress.chapters.at(-1)]) {
+      const nodes = chapterMapNodes(chapter, viewport);
+      for (const node of nodes) {
+        const rect = node.rect;
+        assert.ok(rect.x >= viewport.x && rect.x + rect.w <= viewport.x + viewport.w);
+        assert.ok(rect.y >= viewport.y + 48 && rect.y + rect.h < viewport.y + viewport.h - 48);
+      }
+      for (let index = 0; index < nodes.length; index++) for (const other of nodes.slice(index + 1)) {
+        const a = nodes[index].rect, b = other.rect;
+        assert.ok(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y,
+          'neighboring islands never share a tap area');
+      }
+    }
+  }
+});
+
+test('44 screen-pixel controls remain separate from map islands on compact safe-area screens', () => {
+  const screens = [
+    { width: 240, height: 480, pixelRatio: 1, safeTop: 60, safeBottom: 0 },
+    { width: 320, height: 568, pixelRatio: 2, safeTop: 72, safeBottom: 0 },
+    { width: 360, height: 640, pixelRatio: 3, safeTop: 76, safeBottom: 24 },
+    { width: 390, height: 844, pixelRatio: 3, safeTop: 96, safeBottom: 34 }
+  ];
+  const separate = (a, b) => a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+  for (const metrics of screens) {
+    const h = harness({ metrics });
+    for (const id of [1, 7, 999]) {
+      h.game.openLevelBrowser('all', id); h.draw();
+      const targets = h.game.renderer.hits, nodes = targets.filter(hit => /^level:/.test(hit.action.focusId || ''));
+      for (const target of targets) {
+        assert.ok(target.w * h.game.renderer.scale >= 44 - 1e-7 && target.h * h.game.renderer.scale >= 44 - 1e-7,
+          'visible map controls and nodes preserve a full physical touch target');
+      }
+      for (const node of nodes) for (const other of targets) if (node !== other)
+        assert.ok(separate(node, other), 'expanding footer and tab buttons cannot overlap an island');
+    }
+    const dev = harness({ metrics, development: true });
+    dev.game.openLevelBrowser('chapters'); dev.draw();
+    const picker = dev.game.renderer.hits.find(hit => hit.label === '输入关卡号');
+    const tabs = dev.game.renderer.hits.filter(hit => ['邮路地图', '待摘星', '章节目录'].includes(hit.label));
+    assert.ok(picker && tabs.every(tab => separate(picker, tab)), 'developer picker stays separate from the chapter tabs');
+  }
 });
 
 test('level selection opens at progress and returning from a filter finds it after a long scroll', () => {
@@ -155,7 +222,7 @@ test('developer selection shows free level 999 and supports keyboard and keypad 
   assert.ok(texts.includes('999'));
   assert.equal(texts.includes('先送达上一封'), false);
   h.tap(hit => hit.x === 258 && hit.w === 108); h.draw();
-  h.tap(hit => hit.x === 250 && hit.y === 96); h.draw();
+  h.tap(hit => hit.label === '输入关卡号'); h.draw();
   assert.equal(h.game.modal.kind, 'developer-level');
   h.callbacks.key('0'); h.callbacks.key('Enter');
   assert.match(h.game.modal.error, /1–999/);

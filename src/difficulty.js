@@ -104,16 +104,20 @@ function difficultyProfile(level) {
     : recommendedItem === 'echo' ? '先踩过蓝票，趁回声还没到时用笛提前盖好；离开后也能用，每次只盖一张，未踩过的票不能选。'
     : recommendedItem === 'kite' ? '信笺分散，纸鸢可取回两格内的信，减少折返。'
     : recommendedItem === 'oil' ? '灯油可补充 ' + SUPPLY_ENERGY + ' 拍灯火，为规划失误留出余地。' : '先掌握三拍回声，再挑战最短路线。';
-  const focus = timingTargets ? '末段有蓝票需要提前经过，等回声盖好再回邮局。'
+  const routeFocus = timingTargets ? '末段有蓝票需要提前经过，等回声盖好再回邮局。'
+    : level.experience ? level.experience.focus
     : bridges >= 3 ? '先安排过桥顺序，再把回声盖票与收信串成一条路。'
     : seals >= 4 ? '先规划远端蓝票，提前三拍经过，再顺路收信回邮局。'
     : id >= 7 ? '把分散信笺与蓝票一起规划，减少支路折返。'
     : '每次行动扣一拍，蓝票由晚三拍的回声收取。';
+  const focus = (level.letterOrder ? '按编号依次收信，提前经过的信会留在原地。' : '') + routeFocus;
   return {
     tier, name: TIER_NAMES[tier - 1], reserve, targetCount: letters + seals,
     addedLetters: additions.letters.length, addedSeals: additions.seals.length, timingTargets,
     summary: letters + '信' + seals + '票 · ' + (reserve ? '余量' + reserve + '拍' : '零余量'),
-    focus, recommendedItem, itemReason, journeyPoints: tier <= 2 ? 1 : tier <= 4 ? 2 : 3
+    focus, recommendedItem, itemReason, journeyPoints: tier <= 2 ? 1 : tier <= 4 ? 2 : 3,
+    ...(level.experience ? { phase: level.experience.phase, phaseName: level.experience.phaseName,
+      theme: level.experience.theme, themeName: level.experience.themeName } : {})
   };
 }
 
@@ -125,6 +129,14 @@ function challengeBrief(level, original) {
     .replace(/[一二三四五六七八九十]+枚邮票/g, seals + '枚邮票')
     .replace(/三信三票/g, letters + '信' + seals + '票');
   brief = brief.replace(/灯火只比最短路多 \d+ 拍。|灯火恰好等于最短路，一步也不能多走。/g, '');
+  if (level.experience) {
+    // Generated briefs repeated an obsolete zero-reserve warning and raw map
+    // counts. Show a playable plan instead; keep the hand-written route hints.
+    const hint = level.id <= 30 ? brief.replace('这是最终长信：', '这一封长信：') : level.difficulty.focus;
+    return '本关' + letters + '信' + seals + '票。' + hint +
+      level.experience.features.map(feature => feature.description).join('') +
+      level.experience.guidance + '灯火余量' + level.difficulty.reserve + '拍，可撤销' + level.undo + '次。';
+  }
   return '本关' + letters + '信' + seals + '票。' + brief +
     (level.difficulty.reserve ? '灯火余量' + level.difficulty.reserve + '拍。' : '灯火零余量，每一拍都要规划。');
 }

@@ -347,8 +347,13 @@ function createPlatform(environment) {
       return surface && surface !== canvas ? surface : null;
     } catch (_) { return null; }
   }
+  function createImage() {
+    if (api && typeof api.createImage === 'function') return api.createImage();
+    if (!api && doc && typeof doc.createElement === 'function') return doc.createElement('img');
+    throw new Error('Image decoding is unavailable.');
+  }
   return {
-    kind: api ? 'wechat' : 'browser', wx: api, canvas, createSurface, resize, onPointer, onKey, onResize, storage, setFrameRate,
+    kind: api ? 'wechat' : 'browser', wx: api, canvas, createSurface, createImage, resize, onPointer, onKey, onResize, storage, setFrameRate,
     get reducedMotion() { return !!(reducedMotionQuery && reducedMotionQuery.matches); },
     effectsQuality: 'high',
     isDevelopment: isDevelopmentEnvironment(api, win && win.location),

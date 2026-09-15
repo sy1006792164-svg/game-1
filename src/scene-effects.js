@@ -136,11 +136,18 @@ function drawDestination(r, game, now, projection, options = {}, action) {
       c.restore();
     }
   }
-  const top = y - unit * 1.68;
-  r.round(x - 28, top - 8, 56, 16, 8, '#fffae8', '#c8b98c');
-  r.text(state.status === 'won' ? '已送达' : '可投递', x, top, 10, '#826139', 'center', '600');
+  let badgeX = x, top = y - unit * 1.68;
+  if (r.boardRect && projection.toWorld) {
+    const rect = r.boardRect;
+    const [left, upper] = projection.toWorld(rect.x, rect.y);
+    const [right, bottom] = projection.toWorld(rect.x + rect.w, rect.y + rect.h);
+    badgeX = Math.max(left + 30, Math.min(right - 30, badgeX));
+    top = Math.max(upper + 10, Math.min(bottom - 10, top));
+  }
+  r.round(badgeX - 28, top - 8, 56, 16, 8, '#fffae8', '#c8b98c');
+  r.text(state.status === 'won' ? '已送达' : '可投递', badgeX, top, 10, '#826139', 'center', '600');
   c.restore();
-  if (action) r.hit(x - 28, top - 8, 56, 16, action);
+  if (action) r.hit(badgeX - 28, top - 8, 56, 16, action);
 }
 
 function drawCollectibleAura(r, x, y, size, now, cell, seal) {
@@ -185,4 +192,45 @@ function drawCollectibleAura(r, x, y, size, now, cell, seal) {
   c.restore();
 }
 
-module.exports = { drawActorTrails, drawDestination, drawCollectibleAura };
+function drawStageNotice(r, game, now, rect, suppressed = false) {
+  const { state, previousState: previous } = game;
+  let buffer = r.deliveryStages;
+  if (!buffer || buffer.game !== game || buffer.session !== game.session || buffer.level !== game.level) {
+    buffer = r.deliveryStages = { game, session: game.session, level: game.level, notice: null };
+  }
+  const events = game.moveEvents || [];
+  const changed = buffer.at !== game.transitionAt || buffer.events !== game.moveEvents;
+  const backwards = state.turn < buffer.turn || events.some(event => event.type === 'undo');
+  buffer.at = game.transitionAt; buffer.events = game.moveEvents; buffer.turn = state.turn;
+  if (backwards || game.reviewing || game.modal || state.status !== 'playing') buffer.notice = null;
+  else if (changed && previous && Number.isFinite(game.transitionAt)) {
+    const letters = previous.letters.length > 0 && !state.letters.length && events.some(event => event.type === 'letter');
+    const seals = previous.seals.length > 0 && !state.seals.length && events.some(event => event.type === 'seal');
+    if (letters || seals) {
+      const ready = !state.letters.length && !state.seals.length;
+      buffer.notice = { at: game.transitionAt, ready, icon: ready ? 'check' : letters ? 'letter' : 'stamp',
+        title: ready ? '邮局开放 · 可以投递' : letters ? '信笺已收齐' : '蓝票已盖齐',
+        detail: ready ? '前往邮局，完成这次旅程' : letters ? '让回声走过剩余蓝票' : '收齐剩余信笺后前往邮局' };
+    }
+  }
+  const notice = buffer.notice;
+  if (!notice || suppressed || game.reviewing || game.modal) return false;
+  const age = now - notice.at, duration = 1800;
+  if (age < MOVE_MS || age >= duration) return false;
+  const quiet = r.reducedMotion || r.effectsQuality === 'low';
+  const enter = Math.min(1, (age - MOVE_MS) / 150), fade = Math.min(1, (duration - age) / 230);
+  const width = Math.min(248, rect.w - 24), x = rect.x + (rect.w - width) / 2;
+  const height = Math.min(38, rect.h), compact = height < 36;
+  const y = rect.y + (rect.h - height) / 2, c = r.ctx;
+  c.save();
+  if (!quiet) c.globalAlpha *= enter * fade;
+  r.round(x, y, width, height, 12, '#fcf8eaf5', notice.ready ? '#b8a174' : '#91b4a8');
+  r.circle(x + 23, y + height / 2, compact ? 10 : 12, notice.ready ? '#f1e1b5' : '#dcece0');
+  r.icon(notice.icon, x + 23, y + height / 2, 14, notice.ready ? '#926837' : '#46847a');
+  r.text(notice.title, x + 43, y + (compact ? height / 2 : 12), 12, '#3a6256', 'left', '600');
+  if (!compact) r.text(notice.detail, x + 43, y + 27, 10, '#6c7b65');
+  c.restore();
+  return true;
+}
+
+module.exports = { drawActorTrails, drawDestination, drawCollectibleAura, drawStageNotice };

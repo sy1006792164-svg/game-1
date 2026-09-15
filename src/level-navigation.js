@@ -3,7 +3,8 @@
 const { CAMPAIGN, PER_CHAPTER } = require('./levels');
 
 const CARD_HEIGHT = 144, ROW_HEIGHT = 158, CHAPTER_HEADER = 44, DIRECTORY_ROW = 108;
-const CHAPTER_HEIGHT = CHAPTER_HEADER + Math.ceil(PER_CHAPTER / 2) * ROW_HEIGHT + 20;
+// One existing PageUp/PageDown step turns a map page, at every viewport height.
+const CHAPTER_HEIGHT = 340;
 const MODES = ['all', 'replay', 'chapters'];
 const replayCache = new WeakMap();
 
@@ -25,10 +26,10 @@ function listLayout(height, contentHeight) {
 }
 
 function levelListLayout(height, count = CAMPAIGN.length) {
-  if (!count) return listLayout(height, 0);
-  const chapters = Math.ceil(count / PER_CHAPTER);
-  const lastRows = Math.ceil((count - (chapters - 1) * PER_CHAPTER) / 2);
-  return listLayout(height, (chapters - 1) * CHAPTER_HEIGHT + CHAPTER_HEADER + lastRows * ROW_HEIGHT + 44);
+  const layout = listLayout(height, 0), chapters = Math.ceil(count / PER_CHAPTER);
+  // Keep the established scroll/keyboard contract, with one chapter per map page.
+  const chapterHeight = CHAPTER_HEIGHT, maxScroll = Math.max(0, (chapters - 1) * chapterHeight);
+  return { ...layout, chapterHeight, contentHeight: count ? maxScroll + layout.viewport.h : 0, maxScroll };
 }
 
 function levelBrowserLayout(game, height) {
@@ -42,15 +43,17 @@ function levelBrowserLayout(game, height) {
 }
 
 function levelProgressOffset(level, height) {
-  return Math.min(level.chapter * CHAPTER_HEIGHT, levelListLayout(height).maxScroll);
+  const layout = levelListLayout(height);
+  return Math.min(level.chapter * layout.chapterHeight, layout.maxScroll);
 }
 
 // Count remains the campaign level count in both all and directory modes.
 function levelChapterAtOffset(offset, height, count = CAMPAIGN.length, mode = 'all') {
   const chapters = Math.max(1, Math.ceil(count / PER_CHAPTER));
-  const { viewport } = levelListLayout(height, count);
+  const { viewport, chapterHeight } = levelListLayout(height, count);
   const focus = Math.max(0, Number(offset) || 0) + viewport.h * .3;
-  return Math.min(chapters - 1, Math.max(0, Math.floor(focus / (mode === 'chapters' ? DIRECTORY_ROW : CHAPTER_HEIGHT))));
+  const index = mode === 'chapters' ? Math.floor(focus / DIRECTORY_ROW) : Math.round(Math.max(0, Number(offset) || 0) / chapterHeight);
+  return Math.min(chapters - 1, Math.max(0, index));
 }
 
 function levelBrowserChapter(game, height) {

@@ -41,7 +41,42 @@ function targetsReachable(level, state, reachable) {
   // Only already earned kites count; a potential future advertisement is not
   // an owned tool. Each stranded letter needs its own charge and valid range.
   return stranded.length <= (state.inventory && state.inventory.kite || 0) && stranded.every(letter => [...reachable].some(player =>
-    itemTargets(level, { ...state, player, status: 'playing' }, 'kite').includes(letter)));
+    // Each letter can become the next numbered delivery after earlier ones
+    // are collected. This dead-end filter checks future range, not permission
+    // to use a kite on every remaining letter right now.
+    itemTargets(level, { ...state, player, letters: [letter], status: 'playing' }, 'kite').includes(letter)));
+}
+
+/** Count only unclaimed station tools reachable by real movement rules.
+ * The search tracks torn bridges, so a parcel behind a consumed bridge cannot
+ * supply a repair for that same bridge. This is planning data, never a grant.
+ * A null result means a legal route already reaches the delivery itself.
+ */
+function withReachableStationTools(level, state) {
+  const pending = new Set((state.supplies || []).filter(cell =>
+    ['kite', 'bridge'].includes((level.supplies || {})[cell])));
+  if (!pending.size) return state;
+  const first = { ...state, status: 'playing', energy: 10000 };
+  const queue = [first], seen = new Set(), collected = new Map();
+  for (let index = 0; index < queue.length && collected.size < pending.size; index++) {
+    const current = queue[index];
+    const key = current.player + '|' + (current.bridges || []).slice().sort((a, b) => a - b).join(',');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    for (const direction of Object.keys(DIRECTIONS)) {
+      const result = step(level, current, direction);
+      if (!result.moved) continue;
+      if (result.state.status === 'won') return null;
+      for (const event of result.events) {
+        if (event.type === 'supply' && event.amount > 0 && pending.has(event.cell)) collected.set(event.cell, event.item);
+      }
+      if (result.state.status === 'playing') queue.push(result.state);
+    }
+  }
+  if (!collected.size) return state;
+  const inventory = { ...state.inventory };
+  for (const item of collected.values()) inventory[item] = Math.min(4096, (inventory[item] || 0) + 1);
+  return { ...state, inventory, supplies: state.supplies.filter(cell => !collected.has(cell)) };
 }
 
 function tornRouteBlocked(level, state) {
@@ -51,6 +86,12 @@ function tornRouteBlocked(level, state) {
 
 function repairsBlocked(level, state, reachable) {
   if (targetsReachable(level, state, reachable)) return false;
+  const supplied = withReachableStationTools(level, state);
+  if (supplied === null) return false;
+  if (supplied !== state) {
+    state = supplied;
+    if (targetsReachable(level, state, reachable)) return false;
+  }
   // Try each single repair that can be reached before spending the pack.
   // Each branch retains the existing optimistic treatment of later bridge
   // damage; this is a dead-end filter, not a full route or energy solver.

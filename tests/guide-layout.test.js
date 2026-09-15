@@ -12,6 +12,7 @@ const { createProjection } = require('../src/board-projection');
 const { createState, step } = require('../src/engine');
 const { SceneCamera } = require('../src/camera');
 const { drawIslandSurface } = require('../src/island-surface');
+const { ECHO_TIMELINE_HEIGHT } = require('../src/echo-timeline');
 const { CAMPAIGN } = require('../src/levels');
 
 function renderer(width = 390, height = 700) {
@@ -69,7 +70,7 @@ function allLessonCards() {
   return [...cards.values()];
 }
 
-test('gameplay reclaims unused guide space without changing tile size on any shipped level', () => {
+test('gameplay gives reclaimed guide space to the board while keeping controls clear', () => {
   const lessonGame = gameFor(CAMPAIGN[0]); lessonGame.guideEnabled = true;
   const lesson = guideStep(lessonGame, 1000);
   for (const [width, height] of [[390, 700], [452, 700], [500, 700], [390, 844]]) {
@@ -93,9 +94,9 @@ test('gameplay reclaims unused guide space without changing tile size on any shi
     const lessonHeight = guideCardLayout(r, lesson).height;
     const lessonY = height - CONTROL.height - 8 - lessonHeight - 8;
     assert.equal(lessonRect.y + lessonRect.h + 4, lessonY, 'the lesson must remain clear of the board');
-    assert.equal(normalRect.h - lessonRect.h, GUIDE_HEIGHT - normalHintHeight);
-    assert.equal(r.boardProjection.halfW, normalHalfW);
-    assert.equal(r.boardProjection.halfH, normalHalfH);
+    assert.equal(normalRect.h - lessonRect.h, GUIDE_HEIGHT - normalHintHeight - ECHO_TIMELINE_HEIGHT - 8);
+    assert.ok(r.boardProjection.halfW <= normalHalfW);
+    assert.ok(r.boardProjection.halfH <= normalHalfH);
     assert.ok(lessonPoint[1] < normalPoint[1], 'the board only moves up while the full lesson is visible');
     game.guideStep = () => null;
     game.playHint = () => '只剩一拍，请留好回邮局的路。'.repeat(4);
@@ -104,14 +105,14 @@ test('gameplay reclaims unused guide space without changing tile size on any shi
     const wrappedY = height - CONTROL.height - 8 - wrappedHeight - 8;
     assert.equal(r.boardRect.y + r.boardRect.h + 4, wrappedY,
       'wrapped feedback must remain clear of the board');
-    assert.equal(r.boardProjection.halfW, normalHalfW);
-    assert.equal(r.boardProjection.halfH, normalHalfH);
+    assert.ok(r.boardProjection.halfW > 0 && r.boardProjection.halfW <= normalHalfW);
+    assert.ok(r.boardProjection.halfH > 0 && r.boardProjection.halfH <= normalHalfH);
     for (const level of CAMPAIGN) {
       const view = { scale: 1, panX: 0, panY: 0 };
       const original = createProjection(level, { x: normalRect.x, y: 158, w: width, h: height - 322 }, view);
       const current = createProjection(level, normalRect, view);
-      assert.ok(Math.abs(current.halfW - original.halfW) < 1e-9, `${width}x${height}, level ${level.id}`);
-      assert.ok(Math.abs(current.halfH - original.halfH) < 1e-9);
+      assert.ok(current.halfW >= original.halfW, `${width}x${height}, level ${level.id}: new board is never smaller`);
+      assert.ok(current.halfH >= original.halfH);
     }
   }
 });
@@ -124,7 +125,8 @@ test('the wind-eye bridge hint uses the full space above the controls', () => {
   const hintHeight = Math.max(PLAY_HINT_HEIGHT, r.wrapLines(hint, 310, 12).length * 18 + 14);
   const hintY = r.H - CONTROL.height - 8 - hintHeight - 8;
   assert.equal(r.boardRect.y + r.boardRect.h + 4, hintY);
-  assert.equal(r.boardProjection.centerY, 376, 'the screenshot board moves down by 47 logical pixels');
+  assert.ok(r.boardProjection.centerY > r.boardRect.y && r.boardProjection.centerY < hintY,
+    'the board remains centered between the compact HUD and controls');
 });
 
 test('every reachable tutorial and mechanic card fits the compact band without obscuring the board or its controls', () => {
@@ -164,9 +166,12 @@ test('every reachable tutorial and mechanic card fits the compact band without o
         `${guide.title}: ${a.value} overlaps ${b.value}`);
     }
     const body = texts.filter(box => ui.bodyLines.includes(box.value));
-    assert.ok(body.length <= 2 && body.every(box => box.h >= 14), 'each step stays readable in at most two short lines');
-    assert.ok(body[0].y >= skip.y + skip.h + 8, 'body clears the entire skip touch target');
-    if (!guide.visual.echo) assert.ok(texts.some(box => box.value === guide.tip), 'the rule tip cannot be ellipsized');
+    assert.ok(body.length <= 2 && body.every(box => box.h >= (guide.interactive ? 12 : 14)), 'each step stays readable in at most two short lines');
+    if (guide.interactive) assert.ok(body.every(box => box.x + box.w < skip.x), 'compact guidance clears the skip button horizontally');
+    else {
+      assert.ok(body[0].y >= skip.y + skip.h + 8, 'body clears the entire skip touch target');
+      if (!guide.visual.echo) assert.ok(texts.some(box => box.value === guide.tip), 'the rule tip cannot be ellipsized');
+    }
   }
 });
 

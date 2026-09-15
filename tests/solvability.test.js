@@ -20,7 +20,7 @@ test('solvability gate certifies every level with its original difficulty and a 
 
 test('solvability gate rejects corrupt routes, insufficient light and impossible targets', () => {
   for (const [change, expected] of [
-    [{ budget: CAMPAIGN[0].budget - 5 }, /light ran out/],
+    [{ budget: CAMPAIGN[0].par - 1 }, /light ran out/],
     [{ solution: [] }, /missing winning route/],
     [{ solution: ['teleport'] }, /invalid action/],
     [{ solution: ['up'] }, /blocked action/],
@@ -32,9 +32,9 @@ test('solvability gate rejects corrupt routes, insufficient light and impossible
   ]) {
     assert.throws(() => verifyLevel({ ...CAMPAIGN[0], ...change }), expected);
   }
-  // A late route is geometrically solvable but cannot afford one extra wait.
+  // Exploration reserve permits the wait, but it exceeds the verified star target.
   const late = CAMPAIGN[998];
-  assert.throws(() => verifyLevel({ ...late, solution: ['wait', ...late.solution] }), /light ran out/);
+  assert.throws(() => verifyLevel({ ...late, solution: ['wait', ...late.solution] }), /three-star target/);
 });
 
 test('solvability gate cannot pass an incomplete campaign or silently skip a broken level', () => {

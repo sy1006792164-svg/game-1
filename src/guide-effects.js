@@ -131,6 +131,9 @@ function drawEchoCountdown(r, echo, p, rect, occupied) {
 
 // Draw in screen coordinates so cues remain legible while the island is rotated or zoomed.
 function drawGuideOverlay(r, game, guide, now) {
+  // Contextual lessons highlight the real prop inside the board. They do not
+  // add an invisible button over a different move or consume long presses.
+  if (guide && guide.interactive) return;
   const opacity = guideOpacity(r, game, guide, now), p = r.boardProjection, rect = r.boardRect;
   if (!opacity || !p || !rect || !guide.visual) return;
   const c = r.ctx;
@@ -141,7 +144,8 @@ function drawGuideOverlay(r, game, guide, now) {
     r.line([p.point(from), p.point(guide.visual.focus.cell)], C.green, 2.5, [5, 4]);
   }
   const focusBounds = guide.control === 'wait' ? null : drawFocus(r, guide.visual, p, rect, now,
-    () => guide.kind === 'mechanic' ? game.advanceMechanicGuide() : game.act(guide.action));
+    Object.assign(() => guide.kind === 'mechanic' ? game.advanceMechanicGuide() : game.act(guide.action),
+      { boardCell: guide.visual.tapCell }));
   if (guide.kind === 'mechanic' && guide.visual.focus && p.visible(guide.visual.focus.cell)) {
     // The highlighted floor wins over neighboring props during inspection only.
     const cell = guide.visual.focus.cell, [x, y] = p.point(cell);

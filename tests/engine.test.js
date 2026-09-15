@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { ACTIONS, createState, step, replay, normalizeReviveHistory, revive, stars, STAR_TWO_MARGIN } = require('../src/engine');
-const { CAMPAIGN, chapterNames, CONTENT_VERSION, PER_CHAPTER, reserveFor, undoFor } = require('../src/levels');
+const { CAMPAIGN, chapterNames, CONTENT_VERSION, PER_CHAPTER, reserveFor, undoFor, getLegacyLevel } = require('../src/levels');
 const { additionsFor } = require('../src/difficulty');
 const { solve } = require('../tools/solve');
 const { tier, bridgesRequired, HAND_MADE } = require('../tools/generate');
@@ -67,11 +67,16 @@ test('all 999 campaign witnesses win without revival across 167 chapters', () =>
   }
 });
 
-test('the campaign has independently optimal targets and a tight, sustained light budget', () => {
-  assert.equal(CONTENT_VERSION, '6');
+test('the campaign keeps independently optimal star targets and a bounded practice budget for each chapter phase', () => {
+  assert.equal(CONTENT_VERSION, '7');
   assert.equal(STAR_TWO_MARGIN, 2);
   assert.deepEqual(CAMPAIGN.slice(0, 3).map(level => level.par), [4, 6, 9]);
-  assert.deepEqual([reserveFor(0), reserveFor(3), reserveFor(6), reserveFor(17), reserveFor(18), reserveFor(119), reserveFor(299), reserveFor(300), reserveFor(998)], [2, 1, 1, 1, 0, 0, 0, 0, 0]);
+  const percentages = [32, 28, 24, 38, 22, 16], minimums = [6, 5, 4, 7, 4, 3], undos = [6, 5, 4, 6, 4, 3];
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(index => reserveFor(index, 100)), [32, 28, 24, 38, 22, 16]);
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(index => reserveFor(index, 1)), minimums);
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(undoFor), undos);
+  assert.equal(reserveFor(998, 100), 16, 'the three-route final chapter ends with the trial phase');
+  assert.equal(undoFor(998), 3);
   for (const level of CAMPAIGN) {
     if (independentlySolved(level)) {
       const shortest = solve(level, 8000000);
@@ -79,10 +84,11 @@ test('the campaign has independently optimal targets and a tight, sustained ligh
       assert.equal(shortest.length, level.par, `${level.id}: three-star target must equal the independent minimum`);
     }
     const final = follow(level, level.solution);
-    const reserve = reserveFor(level.id - 1);
-    // A late lamp can force one extra starting unit so the route survives until the lamp; never more.
-    if (level.id >= 4) assert.ok(final.energy >= reserve && final.energy <= reserve + 1, `${level.id}: reserve ${final.energy} must be the chapter margin ${reserve} after collected lamps`);
-    if (level.id >= 19) assert.equal(final.energy, 0, `${level.id}: from route 19 the budget equals the shortest route`);
+    const phase = level.id === 999 ? 5 : (level.id - 1) % 6;
+    const reserve = Math.max(minimums[phase], Math.ceil(level.par * percentages[phase] / 100));
+    assert.equal(reserveFor(level.id - 1), reserve, `${level.id}: practice margin follows its chapter phase`);
+    assert.equal(final.energy, reserve, `${level.id}: collected lamps leave exactly the designed margin`);
+    assert.equal(level.undo, undos[phase], `${level.id}: corrections follow the chapter phase`);
     if (level.id >= 7 && level.id <= 30) assert.ok(level.par >= 23, `${level.id}: chapter 2+ should require a planned route`);
     if (level.id >= 19 && level.id <= 30) assert.ok(level.par >= 30, `${level.id}: later maps should sustain difficulty`);
     if (level.id >= 31) {
@@ -115,10 +121,10 @@ test('the campaign has independently optimal targets and a tight, sustained ligh
   assert.ok(mean(CAMPAIGN.slice(30, 120)) > mean(CAMPAIGN.slice(0, 30)), 'generated routes are longer than the hand-made tutorial');
 });
 
-test('generated stages introduce shorter routes first and late routes reject a wasted opening turn', () => {
+test('generated stages keep their length progression while practice light tolerates a detour without awarding three stars', () => {
   const mechanics = level => {
     const { size, targets, winds, bridges, lights, minPar } = tier(level.id - 1);
-    return [size, targets, winds, bridges, lights, minPar, reserveFor(level.id - 1)].join('/');
+    return [size, targets, winds, bridges, lights, minPar].join('/');
   };
   for (let index = 31; index < CAMPAIGN.length; index++) {
     const before = CAMPAIGN[index - 1], level = CAMPAIGN[index];
@@ -127,12 +133,17 @@ test('generated stages introduce shorter routes first and late routes reject a w
     }
   }
   for (const level of CAMPAIGN.slice(300)) {
-    let state = step(level, createState(level), 'wait').state;
-    for (const action of level.solution) {
-      if (state.status !== 'playing') break;
-      state = step(level, state, action).state;
+    const state = follow(level, ['wait', ...level.solution]);
+    assert.equal(state.status, 'won', `${level.id}: practice light allows one exploratory turn`);
+    assert.equal(state.energy, reserveFor(level.id - 1) - 1);
+    assert.equal(stars(level, state), 2, `${level.id}: an extra turn does not earn the shortest-route rating`);
+    const legacy = getLegacyLevel(level.id, '6');
+    let strict = step(legacy, createState(legacy), 'wait').state;
+    for (const action of legacy.solution) {
+      if (strict.status !== 'playing') break;
+      strict = step(legacy, strict, action).state;
     }
-    assert.equal(state.status, 'failed', `${level.id}: one wasted opening turn must exhaust the budget`);
+    assert.equal(strict.status, 'failed', `${level.id}: a resumed v6 route keeps its original zero-reserve budget`);
   }
 });
 
@@ -197,7 +208,8 @@ test('wait consumes light, advances echo and can complete a delivery', () => {
 });
 
 test('last-turn echo hints keep the courier heading home instead of recommending a losing wait', () => {
-  const level = CAMPAIGN[300], state = replay(level, level.solution.slice(0, -1));
+  const level = CAMPAIGN[300], actions = Array(reserveFor(level.id - 1)).fill('wait').concat(level.solution.slice(0, -1));
+  const state = replay(level, actions);
   assert.equal(state.energy, 1);
   assert.notEqual(state.player, level.exit);
   assert.equal(step(level, state, 'wait').state.status, 'failed');
@@ -215,7 +227,7 @@ test('post office hints recommend only enough waiting to finish the real queued 
   assert.match(playHint({ level, state, mode: 'campaign' }, 0), /已到邮局，再等 2 拍/);
   assert.equal(replay(level, actions.concat('wait', 'wait')).status, 'won');
 
-  const short = replay(level, ['wait'].concat(actions));
+  const short = replay(level, Array(reserveFor(level.id - 1) + 1).fill('wait').concat(actions));
   assert.equal(short.status, 'playing');
   assert.equal(short.energy, 1);
   assert.match(playHint({ level, state: short, mode: 'campaign' }, 0), /回声还需 2 拍.*拍数不够原地等齐/);
@@ -223,9 +235,9 @@ test('post office hints recommend only enough waiting to finish the real queued 
   assert.equal(step(level, short, 'wait').state.status, 'failed');
 });
 
-test('waiting recommendations along all 999 real routes always complete the delivery', () => {
+test('waiting recommendations along all 999 current and resumed v6 routes always complete the delivery', () => {
   let checked = 0, finalEchoTurns = 0;
-  for (const level of CAMPAIGN) {
+  for (const level of CAMPAIGN.concat(CAMPAIGN.map(current => getLegacyLevel(current.id, '6')))) {
     let state = createState(level);
     for (const action of level.solution) {
       const hint = playHint({ level, state, mode: 'campaign' }, 0);

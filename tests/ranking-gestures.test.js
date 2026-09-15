@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const { createFriendLeaderboard } = require('../src/friend-leaderboard');
 const { leaderboardRect } = require('../src/leaderboard-view');
+const { ART_SIZE } = require('../src/art-assets');
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const mainPath = path.join(__dirname, '../src/main.js');
@@ -26,6 +27,7 @@ function harness(t) {
   const metrics = { width: 320, height: 720, pixelRatio: 2, safeTop: 60, safeBottom: 24 };
   const platform = {
     kind: 'wechat', canvas: { getContext: () => ctx }, resize: () => metrics, now: () => now,
+    createImage: () => ({ width: ART_SIZE, height: ART_SIZE, set src(value) { this.onload(); } }),
     raf: fn => { callbacks.frame = fn; return 1; }, cancelRaf: noop, setFrameRate: fps => frameRates.push(fps), vibrate: noop,
     storage: { get: key => data.get(key), set: (key, value) => data.set(key, value), remove: key => data.delete(key) },
     onPointer: (pointer, zoom, wheel) => Object.assign(callbacks, { pointer, zoom, wheel }),

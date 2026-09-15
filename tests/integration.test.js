@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
-const { CAMPAIGN, undoFor, getLegacyLevel } = require('../src/levels');
+const { CAMPAIGN, CONTENT_VERSION, undoFor, getLegacyLevel } = require('../src/levels');
 const { MOVE_MS } = require('../src/motion');
 const { drawResultHeader, drawResultStars } = require('../src/result-effects');
 const { C } = require('../src/theme');
@@ -59,6 +59,12 @@ function harness(options = {}) {
   const metrics = options.metrics || { width: 390, height: 844, pixelRatio: 2, safeTop: 50, safeBottom: 34 };
   const platform = {
     isDevelopment: options.development === true,
+    createImage() {
+      return { set src(file) {
+        const png = fs.readFileSync(path.join(__dirname, '..', file));
+        this.width = png.readUInt32BE(16); this.height = png.readUInt32BE(20); this.onload();
+      } };
+    },
     kind: options.kind || 'wechat', wx: {
       createRewardedVideoAd: () => ad,
       createInnerAudioContext() {
@@ -288,7 +294,7 @@ test('journey route planning restores v5 geometry, original light and earned sup
   assert.deepEqual(h.game.itemRewards, { oil: 0, kite: 0, bridge: 0 });
   assert.deepEqual(h.game.state.inventory, { oil: 0, kite: 0, bridge: 0 });
   assert.deepEqual(h.game.profile(), earned);
-  assert.equal(h.game.store.loadRun().revision, '6');
+  assert.equal(h.game.store.loadRun().revision, CONTENT_VERSION);
 });
 
 test('tool confirmation, cancellation, save/restore and undo preserve paid rewards without free refills', async t => {
@@ -630,7 +636,7 @@ test('echo flute save replay and relaunch undo return the earned charge without 
   assert.deepEqual(resumed.game.actions, ['down']);
   assert.equal(resumed.game.undosUsed, 1);
   resumed.advance(300); resumed.callbacks.key('4');
-  assert.ok(resumed.game.modal.lines.some(line => /无需再看视频/.test(line)));
+  assert.ok(resumed.game.modal.lines.some(line => /已领取，可直接使用/.test(line)));
   resumed.callbacks.key('Enter'); resumed.game.itemTarget(7);
   assert.deepEqual(resumed.game.state, supplied);
   assert.equal(first.showCount, 1);
@@ -710,9 +716,11 @@ test('a failed route uses already-earned oil before ads and persists its own und
   assert.equal(h.game.state.inventory.oil, 1);
   h.game.ads.isConfigured = () => false;
   while (h.game.state.status === 'playing') h.act('wait');
-  assert.equal(h.game.modal.buttons[0].text, '使用已领取灯油 +6 拍');
+  const oil = h.game.modal.buttons.find(button => button.text === '使用已领取灯油 +6 拍');
+  assert.ok(oil);
+  assert.match(h.game.modal.buttons[0].text, /撤回上一步/, 'available undo remains the first free recovery');
   assert.equal(h.game.modal.buttons.some(button => button.text.includes('看广告')), false);
-  const turn = h.game.state.turn, rewards = clone(h.game.itemRewards), use = h.game.modal.buttons[0].action;
+  const turn = h.game.state.turn, rewards = clone(h.game.itemRewards), use = oil.action;
   use(); use();
   assert.equal(h.game.state.status, 'playing'); assert.equal(h.game.state.energy, 6);
   assert.equal(h.game.state.turn, turn); assert.equal(h.game.state.inventory.oil, 0);
@@ -777,13 +785,13 @@ test('trees keep the same continuous wind motion through moves, waits and undo',
   const idle = harness(), active = harness();
   t.after(() => { idle.destroy(); active.destroy(); });
   for (const h of [idle, active]) { h.start(CAMPAIGN[1]); h.draw(1200); }
-  // Capture full tree crowns in world coordinates, before the camera transform.
-  // Actor poses, collection feedback and the rest of the UI can change freely.
-  const crowns = h => h.calls.filter(({ method, args }) => method === 'ellipse' &&
-    Math.abs(args[2] / args[3] - .27 / .48) < 1e-9 && args[5] === 0 && args[6] === Math.PI * 2)
-    .map(({ args }) => args);
+  // The new hand-painted crowns retain independent world-space wind rotation.
+  const tree = require('../src/art-assets').ART_FRAMES.tree;
+  const crowns = h => h.calls.flatMap(({ method, args }, index) => method === 'drawImage' &&
+    args.slice(1, 5).every((value, part) => value === tree[part])
+    ? [[h.calls[index - 2].args, h.calls[index - 1].args, args.slice(1)]] : []);
   const initial = crowns(idle);
-  assert.ok(initial.length > 2, 'the real board must draw trees, not just the distant backdrop');
+  assert.ok(initial.length > 0, 'the real board must draw hand-painted trees, not just the distant backdrop');
   const sample = ms => {
     idle.draw(ms); active.draw(ms);
     assert.equal(active.game.renderer.ambientNow, idle.game.renderer.ambientNow);
@@ -820,65 +828,91 @@ test('zooming at a floor tile preserves its screen anchor with the shared guide 
   }
 });
 
-test('new mechanics use two actual board taps on small phones without spending a turn or accepting stray input', t => {
+test('new mechanics teach through the actual board action while preserving free movement and undo', t => {
   for (const [id, seen] of [[13, {}], [16, { wind: true }], [19, { wind: true, bridge: true }]]) {
     const h = harness({ mechanics: true, development: true,
       metrics: { width: 320, height: 568, pixelRatio: 2, safeTop: 70, safeBottom: 20 } });
     t.after(() => h.destroy());
     Object.keys(seen).forEach(key => h.game.store.markMechanicSeen(key));
     h.start(CAMPAIGN[id - 1]); h.advance(1200, false); h.draw();
-    const original = clone(h.game.state), undos = h.game.undosUsed;
-    assert.equal(h.game.guideStep().kind, 'mechanic');
-    h.act(h.game.level.solution[0]); h.callbacks.key(' '); h.game.undo();
-    assert.deepEqual(h.game.state, original);
-    assert.equal(h.game.undosUsed, undos);
-    assert.equal(h.game.pendingAction, null);
-    for (let phase = 0; phase < 2; phase++) {
-      h.draw();
-      const guide = h.game.guideStep();
-      assert.equal(guide.step, phase + 1);
-      const point = h.game.renderer.boardProjection.point(guide.visual.tapCell);
-      tapBoardPoint(h, point);
-      assert.deepEqual(h.game.state, original, 'inspection spends no energy or history');
-      assert.equal(h.game.actions.length, 0);
+    const mechanic = { 13: 'wind', 16: 'bridge', 19: 'light' }[id];
+    for (const action of h.game.level.solution) {
+      if (h.game.guideStep()?.mechanic === mechanic) break;
+      h.act(action);
     }
-    assert.equal(h.game.guideStep(), null);
-    assert.equal(h.game.profile().mechanicGuides[{ 13: 'wind', 16: 'bridge', 19: 'light' }[id]], true);
-    h.act(h.game.level.solution[0]);
-    assert.equal(h.game.state.turn, 1, 'normal movement resumes immediately after the explanation');
+    const guide = h.game.guideStep(), original = clone(h.game.state), undos = h.game.undosUsed;
+    assert.equal(guide.mechanic, mechanic);
+    assert.equal(guide.interactive, true);
+    assert.equal(h.game.profile().mechanicGuides?.[mechanic], undefined, 'seeing a prop is not practicing it');
+    h.act('wait');
+    assert.equal(h.game.state.turn, original.turn + 1, 'a contextual lesson permits another legal action');
+    h.game.undo();
+    assert.deepEqual(h.game.state, original);
+    assert.equal(h.game.undosUsed, undos + 1);
+    h.advance(MOVE_MS, false); h.draw();
+    const before = h.game.state;
+    const expected = replayItems(h.game.level, h.game.actions.concat(guide.action));
+    tapBoardPoint(h, h.game.renderer.boardProjection.point(guide.visual.tapCell));
+    assert.equal(h.game.state.turn, before.turn + 1, 'tapping the guide target performs the real move');
+    assert.deepEqual(h.game.state, expected);
+    assert.equal(h.game.profile().mechanicGuides[mechanic], true);
   }
 });
 
-test('new mechanic appearances persist across relaunch, retry and skip independently of first-route preferences', t => {
+test('the first-route teaching callout supports a safe hold preview before its real tap', t => {
+  const h = harness({ guide: true }); t.after(() => h.destroy()); h.start(); h.draw(1200);
+  const game = h.game, guide = game.guideStep(), state = game.state;
+  const target = game.renderer.hits.find(hit => hit.action.boardCell === guide.visual.tapCell);
+  const r = game.renderer, x = (target.x + target.w / 2) * r.scale + r.ox,
+    y = (target.y + target.h / 2) * r.scale + r.oy;
+  game.pointerEvent(x, y, 'start'); h.advance(require('../src/action-preview').PREVIEW_HOLD_MS);
+  assert.equal(game.actionPreview.action, guide.action);
+  assert.equal(game.state, state);
+  assert.equal(game.store.loadRun().actions.length, 0);
+  game.pointerEvent(x, y, 'end');
+  assert.equal(game.state, state);
+  assert.equal(game.guideStep().step, 1);
+});
+
+test('only practiced or explicitly skipped mechanics persist across relaunch and retry', t => {
   const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
-  h.game.store.setGuideDismissed(true); h.start(CAMPAIGN[19]);
-  assert.deepEqual(h.game.mechanicGuide.ids, ['wind', 'bridge', 'light']);
-  assert.deepEqual(h.game.profile().mechanicGuides, { wind: true }, 'record the first displayed type before confirmation');
-  h.game.advanceMechanicGuide();
+  h.game.store.setGuideDismissed(true); h.start(CAMPAIGN[12]);
+  for (const action of h.game.level.solution) {
+    if (h.game.guideStep()) break;
+    h.act(action);
+  }
+  assert.equal(h.game.profile().mechanicGuides, undefined);
+  const route = clone(h.game.state);
   const resumed = harness({ mechanics: true, development: true, data: h.data }); t.after(() => resumed.destroy());
   assert.equal(resumed.game.restore(), true);
-  assert.equal(resumed.game.guideStep().step, 1);
-  assert.equal(resumed.game.guideStep().mechanic, 'bridge', 'relaunch skips the already displayed wind and introduces the next unseen type');
-  assert.deepEqual(resumed.game.profile().mechanicGuides, { wind: true, bridge: true });
+  assert.deepEqual(resumed.game.state, route);
+  assert.equal(resumed.game.guideStep().mechanic, 'wind', 'relaunch retains the unpracticed encounter');
+  assert.equal(resumed.game.profile().mechanicGuides, undefined);
+  resumed.act(resumed.game.guideStep().action);
+  assert.equal(resumed.game.profile().mechanicGuides.wind, true);
   resumed.game.start(resumed.game.level);
-  assert.equal(resumed.game.guideStep().mechanic, 'light', 'retry skips the displayed bridge and introduces the next unseen type');
-  assert.deepEqual(resumed.game.profile().mechanicGuides, { wind: true, bridge: true, light: true });
-  resumed.game.dismissGuide();
-  assert.equal(resumed.game.guideStep(), null);
-  resumed.game.start(resumed.game.level);
-  assert.equal(resumed.game.guideStep(), null, 'confirmed mechanics do not reopen on retry');
+  assert.equal(resumed.game.mechanicGuide, null, 'a practiced mechanic does not reopen on retry');
+  resumed.game.start(CAMPAIGN[19]);
+  assert.ok(resumed.game.mechanicGuide.ids.includes('bridge'));
+  while (resumed.game.mechanicGuide) assert.equal(resumed.game.advanceMechanicGuide(true), true);
+  assert.equal(resumed.game.profile().mechanicGuides.bridge, true, 'explicit skip is remembered independently');
   assert.equal(resumed.game.profile().guideDismissed, true, 'first-route preference is independent');
 });
 
-test('pausing a first paper bridge explanation preserves its type, phase and remaining new mechanics', t => {
+test('pausing contextual paper bridge guidance preserves the actual route and unpracticed mechanics', t => {
   for (const level of [CAMPAIGN[15], CAMPAIGN[19]]) {
     const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
     h.game.store.markMechanicSeen('wind'); h.start(level);
-    const route = clone(h.game.state);
-    for (let phase = 0; phase < 2; phase++) {
+    for (const action of level.solution) {
+      if (h.game.guideStep()?.mechanic === 'bridge') break;
+      h.act(action);
+    }
+    const route = clone(h.game.state), count = h.game.actions.length;
+    const saved = h.game.store.loadRun();
+    {
       const lesson = clone(h.game.mechanicGuide);
       assert.equal(h.game.guideStep().mechanic, 'bridge');
-      assert.equal(h.game.guideStep().step, phase + 1);
+      assert.equal(h.game.guideStep().interactive, true);
       h.game.pause();
       assert.equal(h.game.modal.buttons.some(button => /道具引导|回看/.test(button.text)), false);
       h.game.modal.buttons.find(button => button.text === '玩法说明').action();
@@ -890,11 +924,10 @@ test('pausing a first paper bridge explanation preserves its type, phase and rem
       assert.equal(h.game.modal, null);
       assert.deepEqual(h.game.mechanicGuide, lesson, 'pause must not rebuild the queue from wind or reset its phase');
       assert.deepEqual(h.game.state, route);
-      assert.equal(h.game.actions.length, 0);
-      assert.deepEqual(h.game.store.loadRun().mechanicGuide, { id: 'bridge', phase });
-      h.game.advanceMechanicGuide();
+      assert.equal(h.game.actions.length, count);
+      assert.deepEqual(h.game.store.loadRun().mechanicGuide, saved.mechanicGuide);
+      assert.equal(h.game.profile().mechanicGuides.bridge, undefined);
     }
-    assert.equal(h.game.guideStep()?.mechanic || null, level.id === 20 ? 'light' : null);
   }
 });
 
@@ -973,7 +1006,8 @@ test('mechanic help on a legacy mid-route save preserves its route through backg
   h.callbacks.show(); h.game.modal.buttons.find(button => button.text === '继续投递').action();
   assert.equal(h.game.guideStep(), null);
   assert.deepEqual(h.game.state, state);
-  assert.equal(h.game.store.loadRun().mechanicGuide, undefined);
+  assert.deepEqual(h.game.store.loadRun().mechanicGuide, { id: 'wind', phase: 0 },
+    'unpracticed mechanics remain pending without interrupting the current route');
 });
 
 const startupAdvice = [
@@ -992,8 +1026,8 @@ test('home and loading decoration keeps hit geometry and real preparation state 
     const home = harness({ metrics }); t.after(() => home.destroy());
     home.draw(0);
     const r = home.game.renderer, homeHits = geometry(r);
-    const entry = r.hits.find(hit => hit.x === 42 && hit.w === 306 && hit.h === 52);
-    assert.ok(entry, 'the existing primary button remains the departure target');
+    const entry = r.hits.find(hit => hit.label === '开始送信');
+    assert.ok(entry && entry.w * r.scale >= 44 && entry.h * r.scale >= 44, 'the visible primary button remains the accessible departure target');
     for (const ms of [400, 1000]) { home.draw(ms); assert.deepEqual(geometry(r), homeHits); }
     let departures = 0;
     home.game.primary = () => { departures++; };
@@ -1265,8 +1299,9 @@ test('selecting the ongoing level resumes its route and guide while explicit res
   h.act('right'); h.act('right'); h.game.undo();
   const state = clone(h.game.state), run = clone(h.game.store.loadRun());
   h.game.openPage('levels'); h.draw(500);
-  assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '进行中'));
-  assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '继续投递'));
+  assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '进行中 · 继续投递'));
+  assert.ok(h.game.renderer.hits.some(hit => hit.action.focusId === 'level:1' &&
+    hit.label.includes('进行中 · 继续投递')), 'the current map node exposes the saved-route action');
   assert.equal(h.game.selectLevel(1), true);
   assert.deepEqual(h.game.state, state);
   assert.deepEqual(h.game.store.loadRun(), run);
@@ -1634,7 +1669,7 @@ test('real turn events select distinct sounds without replaying outcomes after u
   assert.equal(h.soundCalls.length, count, 'opening the result does not replay its jingle');
 });
 
-test('result effects preserve earned stars and saves, fit small screens and allow immediate next-level taps', t => {
+test('delivery presentation preserves earned stars and saves, fits small screens and then exposes original result actions', t => {
   for (const [waits, earned] of [[0, 3], [1, 2], [3, 1]]) {
     const h = harness({ guide: waits === 0, metrics: { width: 320, height: 568, pixelRatio: 2, safeTop: 70, safeBottom: 20 } });
     t.after(() => h.destroy());
@@ -1655,9 +1690,13 @@ test('result effects preserve earned stars and saves, fit small screens and allo
     h.draw(1);
     assert.equal(ages.at(-1), 0);
     assert.ok(bounds.y >= 0 && bounds.y + bounds.h <= renderer.H, 'the result fits the smallest supported phone');
-    assert.ok(h.game.modal.buttons.every(button => renderer.hits.some(hit => hit.action === button.action)), 'every action is available on the first visible result frame');
-    const next = renderer.hits.find(hit => hit.action === h.game.modal.buttons[0].action);
+    assert.equal(renderer.hits.length, 1, 'the first visible delivery frame offers one explicit skip action');
+    assert.equal(renderer.hits[0].action, renderer.deliveryPresentation.skip);
+    assert.deepEqual(h.game.modal.delivery.rewards.map(stamp => stamp.id), h.game.album().stamps.filter(stamp => stamp.owned).map(stamp => stamp.id),
+      'the ceremony receives the real newly earned stamp payload');
     for (const ms of [120, 330, 750, 3800]) h.draw(ms);
+    assert.ok(h.game.modal.buttons.every(button => renderer.hits.some(hit => hit.action === button.action)), 'every original action returns after the ceremony');
+    const next = renderer.hits.find(hit => hit.action === h.game.modal.buttons[0].action);
     assert.deepEqual(clone({ state: h.game.state, profile: h.game.profile(), actions: h.game.actions, data: Array.from(h.data) }), snapshot);
     assert.equal(h.soundCalls.length, soundCount, 'drawing and finishing the animation do not replay feedback');
 
@@ -1676,6 +1715,28 @@ test('result effects preserve earned stars and saves, fit small screens and allo
     h.draw(1);
     assert.equal(ages.length, resultDraws, 'no result overlay survives into the next level');
   }
+});
+
+test('a pointer held across automatic delivery completion cannot activate a newly uncovered result action', t => {
+  const h = harness(); t.after(() => h.destroy()); h.start();
+  CAMPAIGN[0].solution.forEach(action => h.act(action));
+  h.draw(400);
+  const modal = h.game.modal, renderer = h.game.renderer, skip = renderer.hits[0];
+  const snapshot = clone({ profile: h.game.profile(), data: Array.from(h.data) });
+  const x = renderer.ox + (skip.x + skip.w / 2) * renderer.scale;
+  const y = renderer.oy + (skip.y + skip.h / 2) * renderer.scale;
+  h.game.pointerEvent(x, y, 'start');
+  const held = h.game.pointer;
+  h.draw(2800);
+  assert.equal(held.cancelled, true, 'automatic presentation replacement invalidates the old press');
+  h.game.pointerEvent(x, y, 'end');
+  assert.equal(h.game.modal, modal); assert.equal(h.game.level.id, 1);
+  assert.deepEqual(clone({ profile: h.game.profile(), data: Array.from(h.data) }), snapshot);
+  const next = renderer.hits.find(hit => hit.action === modal.buttons[0].action);
+  const nx = renderer.ox + (next.x + next.w / 2) * renderer.scale;
+  const ny = renderer.oy + (next.y + next.h / 2) * renderer.scale;
+  h.game.pointerEvent(nx, ny, 'start'); h.game.pointerEvent(nx, ny, 'end');
+  assert.equal(h.game.level.id, 2, 'a new intentional press still advances normally');
 });
 
 test('failed result effects keep the original turn time across review, ads and backgrounding', async t => {
@@ -1778,18 +1839,13 @@ test('all 999 campaign routes clear with three stars through the real next-level
     assert.equal(h.game.unlocked(index), true, label);
     if (index + 1 < CAMPAIGN.length) assert.equal(h.game.unlocked(index + 1), false, label + ' has not unlocked its successor early');
 
-    for (let inspected = 0; h.game.mechanicGuide && inspected < 6; inspected++) {
-      const lesson = h.game.guideStep(), before = clone(h.game.state);
-      if (lesson.step === 1) introductions.push([level.id, lesson.mechanic]);
-      assert.equal(h.game.inspectGuideCell(lesson.visual.tapCell), true);
-      assert.deepEqual(h.game.state, before, label + ' teaches without spending a turn or inventing a state');
-    }
-    assert.equal(h.game.mechanicGuide, null, label + ' returns to normal controls after inspection');
-
     for (const [stepIndex, action] of level.solution.entries()) {
       assert.equal(h.game.state.status, 'playing', `${label} before step ${stepIndex + 1}`);
+      const seen = { ...h.game.profile().mechanicGuides };
       h.act(action);
       assert.equal(h.game.state.turn, stepIndex + 1, `${label} commits step ${stepIndex + 1}: ${action}`);
+      for (const id of Object.keys(h.game.profile().mechanicGuides || {}))
+        if (!seen[id]) introductions.push([level.id, id]);
     }
 
     assert.equal(h.game.state.status, 'won', label);
@@ -1821,7 +1877,7 @@ test('all 999 campaign routes clear with three stars through the real next-level
   assert.equal(h.game.page, 'home');
   assert.equal(h.game.completion(), 999);
   assert.equal(h.game.starCount(), 2997);
-  assert.deepEqual(introductions, [[13, 'wind'], [16, 'bridge'], [19, 'light']]);
+  assert.deepEqual(introductions, [[4, 'supply'], [9, 'order'], [13, 'wind'], [16, 'bridge'], [19, 'light']]);
   assert.equal(h.game.unlocked(999), false, 'there is no thousandth campaign level');
   const reloaded = harness({ data: h.data, configured: false });
   t.after(() => reloaded.destroy());
@@ -1852,7 +1908,7 @@ test('cancelled ads do not revive and the same route can relight repeatedly acro
   for (let index = 0; index < CAMPAIGN[0].budget; index++) h.act('wait');
   assert.equal(h.game.state.status, 'failed');
   const failed = clone(h.game.state);
-  assert.match(h.game.modal.buttons[0].text, /看广告续灯 \+6 拍/);
+  assert.ok(h.game.modal.buttons.some(button => /看广告续灯 \+6 拍/.test(button.text)));
   assert.ok(h.game.modal.lines.some(line => line.includes('每次视频补 6 拍')));
   let pending = h.game.requestRevive();
   await Promise.resolve();
@@ -1936,7 +1992,7 @@ test('an irrecoverable bridge route never offers or starts an ad and can restart
   assert.equal(h.showCount, 0);
   assert.deepEqual(h.game.state, failed);
   const retry = h.game.modal.buttons.find(button => /免费再试/.test(button.text));
-  assert.equal(retry.primary, true);
+  assert.equal(retry.primary, false, 'a still available undo takes priority over restarting');
   retry.action();
   assert.equal(h.game.state.status, 'playing');
   assert.deepEqual(h.game.state.bridges, level.bridges);
@@ -2019,8 +2075,11 @@ test('relit results use total turns and repeated low-star wins preserve personal
 });
 
 test('a real route finishing within the two-star limit still earns two stars after relighting', async () => {
-  const h = harness({ development: true }), level = CAMPAIGN[18];
-  h.start(level); h.act('wait'); h.act('wait');
+  const level = getLegacyLevel(19, '6');
+  const h = harness({ development: true, data: new Map([[DEV_RUN_KEY,
+    { mode: 'campaign', levelId: level.id, revision: '6', actions: [], reviveHistory: [], undosUsed: 0 }]]) });
+  assert.equal(h.game.restore(), true);
+  h.act('wait'); h.act('wait');
   let action = 0;
   while (h.game.state.status === 'playing') h.act(level.solution[action++]);
   assert.equal(h.game.state.status, 'failed');
@@ -2143,7 +2202,7 @@ test('every campaign screen renders finite geometry on small phones and tablets'
     for (const level of CAMPAIGN) {
       h.start(level, 'campaign'); h.draw();
       assert.ok(h.game.renderer.boardRect.w > 240);
-      const controls = h.game.renderer.hits.filter(hit => hit.w === 165 && hit.h === 52);
+      const controls = h.game.renderer.hits.filter(hit => hit.action.previewAction === 'wait');
       assert.equal(controls.length, 1, 'only wait is clickable before the first move');
       assert.equal(controls[0].x, 201, 'the disabled undo button has no click target');
       const boardBottom = h.game.renderer.boardRect.y + h.game.renderer.boardRect.h;
@@ -2475,7 +2534,8 @@ test('a failed route can be reviewed without spending turns and free retry prese
   for (let index = 0; index < CAMPAIGN[0].budget; index++) h.act('wait');
   const failed = clone(h.game.state), saved = clone(h.game.store.loadRun());
   assert.equal(h.game.modal.buttons[0].primary, true);
-  assert.match(h.game.modal.buttons[0].text, /看广告续灯/, 'with a configured ad the relight leads the failure dialog');
+  assert.match(h.game.modal.buttons[0].text, /撤回上一步/, 'a free undo leads recovery when one remains');
+  assert.ok(h.game.modal.buttons.some(button => /看广告续灯/.test(button.text)));
   assert.ok(h.game.modal.lines.some(line => /本次通关至多一星/.test(line)), 'the reachable score is disclosed before choosing an ad');
   const retry = h.game.modal.buttons.find(button => /免费再试/.test(button.text));
   assert.ok(retry, 'the free retry always remains available');
@@ -2602,7 +2662,7 @@ test('undo takes back turns from history, is limited per run, survives relaunch 
   finishCampaign(h, 1);
   const level = CAMPAIGN[1];
   h.start(level);
-  assert.equal(h.game.undoLeft(), 3);
+  assert.equal(h.game.undoLeft(), level.undo);
   assert.equal(h.game.canUndo(), false, 'nothing to undo at the start');
   h.game.undo();
   assert.equal(h.game.undosUsed, 0, 'an impossible undo costs nothing');
@@ -2617,7 +2677,7 @@ test('undo takes back turns from history, is limited per run, survives relaunch 
   h.game.undo();
   assert.deepEqual(h.game.state, threeSteps);
   assert.deepEqual(h.game.state, replayed(level, level.solution.slice(0, 3)), 'undo rebuilds the exact rule-produced state');
-  assert.equal(h.game.undoLeft(), 1);
+  assert.equal(h.game.undoLeft(), level.undo - 2);
   assert.equal(h.game.store.loadRun().undosUsed, 2);
   const reloaded = harness({ data: h.data });
   assert.equal(reloaded.game.restore(), true);
@@ -2625,9 +2685,10 @@ test('undo takes back turns from history, is limited per run, survives relaunch 
   assert.deepEqual(reloaded.game.state, h.game.state);
   reloaded.game.undo();
   assert.deepEqual(reloaded.game.state, twoSteps);
-  assert.equal(reloaded.game.undoLeft(), 0);
+  assert.equal(reloaded.game.undoLeft(), level.undo - 3);
+  while (reloaded.game.undoLeft()) { reloaded.act('wait'); reloaded.game.undo(); }
   reloaded.game.undo();
-  assert.deepEqual(reloaded.game.state, twoSteps, 'the fourth undo is refused');
+  assert.deepEqual(reloaded.game.state, twoSteps, 'an undo beyond the chapter allowance is refused');
   assert.match(reloaded.game.toastText, /已用完/);
   assert.equal(reloaded.game.canUndo(), false);
 
@@ -2647,24 +2708,25 @@ test('undo takes back turns from history, is limited per run, survives relaunch 
   h.destroy(); reloaded.destroy(); spent.destroy();
 });
 
-test('late routes allow a single undo, a legacy expert save is discarded, and an over-limit undo count is rejected', () => {
+test('chapter undo allowances are enforced and retired or over-limit saves are rejected', () => {
   const h = harness();
   const level = CAMPAIGN[18];
-  assert.equal(level.undo, 1);
-  assert.deepEqual([undoFor(0), undoFor(5), undoFor(6), undoFor(17), undoFor(18), undoFor(119)], [3, 3, 2, 2, 1, 1]);
+  assert.equal(level.undo, 6);
+  assert.deepEqual([undoFor(0), undoFor(5), undoFor(6), undoFor(17), undoFor(18), undoFor(119)], [6, 3, 6, 3, 6, 3]);
   for (const earlier of CAMPAIGN.slice(0, 18)) h.game.store.recordWin(earlier.id, 3, earlier.par, 'campaign');
   const earned = clone(h.game.profile());
   h.start(level);
-  assert.equal(h.game.undoLeft(), 1);
+  assert.equal(h.game.undoLeft(), level.undo);
   h.act(level.solution[0]);
   h.act(level.solution[1]);
   h.game.undo();
-  assert.equal(h.game.undoLeft(), 0);
+  assert.equal(h.game.undoLeft(), level.undo - 1);
+  while (h.game.undoLeft()) { h.act('wait'); h.game.undo(); }
   const before = clone(h.game.state);
   h.game.undo();
   assert.deepEqual(h.game.state, before);
-  assert.match(h.game.toastText, /1 次回溯已用完/);
-  h.data.set(RUN_KEY, { ...clone(h.game.store.loadRun()), undosUsed: 2 });
+  assert.match(h.game.toastText, /6 次回溯已用完/);
+  h.data.set(RUN_KEY, { ...clone(h.game.store.loadRun()), undosUsed: level.undo + 1 });
   let reloaded = harness({ data: h.data });
   assert.equal(reloaded.game.restore(), false, 'a save claiming more undos than the route allows is rejected');
   assert.deepEqual(reloaded.game.profile(), earned);
@@ -2708,7 +2770,7 @@ test('the game screen keeps one route target, undo and wait without duplicate bo
   const h = harness(); h.start(CAMPAIGN[15]);
   h.draw();
   const texts = () => h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
-  assert.ok(texts().includes('撤回（2）'), 'chapter three routes allow two undos');
+  assert.ok(texts().includes('撤回（' + h.game.level.undo + '）'), 'the current chapter supplies its real undo allowance');
   assert.ok(texts().includes('等一拍'));
   assert.equal(texts().filter(text => text.includes('已走 0 拍') && text.includes('三星目标')).length, 1,
     'one compact header communicates the current route target');
@@ -2717,7 +2779,7 @@ test('the game screen keeps one route target, undo and wait without duplicate bo
   h.act(CAMPAIGN[15].solution[0]);
   h.game.undo();
   h.draw();
-  assert.ok(texts().includes('撤回（1）'));
+  assert.ok(texts().includes('撤回（' + (h.game.level.undo - 1) + '）'));
   h.game.openPage('levels'); h.game.levelScroll.offset = require('../src/level-view').levelProgressOffset(CAMPAIGN[12], h.game.renderer.H); h.draw();
   assert.ok(h.game.renderer.hits.length > 0);
   h.destroy();
@@ -2749,7 +2811,14 @@ function boardDevicePoint(h, point) {
 function postOfficePoint(h, part) {
   const p = h.game.renderer.boardGeometry.projection;
   const [x, y] = p.point(h.game.level.exit), size = p.halfW * 1.2 / 44;
-  if (part === 'badge') return [x, y - p.halfW * 1.68];
+  if (part === 'badge') {
+    const label = h.calls.find(call => call.method === 'fillText' && call.args[0] === '可投递');
+    assert.ok(label, 'ready badge is painted');
+    const point = label.args.slice(1, 3), screen = p.toScreen(...point), bounds = h.game.renderer.boardRect;
+    assert.ok(screen[0] >= bounds.x && screen[0] <= bounds.x + bounds.w && screen[1] >= bounds.y && screen[1] <= bounds.y + bounds.h,
+      'ready badge stays inside the visible board after zoom and pan');
+    return point;
+  }
   return part === 'door' ? [x - 7 * size, y - 2 - 10 * size] : [x, y - 2 - 32 * size];
 }
 
@@ -2936,7 +3005,7 @@ test('a save from an older content version restarts its route with notice and pr
   assert.equal(reloaded.game.level.id, 4);
   assert.equal(reloaded.game.state.turn, 0);
   assert.deepEqual(reloaded.game.actions, []);
-  assert.equal(reloaded.game.store.loadRun().revision, '6');
+  assert.equal(reloaded.game.store.loadRun().revision, CONTENT_VERSION);
   assert.match(reloaded.game.toastText, /路线已升级/);
   assert.deepEqual(reloaded.game.profile(), earned);
   h.destroy(); reloaded.destroy();
@@ -2947,7 +3016,7 @@ test('a current-version save resumes its exact actions without an upgrade notice
   h.start(CAMPAIGN[2]);
   CAMPAIGN[2].solution.slice(0, 3).forEach(action => h.act(action));
   const before = clone(h.game.state), actions = clone(h.game.actions), earned = clone(h.game.profile());
-  assert.equal(h.game.store.loadRun().revision, '6');
+  assert.equal(h.game.store.loadRun().revision, CONTENT_VERSION);
   const reloaded = harness({ data: h.data });
   assert.equal(reloaded.game.restore(), true);
   assert.equal(reloaded.game.level.id, 3);
@@ -2958,22 +3027,22 @@ test('a current-version save resumes its exact actions without an upgrade notice
   h.destroy(); reloaded.destroy();
 });
 
-test('the fresh home separates its settings shortcut from the three primary links', () => {
+test('the fresh home presents four clearly labeled destinations beneath the departure action', () => {
   const h = harness(); h.draw();
   const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
-  for (const label of ['开始送信', '选关', '邮票', '排行']) assert.ok(texts.includes(label));
-  assert.equal(texts.includes('设置'), false, 'the icon-only settings shortcut stays out of the bottom labels');
+  for (const label of ['开始送信', '选关', '邮票', '排行', '设置']) assert.ok(texts.includes(label));
   assert.equal(texts.includes('圈子'), false);
   assert.equal(texts.some(text => /每日|成长|LV\.|已走 0 拍|本周|下一小步/.test(text)), false);
   const hits = h.game.renderer.hits;
-  assert.equal(hits.length, 6, 'delivery, today’s itinerary, three primary links and settings are available');
+  assert.equal(hits.length, 6, 'delivery, today’s itinerary and all four destinations are available');
   assert.ok(texts.some(text => text.includes('今日邮程')), 'the itinerary has a visible home entry');
-  const settings = hits.find(hit => hit.x === 330 && hit.y === 10 && hit.w === 44 && hit.h === 44);
-  assert.ok(settings, 'settings uses a top-right touch target below the platform safe area');
-  const links = hits.filter(hit => hit.w === 104);
-  assert.equal(links.length, 3, 'settings is not grouped with primary navigation');
-  assert.equal(new Set(links.map(hit => hit.y)).size, 1, 'the three destinations remain a single row');
-  assert.ok(links.every(hit => hit.y > settings.y));
+  const settings = hits.find(hit => hit.label === '设置');
+  assert.ok(settings, 'the visible settings label is an actionable destination');
+  const links = hits.filter(hit => ['选关', '邮票', '排行', '设置'].includes(hit.label));
+  assert.equal(links.length, 4);
+  assert.equal(new Set(links.map(hit => hit.y)).size, 1, 'all four destinations remain a single row');
+  const departure = hits.find(hit => hit.label === '开始送信');
+  assert.ok(links.every(hit => hit.y >= departure.y + departure.h + 8));
   settings.action(); h.draw();
   assert.equal(h.game.page, 'settings');
   assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '体验设置'));
@@ -2992,13 +3061,19 @@ test('home keeps six accessible actions across browser and WeChat versions', () 
         const texts = h.calls.filter(call => call.method === 'fillText').map(call => String(call.args[0]));
         assert.equal(texts.includes('圈子'), false, kind + '/' + envVersion);
         const hits = h.game.renderer.hits;
-        assert.equal(hits.length, 6, 'delivery, today’s itinerary, three primary links and settings are available');
-        const links = hits.filter(hit => hit.w === 104);
-        assert.equal(links.length, 3, 'primary navigation contains its three destinations');
+        assert.equal(hits.length, 6, 'delivery, today’s itinerary and all four destinations are available');
+        const links = hits.filter(hit => ['选关', '邮票', '排行', '设置'].includes(hit.label));
+        assert.equal(links.length, 4, 'navigation names all four destinations');
         assert.equal(new Set(links.map(hit => hit.y)).size, 1, 'the destination row remains aligned');
         assert.equal(links[0].x + links.at(-1).x + links.at(-1).w, 390, 'navigation stays centered');
-        assert.ok(hits.every(hit => hit.x >= 0 && hit.x + hit.w <= 390 && hit.w >= 44 && hit.h >= 44),
+        assert.ok(hits.every(hit => hit.x >= 0 && hit.x + hit.w <= 390 && hit.y >= 0 && hit.y + hit.h <= h.game.renderer.H - 18 &&
+          hit.w * h.game.renderer.scale >= 44 && hit.h * h.game.renderer.scale >= 44),
           'all home actions remain visible and touch accessible');
+        for (let i = 0; i < hits.length; i++) for (let j = i + 1; j < hits.length; j++) {
+          const a = hits[i], b = hits[j];
+          assert.ok(!(a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y),
+            'home actions retain separate touch targets');
+        }
       } finally { h.destroy(); }
     }
   }
@@ -3139,7 +3214,7 @@ test('the 999th route resumes after undo, saves the final score and returns home
   const reloaded = harness({ data });
   assert.equal(reloaded.game.restore(), true);
   assert.deepEqual(reloaded.game.state, state);
-  assert.equal(reloaded.game.undoLeft(), 0);
+  assert.equal(reloaded.game.undoLeft(), last.undo - 1);
   last.solution.slice(4).forEach(action => reloaded.act(action));
   assert.equal(reloaded.game.state.status, 'won');
   assert.equal(reloaded.game.completion(), 999);
@@ -3163,7 +3238,11 @@ test('large campaign boards render and accept adjacent moves at phone sizes', ()
     const h = harness({ metrics });
     for (const id of [121, 301, 361, 481, 601, 781, 999]) {
       h.start(CAMPAIGN[id - 1]); h.advance(1000); h.draw();
-      if (id >= 301) assert.match(h.game.playHint(h.platform.now()), /没有富余拍数/);
+      if (id >= 301) {
+        const hint = h.game.playHint(h.platform.now());
+        if (h.game.level.letterOrder) assert.match(hint, /顺序来信.*先收第 1 封信/);
+        else assert.equal(hint, h.game.level.experience.guidance);
+      }
       for (const hit of h.game.renderer.hits) {
         for (const value of [hit.x, hit.y, hit.w, hit.h]) assert.ok(Number.isFinite(value), `${id}: invalid hit region`);
       }
@@ -3175,7 +3254,7 @@ test('large campaign boards render and accept adjacent moves at phone sizes', ()
       h.draw();
       assert.equal(h.game.state.player, expected.player);
       assert.equal(h.game.state.energy, expected.energy);
-      assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '撤回（1）'));
+      assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '撤回（' + h.game.level.undo + '）'));
       assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '等一拍'));
     }
     h.destroy();

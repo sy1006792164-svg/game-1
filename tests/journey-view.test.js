@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { CAMPAIGN } = require('../src/levels');
-const { createState } = require('../src/engine');
+const { createState, step } = require('../src/engine');
 const { getAlbum } = require('../src/stamp-album');
 const { getJourney } = require('../src/journey');
 const { openJourney, openRoutePlan } = require('../src/journey-view');
@@ -97,6 +97,9 @@ test('route preparation keeps already earned supplies accessible when video is u
   h.game.platform.kind = 'browser'; h.game.ads.isConfigured = () => false;
   h.game.page = 'game'; h.game.level = CAMPAIGN[3];
   h.game.state = createState(h.game.level, { oil: 1 });
+  // Stock alone is not a reason to recommend an unnecessary supply. Follow
+  // real waits until the current route has a light shortfall worth addressing.
+  while (h.game.state.energy > 6) h.game.state = step(h.game.level, h.game.state, 'wait').state;
   h.game.guideStep = () => null;
   let selected = null;
   h.game.selectItem = id => { selected = id; };

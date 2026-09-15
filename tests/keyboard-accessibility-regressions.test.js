@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const { CAMPAIGN } = require('../src/levels');
 const { MOVE_MS } = require('../src/motion');
+const { ART_SIZE } = require('../src/art-assets');
 
 const mainPath = path.join(__dirname, '../src/main.js');
 const source = fs.readFileSync(mainPath, 'utf8').replace(/new Game\(createPlatform\(\)\);\s*$/, 'module.exports = { Game };');
@@ -26,6 +27,7 @@ function harness() {
   const metrics = { width: 390, height: 844, pixelRatio: 1, safeTop: 0, safeBottom: 0 };
   const platform = {
     kind: 'browser', canvas: { getContext: () => context },
+    createImage: () => ({ width: ART_SIZE, height: ART_SIZE, set src(value) { this.onload(); } }),
     storage: { get: key => saved.get(key), set: (key, value) => saved.set(key, value), remove: key => saved.delete(key) },
     resize: () => metrics, now: () => now, raf: () => 1, cancelRaf: noop, vibrate: noop,
     onResize: noop, onPointer: noop, onKey: fn => { callbacks.key = fn; }, onHide: noop, onShow: noop,
@@ -71,12 +73,27 @@ test('Enter continues the completed route and restarts a failed route without a 
   assert.equal(h.game.modal.kind, 'win');
   h.key('Enter');
   assert.equal(h.game.level.id, 1, 'an unseen result cannot consume an early confirmation');
-  h.draw(399); h.key('Enter');
-  assert.equal(h.game.level.id, 1, 'the final move must finish its presentation');
+  const settled = JSON.stringify(h.game.profile());
+  h.draw(399);
+  h.key('Enter');
+  assert.equal(h.game.level.id, 1, 'the final move still owns input before presentation controls are available');
   h.draw(1);
+  assert.ok(h.game.renderer.hits.some(hit => hit.action === h.game.renderer.deliveryPresentation.skip));
+  h.key('Enter');
+  assert.equal(h.game.level.id, 1, 'skipping the delivery opens its receipt, never the next route');
+  assert.equal(JSON.stringify(h.game.profile()), settled, 'skipping cannot award the delivery twice');
+  h.key('Enter');
+  assert.equal(h.game.level.id, 1, 'a second key cannot activate receipt buttons before they are drawn');
+  h.draw();
+  const primary = h.game.modal.buttons.find(button => button.primary);
+  assert.ok(h.game.renderer.hits.some(hit => hit.action === primary.action));
   h.key('Enter');
   assert.equal(h.game.level.id, 2);
   assert.equal(h.game.modal, null);
+  for (let used = 0, limit = h.game.undoLimit(); used < limit; used++) {
+    h.act('wait'); h.game.undo();
+  }
+  assert.equal(h.game.undoLeft(), 0, 'legal attempts exhaust rewinds before testing the free restart');
   while (h.game.state.status === 'playing') h.act('wait');
   assert.equal(h.game.modal.kind, 'fail');
   h.draw(399); h.key('Enter');
@@ -87,6 +104,30 @@ test('Enter continues the completed route and restarts a failed route without a 
   assert.equal(h.game.state.status, 'playing');
   assert.equal(h.game.level.id, 2);
   assert.deepEqual(h.game.actions, []);
+});
+
+test('Escape only skips a visible delivery and keyboard focus cannot activate stale presentation actions', t => {
+  const h = harness(); t.after(() => h.destroy()); h.start();
+  for (const action of h.game.level.solution) h.act(action);
+  const modal = h.game.modal, settled = JSON.stringify(h.game.profile());
+  h.key('Escape');
+  assert.equal(h.game.modal, modal);
+  assert.equal(h.game.renderer.deliveryPresentation, undefined);
+  h.draw(400);
+  const { focusedTarget } = require('../src/keyboard-focus');
+  h.key('Tab');
+  assert.match(focusedTarget(h.game).label, /跳过演出/);
+  h.key('Escape');
+  assert.equal(h.game.modal, modal);
+  assert.equal(h.game.level.id, 1);
+  assert.deepEqual(h.game.renderer.hits, []);
+  h.key('Escape');
+  assert.equal(h.game.level.id, 1);
+  h.draw();
+  assert.equal(h.game.renderer.deliveryPresentation, null);
+  assert.equal(JSON.stringify(h.game.profile()), settled);
+  h.key('Enter');
+  assert.equal(h.game.level.id, 2);
 });
 
 test('visible reduced-motion results accept Enter immediately and failure ads require explicit confirmation', t => {
@@ -100,6 +141,17 @@ test('visible reduced-motion results accept Enter immediately and failure ads re
   h.game.platform.kind = 'wechat';
   h.game.ads.isConfigured = () => true;
   h.game.requestRevive = () => { requested++; };
+  h.game.failure();
+  assert.match(h.game.modal.buttons.find(button => button.primary).text, /撤回上一步/);
+  while (h.game.undoLeft() > 0) {
+    const actions = h.game.actions.length;
+    h.draw(); h.key('Enter');
+    assert.equal(h.game.state.status, 'playing');
+    assert.equal(h.game.actions.length, actions - 1, 'the primary recovery really rewinds one action');
+    assert.equal(requested, 0, 'available free rewinds never request an ad');
+    while (h.game.state.status === 'playing') h.act('wait');
+  }
+  assert.equal(h.game.state.inventory.oil, 0, 'the ad fixture has no stored oil');
   h.game.failure();
   assert.match(h.game.modal.buttons.find(button => button.primary).text, /看广告续灯/);
   h.key('Enter');

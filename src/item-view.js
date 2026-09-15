@@ -3,6 +3,7 @@
 const { ITEMS, itemOffer } = require('./items');
 const { C } = require('./theme');
 const { drawPaperPlaque } = require('./controls');
+const { pendingSupplyCells } = require('./supply-stations');
 
 const ITEM_TRAY_HEIGHT = 58;
 const ITEM_TRAY_GAP = 8;
@@ -89,9 +90,10 @@ function drawItemTray(r, game, layout) {
     if (locked) r.icon('lock', x + w - 12, y + 30, 10, C.muted);
     else r.label('×' + remaining, x + w - 9, y + 30, 38, 10, C.muted, 'right', '600');
     const video = !selected && !locked && offer.eligible && remaining === 0;
+    const station = remaining === 0 && pendingSupplyCells(game.level, game.state, item.id).length > 0;
     let detail = selected ? '请点亮起的目标' : locked ? '第 ' + item.unlock + ' 关开启' :
       item.id === 'bridge' && !(game.level.bridges || []).length ? '本关没有纸桥' :
-      !offer.eligible ? offer.reason : video ? game.platform.kind === 'browser' ? '微信内视频获取' :
+      !offer.eligible ? offer.reason : video ? game.platform.kind === 'browser' ? '微信视频获取' :
         advice && advice.itemId === item.id ? '建议·看视频获取' : '看视频获取' : item.short;
     if (compact) {
       if (selected) detail = '点亮起的目标';
@@ -101,13 +103,14 @@ function drawItemTray(r, game, layout) {
         item.id === 'kite' ? (game.state.letters || []).length ? '信笺不在范围' : '信笺已齐' :
         !(game.level.bridges || []).length ? '本关没有纸桥' : (game.level.bridges || []).some(cell => !(game.state.bridges || []).includes(cell)) ? '靠近断桥再修' : '纸桥完好';
     }
-    if (video && !compact) {
+    if (!selected && !locked && station) detail = '驿站免费领取';
+    if (video && !station && !compact) {
       r.round(x + 9, y + 40, 13, 10, 2, null, tone.ink);
       const c = r.ctx; c.beginPath(); c.moveTo(x + 14, y + 42); c.lineTo(x + 18, y + 45); c.lineTo(x + 14, y + 48); c.closePath();
       c.fillStyle = tone.ink; c.fill();
     }
-    r.label(detail, x + w / 2 + (video && !compact ? 9 : 0), y + 45,
-      w - (video && !compact ? 34 : 14), 11, selected ? C.green : C.muted, 'center');
+    r.label(detail, x + w / 2 + (video && !station && !compact ? 9 : 0), y + 45,
+      w - (video && !station && !compact ? 34 : 14), 11, selected || station ? C.green : C.muted, 'center');
     // Locked and temporarily unavailable tools stay inspectable, explaining their rule.
     if (canInspect) {
       const action = Object.assign(() => game.selectItem(item.id), { itemId: item.id });

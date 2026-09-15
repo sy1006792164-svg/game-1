@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { CAMPAIGN } = require('../src/levels');
+const { CAMPAIGN, getLegacyLevel } = require('../src/levels');
 const { createState, step, replay, revive } = require('../src/engine');
 const { isReviveRouteBlocked } = require('../src/revive-policy');
 const { showFailure, requestRevive } = require('../src/revive-flow');
@@ -12,7 +12,9 @@ const { itemOffer, parseItemAction } = require('../src/items');
 function exhausted(state) { return { ...state, inventory: { oil: 0, kite: 0, bridge: 0 } }; }
 
 function trappedRoute(withTools = false) {
-  const level = CAMPAIGN[19];
+  // Keep this video-only rescue fixture on its shipped rules; v7 also offers
+  // station oil, independently covered by the current campaign replay checks.
+  const level = getLegacyLevel(20, '6');
   // Tear the bridge above cell 26. The apparently open passage below is a
   // north-facing wind: every attempt to leave through it lands back on 26.
   const detour = ['down', 'down', 'down', 'down', 'left', 'down', 'left', 'left', 'up', 'down'];

@@ -2,7 +2,7 @@
 
 const { SUPPLY_ENERGY, plainRecord } = require('./supply-rules');
 
-// Only completed rewarded videos grant supplies; a new route starts empty.
+// Supplies come from actual map stations or completed rewarded videos.
 const ITEMS = Object.freeze([
   Object.freeze({ id: 'oil', name: '灯油', icon: 'oil', unlock: 4,
     description: '补充 ' + SUPPLY_ENERGY + ' 拍灯火，能再走或等 ' + SUPPLY_ENERGY + ' 次。\n灯还亮着时，点下方按钮直接补充。\n不用选格子，不移动人物，也不耗拍。', short: '灯火 +' + SUPPLY_ENERGY }),
@@ -62,7 +62,11 @@ function distance(level, from, to) {
 function candidateTargets(level, state, id) {
   if (!validCell(level, state.player)) return [];
   if (id === 'oil') return [state.player];
-  if (id === 'kite') return (state.letters || []).filter(cell => validCell(level, cell) && distance(level, state.player, cell) <= 2);
+  if (id === 'kite') {
+    const nextLetter = level.letterOrder && level.letterOrder.find(cell => (state.letters || []).includes(cell));
+    return (state.letters || []).filter(cell => (!level.letterOrder || cell === nextLetter) &&
+      validCell(level, cell) && distance(level, state.player, cell) <= 2);
+  }
   if (id === 'bridge') return (level.bridges || []).filter(cell => validCell(level, cell) &&
     !(state.bridges || []).includes(cell) && distance(level, state.player, cell) === 1);
   if (id === 'echo') {
@@ -85,7 +89,8 @@ function itemOffer(level, state, id) {
   if (!state || state.status !== 'playing') return unavailable('只能在投递中使用');
   const targets = candidateTargets(level, state, id);
   if (!targets.length) {
-    if (id === 'kite') return unavailable((state.letters || []).length ? '两格内没有待收的信' : '信笺已全部收齐');
+    if (id === 'kite') return unavailable((state.letters || []).length ? level.letterOrder
+      ? '下一封编号信不在两格内' : '两格内没有待收的信' : '信笺已全部收齐');
     if (id === 'echo') return unavailable((state.seals || []).length ? '先踩蓝票，趁回声还没到时使用' : '蓝票已全部盖好');
     const torn = (level.bridges || []).some(cell => !(state.bridges || []).includes(cell));
     return unavailable(torn ? '先走到断桥旁，上下左右紧挨一格' : '纸桥完好，无需修复');

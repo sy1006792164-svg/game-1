@@ -7,12 +7,13 @@ function turnFeedback(events, before, after) {
   if (types.has('fail')) return { sounds: ['fail'], haptic: false };
   if (types.has('repair')) return { sounds: ['light'], haptic: true };
   const sounds = ['light', 'seal', 'letter', 'bridge', 'wind'].filter(type => types.has(type)).slice(0, 2);
+  if (types.has('supply') && !sounds.includes('light') && sounds.length < 2) sounds.push('light');
   const low = before.energy > 3 && after.energy <= 3;
   const echoAppeared = before.echo === null && after.echo !== null;
   if (low && sounds.length < 2) sounds.push('low');
   else if (echoAppeared && sounds.length < 2) sounds.push('echo');
   if (!sounds.length) sounds.push(types.has('wait') ? 'wait' : 'move');
-  return { sounds, haptic: ['letter', 'seal', 'light'].some(type => types.has(type)) };
+  return { sounds, haptic: ['letter', 'seal', 'light', 'supply'].some(type => types.has(type)) };
 }
 
 module.exports = { turnFeedback };

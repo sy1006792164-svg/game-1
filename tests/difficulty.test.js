@@ -18,14 +18,15 @@ function follow(level, actions = level.solution) {
   return state;
 }
 
-test('every route is materially harder while keeping its original shortest witness and plain-cell objectives', () => {
+test('every route keeps its original shortest witness and v6 objectives while adding practice room', () => {
   for (const current of CAMPAIGN) {
-    const legacy = getLegacyLevel(current.id, '5');
+    const legacy = getLegacyLevel(current.id, '5'), previous = getLegacyLevel(current.id, '6');
     assert.deepEqual(current.solution, legacy.solution, `${current.id}: original witness remains intact`);
     assert.equal(current.par, legacy.par, `${current.id}: established shortest lower bound remains intact`);
-    assert.ok(current.budget < legacy.budget || current.letters.length > legacy.letters.length || current.seals.length > legacy.seals.length,
-      `${current.id}: has a real budget or objective increase`);
-    assert.ok(current.budget <= legacy.budget, `${current.id}: no added light`);
+    for (const field of ['width', 'height', 'walls', 'start', 'exit', 'letters', 'seals', 'lights', 'bridges', 'winds', 'difficultyAdditions']) {
+      assert.deepEqual(current[field], previous[field], `${current.id}: v6 ${field} remains intact`);
+    }
+    assert.ok(current.budget > previous.budget, `${current.id}: the current route restores bounded practice light`);
     for (const kind of ['letters', 'seals']) {
       assert.ok(legacy[kind].every(cell => current[kind].includes(cell)), `${current.id}: existing ${kind} constraints retained`);
       assert.equal(current.difficultyAdditions[kind].length, additionsFor(current.id - 1)[kind]);
@@ -35,7 +36,7 @@ test('every route is materially harder while keeping its original shortest witne
       }
     }
     const objects = [current.start, current.exit, ...current.letters, ...current.seals,
-      ...current.lights, ...current.bridges, ...Object.keys(current.winds).map(Number)];
+      ...current.lights, ...current.bridges, ...Object.keys(current.winds).map(Number), ...Object.keys(current.supplies || {}).map(Number)];
     assert.equal(new Set(objects).size, objects.length, `${current.id}: all painted objects remain distinct`);
     const final = follow(current);
     assert.equal(final.status, 'won');
@@ -45,19 +46,28 @@ test('every route is materially harder while keeping its original shortest witne
   }
 });
 
-test('all v5 runs resume with original targets, light and rating instead of silently gaining new obligations', () => {
-  for (const current of CAMPAIGN) {
-    const legacy = getLegacyLevel(current.id, '5');
+test('all v5 and v6 runs resume with original targets, light, undos and rating without new obligations', () => {
+  for (const current of CAMPAIGN) for (const revision of ['5', '6']) {
+    const legacy = getLegacyLevel(current.id, revision);
     const partial = legacy.solution.slice(0, Math.floor(legacy.par / 2));
-    assert.equal(legacy.revision, '5');
+    assert.equal(legacy.revision, revision);
+    assert.equal(legacy.letterOrder, undefined);
+    assert.equal(legacy.supplies, undefined);
+    assert.equal(legacy.experience, undefined);
+    assert.equal(createState(legacy).supplies, undefined, 'legacy state shape stays unchanged');
+    assert.equal(legacy.undo, legacy.id <= 6 ? 3 : legacy.id <= 18 ? 2 : 1);
     assert.deepEqual(replay(legacy, partial), follow(legacy, partial));
     const final = follow(legacy);
     assert.equal(final.status, 'won');
     assert.equal(stars(legacy, final), 3);
+    const expectedReserve = revision === '6' ? legacy.id <= 3 ? 2 : legacy.id <= 18 ? 1 : 0
+      : legacy.id <= 3 ? Math.max(4, Math.ceil(legacy.par * .6)) : legacy.id <= 6 ? 3 : legacy.id <= 18 ? 2 : legacy.id <= 300 ? 1 : 0;
+    assert.equal(final.energy, expectedReserve, `${legacy.id}/v${revision}: the old exact light margin survives`);
     assert.equal(getLegacyLevel(current.id, CONTENT_VERSION), current);
   }
   assert.deepEqual([1, 4, 7, 19, 301].map(id => getLegacyLevel(id, '5').budget), [8, 18, 25, 25, 46]);
-  for (const id of [0, -1, 1000, 1.5, '1', null]) assert.equal(getLegacyLevel(id, '5'), null);
+  assert.deepEqual([1, 4, 7, 19, 301].map(id => getLegacyLevel(id, '6').budget), [6, 16, 24, 24, 46]);
+  for (const revision of ['5', '6']) for (const id of [0, -1, 1000, 1.5, '1', null]) assert.equal(getLegacyLevel(id, revision), null);
   assert.equal(getLegacyLevel(1, '4'), null);
 });
 

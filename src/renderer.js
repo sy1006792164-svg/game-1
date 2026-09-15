@@ -53,6 +53,7 @@ class Renderer {
   }
   pauseAmbient(now) { this.ambientClock.sample(now, true); }
   clearCaches() {
+    if (this.homeArtCache) { this.homeArtCache.width = 1; this.homeArtCache.height = 1; this.homeArtCache = null; }
     if (this.wrapCache) this.wrapCache.clear();
     if (this.labelCache) this.labelCache.clear();
     clearStampPaperCache(this);

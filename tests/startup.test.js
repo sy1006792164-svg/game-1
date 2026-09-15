@@ -3,8 +3,55 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { StartupLoader } = require('../src/startup');
+const { ART_FILE, ART_SIZE, ART_FRAMES, createArtAssets } = require('../src/art-assets');
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('bundled hand-painted atlas has real alpha and bounded source frames', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const image = fs.readFileSync(path.resolve(__dirname, '..', ART_FILE));
+  assert.equal(image.readUInt32BE(16), ART_SIZE);
+  assert.equal(image.readUInt32BE(20), ART_SIZE);
+  assert.equal(image[25], 6, 'RGBA PNG retains its original transparent pixels');
+  for (const [x, y, w, h] of Object.values(ART_FRAMES)) {
+    assert.ok(x >= 0 && y >= 0 && x + w <= ART_SIZE && y + h <= ART_SIZE);
+  }
+});
+
+test('art loading waits for real decoding, shares concurrent work and caches decoded sprites', async () => {
+  let count = 0;
+  const image = { width: ART_SIZE, height: ART_SIZE };
+  const assets = createArtAssets({ createImage() { count++; return image; } });
+  const first = assets.load(), second = assets.load();
+  assert.equal(first, second); assert.equal(assets.ready, false); assert.equal(assets.get('courier'), null);
+  assert.equal(image.src, ART_FILE);
+  image.onload(); await first;
+  assert.equal(assets.ready, true); assert.equal(assets.decodedBytes, ART_SIZE * ART_SIZE * 4);
+  assert.equal(assets.get('courier').image, image);
+  assert.equal(assets.get('courier'), assets.get('courier'), 'rendering does not allocate a sprite descriptor per frame');
+  assert.equal(assets.get('toString'), null);
+  await assets.load(); assert.equal(count, 1);
+});
+
+test('art failures keep startup closed and retry only the failed real resource', async () => {
+  for (const failure of ['decode', 'wrong-size', 'factory']) {
+    const images = [];
+    let attempts = 0;
+    const assets = createArtAssets({ createImage() {
+      attempts++;
+      if (failure === 'factory' && attempts === 1) throw new Error('decoder unavailable');
+      const image = { width: failure === 'wrong-size' && attempts === 1 ? 100 : ART_SIZE, height: ART_SIZE };
+      images.push(image); return image;
+    } });
+    const task = assets.load();
+    if (failure === 'decode') images[0].onerror();
+    else if (failure === 'wrong-size') images[0].onload();
+    await assert.rejects(task);
+    assert.equal(assets.ready, false); assert.equal(assets.decodedBytes, 0);
+    const retry = assets.load(); images[images.length - 1].onload(); await retry;
+    assert.equal(attempts, 2); assert.equal(assets.ready, true);
+  }
+});
 function settle(loader) {
   for (let frame = 0; !loader.ready && frame < 100; frame++) loader.update(100);
   assert.equal(loader.ready, true);

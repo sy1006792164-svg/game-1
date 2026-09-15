@@ -6,7 +6,7 @@ const { buttonTouch, TOUCH_MS } = require('./ui-motion');
 
 const CONTROL = Object.freeze({ height: 52, compactHeight: 44, icon: UI_ICON.size, gap: 8, depth: 3, lineHeight: 20 });
 const TONES = Object.freeze({
-  primary: { face: '#39796b', held: '#2e655b', edge: '#4c8a77', base: '#285b52', shine: '#a6c9ad88', ink: C.white, icon: '#f3d4a0' },
+  primary: { face: '#3b7058', held: '#305d49', edge: '#779a70', base: '#294d3d', shine: '#d4dca288', ink: C.white, icon: '#f3d4a0' },
   secondary: { face: '#fcfaf0', held: '#e1eadc', edge: '#b7cbbd', base: '#b4c6b8', shine: '#ffffff', ink: C.ink, icon: C.green },
   quiet: { face: '#edf2e8', held: '#d7e4d6', edge: '#c3d2c4', base: '#c4d2c5', shine: '#ffffff99', ink: C.ink, icon: C.green }
 });
@@ -122,7 +122,10 @@ function drawButton(r, text, x, y, w, h, action, style) {
   ui.lines.forEach((line, index) => r.text(line, textX, textY + index * ui.lineHeight, ui.size, ink, 'center', ui.weight));
   if (options.trailing) drawUiIcon(r, options.trailing, x + w - ui.inset - CONTROL.icon / 2, middle, options.color || tone.icon);
   c.restore();
-  if (!disabled) r.hit(x, y, w, h, action, undefined, String(text) || options.icon);
+  if (!disabled) {
+    const minimum = 44 / (r.scale || 1), hitW = Math.max(w, minimum), hitH = Math.max(h, minimum);
+    r.hit(x - (hitW - w) / 2, y - (hitH - h) / 2, hitW, hitH, action, undefined, String(text) || options.icon);
+  }
 }
 
 module.exports = { CONTROL, drawButton, buttonLayout, drawPaperPlaque: plaque };

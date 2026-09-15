@@ -34,6 +34,8 @@ function showFailure(game) {
   const storedOil = hasStoredOil(game) && !blocked && !recordFull;
   const canRevive = !storedOil && game.platform.kind === 'wechat' && game.ads.isConfigured() && !blocked && !recordFull;
   const canContinue = storedOil || canRevive;
+  const canRewind = typeof game.undo === 'function' && typeof game.undoLeft === 'function' &&
+    game.undoLeft() > 0 && game.actions.length > (game.reviveAt == null ? 0 : game.reviveAt);
   const remaining = [];
   if (game.state.letters.length) remaining.push(game.state.letters.length + ' 封信');
   if (game.state.seals.length) remaining.push(game.state.seals.length + ' 枚邮票');
@@ -44,11 +46,13 @@ function showFailure(game) {
       ...(canContinue ? [storedOil ? '用已有灯油补 ' + SUPPLY_ENERGY + ' 拍，无需再看视频。' : '每次视频补 ' + SUPPLY_ENERGY + ' 拍，和投递中的灯油相同。',
         '保留路线与收集 · ' + reviveScoreHint(game.level, game.state)] : [])],
     buttons: [
-      ...(storedOil ? [{ text: '使用已领取灯油 +' + SUPPLY_ENERGY + ' 拍', primary: true,
+      ...(canRewind ? [{ text: '撤回上一步 · 剩余 ' + game.undoLeft() + ' 次', primary: true,
+        icon: 'undo', action: () => { game.modal = null; game.undo(); if (game.state.status === 'failed') showFailure(game); game.syncMusic(); } }] : []),
+      ...(storedOil ? [{ text: '使用已领取灯油 +' + SUPPLY_ENERGY + ' 拍', primary: !canRewind,
         icon: 'lamp', action: () => game.useStoredOil() }] : []),
-      ...(canRevive ? [{ text: '看广告续灯 +' + reviveEnergy(game.level) + ' 拍 · 接着送', primary: true,
+      ...(canRevive ? [{ text: '看广告续灯 +' + reviveEnergy(game.level) + ' 拍 · 接着送', primary: !canRewind,
         icon: 'lamp', action: () => game.requestRevive() }] : []),
-      { text: '重新规划 · 免费再试', primary: !canContinue, icon: 'restart', action: () => game.start(game.level, game.mode) },
+      { text: '重新规划 · 免费再试', primary: !canContinue && !canRewind, icon: 'restart', action: () => game.start(game.level, game.mode) },
       { text: '看看刚才的路线', icon: 'route', action: () => { game.modal = null; game.reviewing = true; } },
       { text: '返回邮局', textOnly: true, action: () => game.home() }
     ]

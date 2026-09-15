@@ -1,15 +1,16 @@
 'use strict';
 
-const { CAMPAIGN, chapterNames, PER_CHAPTER } = require('./levels');
+const { CAMPAIGN, PER_CHAPTER } = require('./levels');
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { insideRect } = require('./board-projection');
 const { campaignRecord } = require('./campaign-progress');
 const { drawChapterDirectory } = require('./chapter-view');
+const { drawChapterMap } = require('./chapter-map');
 const { drawLevelHeader } = require('./level-header-view');
 const { difficultyProfile } = require('./difficulty');
 const { drawScrollEdges } = require('./page-feedback');
-const { CARD_HEIGHT, ROW_HEIGHT, CHAPTER_HEADER, CHAPTER_HEIGHT, levelBrowserMode, replayLevels,
+const { CARD_HEIGHT, ROW_HEIGHT, CHAPTER_HEADER, levelBrowserMode, replayLevels,
   levelBrowserLayout, levelListLayout, levelProgressOffset, levelChapterAtOffset, levelBrowserChapter,
   navigateLevelBrowser } = require('./level-navigation');
 
@@ -44,7 +45,8 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   if (inProgress) r.text('进行中', x + 62, y + 24, 11, C.goldText, 'left', '600');
   else {
     const difficulty = level.difficulty || difficultyProfile(level);
-    r.label(difficulty.name, x + 62, y + 24, 55, 11, unlocked && difficulty.tier >= 4 ? C.goldText : C.muted);
+    r.label(level.experience ? level.experience.phaseName : difficulty.name, x + 62, y + 24, 55, 11,
+      unlocked && level.experience && level.experience.chapterFinale ? C.goldText : C.muted);
   }
   const idle = unlocked && !record && highlighted && !held && !scroll.touching &&
     Math.abs(scroll.velocity) < 4 && scroll.wheelTarget === null && progress === 1 &&
@@ -66,7 +68,9 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   c.restore();
   r.label(level.title, x + 17, y + 52, 132, 16, unlocked ? C.ink : C.muted, 'left', '600');
   r.label('三星目标 · ' + level.par + ' 拍内', x + 17, y + 76, 132, 11, C.muted);
-  r.text('不用道具或续灯', x + 17, y + 92, 11, C.muted);
+  const feature = level.letterOrder ? '编号收信 · 按序投递' : Object.keys(level.supplies || {}).length ? '沿途驿站 · 免费补给'
+    : level.experience ? level.experience.themeName : '不用道具或续灯';
+  r.label(feature, x + 17, y + 92, 132, 11, C.muted);
   if (record) {
     for (let star = 0; star < 3; star++) r.icon('star', x + 23 + star * 21, y + h - 24, 14, star < record.stars ? C.gold : C.line);
     r.text(record.bestTurns + ' 拍', x + 125, y + h - 24, 11, C.muted, 'right');
@@ -77,28 +81,6 @@ function drawLevelCard(r, game, level, record, index, rect, viewport, current, s
   action.focusId = 'level:' + level.id;
   r.hit(x, y, w, h, action,
     (px, py) => insideRect(viewport, px, py));
-}
-
-function drawAllLevels(r, game, profile, current, saved, viewport, contentHeight) {
-  const scroll = game.levelScroll;
-  // Render only chapters intersecting the viewport, not all 999 cards.
-  const first = Math.max(0, Math.floor(scroll.offset / CHAPTER_HEIGHT));
-  const last = Math.min(chapterNames.length - 1, Math.floor((scroll.offset + viewport.h) / CHAPTER_HEIGHT));
-  for (let chapter = first; chapter <= last; chapter++) {
-    const baseY = viewport.y + chapter * CHAPTER_HEIGHT - scroll.offset;
-    if (baseY + 34 > viewport.y && baseY < viewport.y + viewport.h) {
-      r.label(chapterNames[chapter], 25, baseY + 18, 248, 17, C.ink, 'left', '600');
-      r.text('第 ' + (chapter + 1) + ' 章', 365, baseY + 19, 11, C.muted, 'right');
-    }
-    const end = Math.min(CAMPAIGN.length, (chapter + 1) * PER_CHAPTER);
-    for (let index = chapter * PER_CHAPTER; index < end; index++) {
-      const slot = index % PER_CHAPTER, level = CAMPAIGN[index];
-      const rect = { x: 24 + slot % 2 * 178, y: baseY + CHAPTER_HEADER + Math.floor(slot / 2) * ROW_HEIGHT, w: 164, h: CARD_HEIGHT };
-      if (rect.y + rect.h > viewport.y && rect.y < viewport.y + viewport.h) drawLevelCard(r, game, level, campaignRecord(profile, String(level.id)), index, rect, viewport, current, saved);
-    }
-  }
-  const endY = viewport.y + contentHeight - 18 - scroll.offset;
-  if (endY > viewport.y && endY < viewport.y + viewport.h) r.text('九百九十九封信，寄往远方。', 195, endY, 11, C.muted, 'center');
 }
 
 function drawReplayLevels(r, game, profile, progress, current, saved, viewport) {
@@ -141,7 +123,7 @@ function drawLevels(r, game) {
   }
   scroll.update(now);
   drawLevelHeader(r, game, progress, mode);
-  [['all', '全部来信'], ['replay', '待摘星'], ['chapters', '章节目录']].forEach(([key, title], index) => {
+  [['all', '邮路地图'], ['replay', '待摘星'], ['chapters', '章节目录']].forEach(([key, title], index) => {
     r.button(title, 24 + index * 117, 151, 108, CONTROL.compactHeight, () => {
       if (key === mode) return;
       if (key === 'all') game.scrollToProgress();
@@ -153,8 +135,9 @@ function drawLevels(r, game) {
   c.save(); c.beginPath(); c.rect(viewport.x, viewport.y, viewport.w, viewport.h); c.clip();
   if (mode === 'chapters') drawChapterDirectory(r, game, progress.chapters, viewport, current, saved);
   else if (mode === 'replay') drawReplayLevels(r, game, profile, progress, current, saved, viewport);
-  else drawAllLevels(r, game, profile, current, saved, viewport, contentHeight);
+  else drawChapterMap(r, game, progress, profile, current, saved, viewport);
   c.restore();
+  if (mode === 'all') return;
   drawScrollEdges(r, viewport, scroll);
   const alpha = scroll.touching || Math.abs(scroll.velocity) > 4 ? .65 : clamp(1 - (now - scroll.activeAt - 600) / 450) * .65;
   if (maxScroll > 0 && alpha > 0) {

@@ -8,6 +8,7 @@ const { itemTargets } = require('../src/items');
 const { helpContent } = require('../src/help-view');
 const { mechanicStep } = require('../src/mechanic-guide');
 const { getRoutePreview } = require('../src/route-preview');
+const { forecastAction, previewMessage } = require('../src/action-preview');
 
 test('bridge lessons describe the real repair-and-cross route after using a kite', () => {
   const level = CAMPAIGN[20], rewards = { kite: 1, bridge: 1 };
@@ -19,9 +20,8 @@ test('bridge lessons describe the real repair-and-cross route after using a kite
 
   const guide = mechanicStep({ level, state, mechanicGuide: { ids: ['bridge'], phase: 1 } });
   const explanation = helpContent(level, 0, 'wechat').sections.find(section => section.title === '本关机关').text;
-  assert.match(guide.text, /修好才能再走/);
-  assert.match(guide.tip, /修桥包.*相邻断桥/);
-  assert.doesNotMatch(guide.title + explanation, /无法折返|仅回声可再次通过/);
+  assert.equal(guide, null, 'a consumed bridge has no unperformed first-crossing lesson');
+  assert.doesNotMatch(explanation, /无法折返|仅回声可再次通过/);
   assert.match(explanation, /修桥包.*相邻断桥.*修好可再走/);
 
   const repaired = step(level, state, 'item:bridge:34');
@@ -34,6 +34,34 @@ test('bridge lessons describe the real repair-and-cross route after using a kite
   assert.equal(returned.state.player, level.start);
   assert.deepEqual(returned.state.bridges, [], 'a repaired bridge tears again after departure');
   assert.deepEqual(returned.state, replay(level, [...actions, 'item:bridge:34', 'right', 'right'], [], rewards));
+});
+
+test('one-step forecasts preserve real state, inventory and history across every shipped mechanic', () => {
+  const observed = new Set();
+  for (const level of [CAMPAIGN[3], CAMPAIGN[8], CAMPAIGN[12], CAMPAIGN[15], CAMPAIGN[18], CAMPAIGN[19]]) {
+    let state = createState(level);
+    for (const action of level.solution) {
+      const before = JSON.stringify(state), preview = forecastAction(level, state, action);
+      assert.ok(preview);
+      assert.equal(preview.source, state);
+      assert.equal(JSON.stringify(state), before, 'preview cannot change a nested collection or inventory');
+      assert.equal(state.status, 'playing', 'forecast completion does not settle the source route');
+      preview.events.forEach(event => observed.add(event.type));
+      assert.deepEqual(preview.state, step(level, state, action).state);
+      state = preview.state;
+    }
+    assert.equal(forecastAction(level, state, 'wait'), null, 'finished routes cannot be forecast');
+  }
+  for (const event of ['move', 'echo', 'letter', 'seal', 'wind', 'bridge', 'light', 'supply', 'win'])
+    assert.ok(observed.has(event), 'real route coverage: ' + event);
+  const level = CAMPAIGN[0], state = createState(level);
+  assert.equal(forecastAction(level, state, 'up'), null);
+  assert.equal(forecastAction(level, state, 'item:oil'), null);
+  const lastBeat = { ...state, energy: 1 };
+  const failed = forecastAction(level, lastBeat, 'wait');
+  assert.equal(failed.state.status, 'failed');
+  assert.equal(lastBeat.status, 'playing');
+  assert.match(previewMessage(failed), /将熄灭/);
 });
 
 test('route previews retain the real echo timing through tools and bridge repairs', () => {
@@ -75,7 +103,8 @@ function expectedTargets(level, state, id) {
   if (id === 'oil') return [state.player];
   const distance = cell => Math.abs(cell % level.width - state.player % level.width) +
     Math.abs(Math.floor(cell / level.width) - Math.floor(state.player / level.width));
-  return id === 'kite' ? state.letters.filter(cell => distance(cell) <= 2)
+  const nextLetter = level.letterOrder && level.letterOrder.find(cell => state.letters.includes(cell));
+  return id === 'kite' ? state.letters.filter(cell => distance(cell) <= 2 && (!level.letterOrder || cell === nextLetter))
     : level.bridges.filter(cell => !state.bridges.includes(cell) && distance(cell) === 1);
 }
 
@@ -93,19 +122,32 @@ test('seeded mixed routes on all 999 boards preserve geometry, echo timing, repl
   const directions = Object.keys(DELTAS);
   const counts = { routes: 0, attempted: 0, accepted: 0, blocked: 0, targetChecks: 0,
     replayChecks: 0, undoChecks: 0, waits: 0, kite: 0, repair: 0, oil: 0,
-    relight: 0, bridgeDepartures: 0, windPushes: 0, windBlockedByBridge: 0 };
+    relight: 0, bridgeDepartures: 0, windPushes: 0, windBlockedByBridge: 0,
+    stationPickups: 0, stationUndos: 0, orderBlockedMoves: 0, orderBlockedKites: 0 };
   for (const level of CAMPAIGN) for (let sample = 0; sample < 2; sample++) {
     counts.routes++;
     const rewards = { oil: level.id >= 4 ? 4 : 0, kite: level.id >= 7 ? 4 : 0,
       bridge: level.id >= 16 && level.bridges.length ? 4 : 0 };
     let state = freezeState(createState(level, rewards));
-    const actions = [];
+    const actions = [], collectedStations = new Set();
     for (let attempt = 0; attempt < 80 && state.status !== 'won'; attempt++) {
       const targets = {};
       for (const id of ['oil', 'kite', 'bridge']) {
         targets[id] = expectedTargets(level, state, id);
         assert.deepEqual(itemTargets(level, state, id), targets[id], `${level.id}/${sample}/${attempt}: ${id} target geometry`);
         counts.targetChecks++;
+      }
+      if (level.letterOrder && state.status === 'playing' && state.inventory.kite > 0) {
+        const nextLetter = level.letterOrder.find(cell => state.letters.includes(cell));
+        for (const cell of state.letters) {
+          const distance = Math.abs(cell % level.width - state.player % level.width) +
+            Math.abs(Math.floor(cell / level.width) - Math.floor(state.player / level.width));
+          if (cell === nextLetter || distance > 2) continue;
+          const rejected = step(level, state, 'item:kite:' + cell);
+          assert.equal(rejected.moved, false, `${level.id}/${sample}/${attempt}: a kite cannot skip a letter number`);
+          assert.equal(rejected.state, state);
+          counts.orderBlockedKites++;
+        }
       }
       let action;
       if (state.status === 'failed') {
@@ -133,6 +175,7 @@ test('seeded mixed routes on all 999 boards preserve geometry, echo timing, repl
       }
       actions.push(action); counts.accepted++;
       state = freezeState(result.state);
+      const supplyEvents = result.events.filter(event => event.type === 'supply');
       if (action.startsWith('item:') || action === RELIGHT_ACTION) {
         const id = action === RELIGHT_ACTION ? 'oil' : action.split(':')[1];
         counts[action === RELIGHT_ACTION ? 'relight' : id === 'bridge' ? 'repair' : id]++;
@@ -142,7 +185,10 @@ test('seeded mixed routes on all 999 boards preserve geometry, echo timing, repl
         assert.deepEqual(state.history, before.history, label + ': tools leave the recorded route alone');
         assert.deepEqual(state.seals, before.seals, label + ': tools cannot collect stamps');
         assert.deepEqual(state.lights, before.lights, label + ': tools cannot consume map lamps');
+        assert.deepEqual(state.supplies, before.supplies, label + ': tools cannot collect route stations');
+        assert.deepEqual(supplyEvents, [], label + ': tools never grant station stock');
         assert.deepEqual(state.inventory, { ...before.inventory, [id]: before.inventory[id] - 1 });
+        assert.equal(state.itemsUsed, before.itemsUsed + 1, label + ': spending stock counts exactly once');
         assert.equal(state.energy, action === RELIGHT_ACTION ? 6 : before.energy + (id === 'oil' ? 6 : 0));
       } else {
         const entry = action === 'wait' ? before.player : openNeighbor(level, before, before.player, action);
@@ -153,12 +199,32 @@ test('seeded mixed routes on all 999 boards preserve geometry, echo timing, repl
         assert.deepEqual(state.history, before.history.concat(landing));
         assert.equal(state.turn, before.turn + 1);
         assert.equal(state.echo, state.turn >= 3 ? state.history[state.turn - 3] : null);
-        assert.deepEqual(state.letters, before.letters.filter(cell => cell !== landing));
+        const nextLetter = level.letterOrder && level.letterOrder.find(cell => before.letters.includes(cell));
+        const mayCollect = !level.letterOrder || landing === nextLetter;
+        assert.deepEqual(state.letters, before.letters.filter(cell => cell !== landing || !mayCollect));
+        const orderBlocked = before.letters.includes(landing) && !mayCollect;
+        assert.deepEqual(result.events.filter(event => event.type === 'order-blocked'), orderBlocked
+          ? [{ type: 'order-blocked', cell: landing, expected: nextLetter }] : [], label + ': numbered letters report only premature arrivals');
+        if (orderBlocked) counts.orderBlockedMoves++;
         assert.deepEqual(state.seals, before.seals.filter(cell => cell !== state.echo));
         assert.deepEqual(state.lights, before.lights.filter(cell => cell !== landing));
         assert.equal(state.energy, before.energy - 1 + (before.lights.includes(landing) ? 3 : 0));
         assert.deepEqual(state.bridges, before.bridges.filter(cell => cell !== before.player || landing === before.player));
-        assert.deepEqual(state.inventory, before.inventory, label + ': movement never spends an item');
+        const station = (before.supplies || []).includes(landing);
+        if (station) {
+          const item = level.supplies[landing], stock = Math.min(4096, (before.inventory[item] || 0) + 1);
+          assert.deepEqual(supplyEvents, [{ type: 'supply', cell: landing, item, amount: stock - (before.inventory[item] || 0) }],
+            label + ': the first landing reports the real station reward');
+          assert.deepEqual(state.inventory, { ...before.inventory, [item]: stock }, label + ': only the station item gains stock');
+          assert.deepEqual(state.supplies, before.supplies.filter(cell => cell !== landing), label + ': a collected station is removed');
+          assert.equal(collectedStations.has(landing), false, label + ': a station grants stock once per route');
+          collectedStations.add(landing); counts.stationPickups++;
+        } else {
+          assert.deepEqual(supplyEvents, [], label + ': movement without an uncollected station grants no stock');
+          assert.deepEqual(state.inventory, before.inventory, label + ': movement without a station preserves every item');
+          assert.deepEqual(state.supplies, before.supplies, label + ': other movement leaves uncollected stations alone');
+        }
+        assert.equal(state.itemsUsed, before.itemsUsed, label + ': movement and station collection never spend an item');
         if (action === 'wait') counts.waits++;
         if (pushed !== null) counts.windPushes++;
         if (before.bridges.length !== state.bridges.length) counts.bridgeDepartures++;
@@ -169,9 +235,17 @@ test('seeded mixed routes on all 999 boards preserve geometry, echo timing, repl
       }
       assert.equal(state.status, state.player === level.exit && !state.letters.length && !state.seals.length
         ? 'won' : state.energy <= 0 ? 'failed' : 'playing', label + ': completion wins over empty energy');
-      if (actions.length % 12 === 0) {
+      if (actions.length % 12 === 0 || supplyEvents.length) {
         assert.deepEqual(replay(level, actions, [], rewards), state, label + ': saved history reproduces direct execution');
-        assert.deepEqual(replay(level, actions.slice(0, -1), [], rewards), before, label + ': undo restores the prior state and inventory');
+        const restored = replay(level, actions.slice(0, -1), [], rewards);
+        assert.deepEqual(restored, before, label + ': undo restores the prior state and inventory');
+        if (supplyEvents.length) {
+          assert.ok(restored.supplies.includes(supplyEvents[0].cell), label + ': undo makes the collected station available again');
+          const repeated = step(level, restored, action);
+          assert.deepEqual(repeated.state, state, label + ': replaying the pickup restores the same stock without duplication');
+          assert.deepEqual(repeated.events.filter(event => event.type === 'supply'), supplyEvents);
+          counts.stationUndos++;
+        }
         counts.replayChecks++; counts.undoChecks++;
         for (const id of ['kite', 'bridge']) {
           const rejected = step(level, state, 'item:' + id + ':' + level.width * level.height);
@@ -186,5 +260,7 @@ test('seeded mixed routes on all 999 boards preserve geometry, echo timing, repl
   assert.ok(counts.accepted > 100000 && counts.blocked > 5000 && counts.waits > 10000);
   assert.ok(counts.kite > 1000 && counts.repair > 500 && counts.oil > 500 && counts.relight > 500);
   assert.ok(counts.bridgeDepartures > 1000 && counts.windPushes > 1000 && counts.windBlockedByBridge > 0);
+  assert.ok(counts.stationPickups > 0 && counts.orderBlockedMoves > 0 && counts.orderBlockedKites > 0);
+  assert.equal(counts.stationUndos, counts.stationPickups, 'every station pickup is checked through undo and replay');
   t.diagnostic('Deterministic mixed-route coverage: ' + JSON.stringify(counts));
 });

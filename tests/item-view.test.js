@@ -47,7 +47,7 @@ function gameFor(level = CAMPAIGN[19]) {
     selected, acted, targeted };
 }
 
-test('supplies retain the existing tile size and clear all controls on short and wide screens', () => {
+test('supplies fit the board above their controls on short and wide screens', () => {
   for (const [width, height] of [[390, 700], [452, 700], [500, 700], [390, 844]]) {
     for (const id of [4, 7, 16, 20, 121, 301, 601, 999]) {
       const game = gameFor(CAMPAIGN[id - 1]), { r, ellipses } = renderer(width, height);
@@ -58,7 +58,14 @@ test('supplies retain the existing tile size and clear all controls on short and
       drawGame(r, game, 1000);
       const layout = controlLayout(r, game), cards = r.hits.filter(hit => hit.action.itemId);
       assert.equal(cards.length, id >= 31 ? 4 : 3);
-      assert.equal(r.boardProjection.halfW, previousHalfW, `level ${id}: retain tile size at ${width}x${height}`);
+      assert.ok(r.boardProjection.halfW > 0 && r.boardProjection.halfW <= previousHalfW,
+        `level ${id}: opening the satchel allocates its own space at ${width}x${height}`);
+      const bounds = r.boardRect, projection = r.boardGeometry.projection;
+      for (const corner of projection.corners) {
+        const [x, y] = projection.toScreen(...corner);
+        assert.ok(x >= bounds.x && x <= bounds.x + bounds.w && y >= bounds.y && y <= bounds.y + bounds.h,
+          `level ${id}: the complete playable island stays above the satchel`);
+      }
       assert.equal(r.boardRect.y + r.boardRect.h + 4, layout.tray.y);
       assert.ok(cards.every(card => card.w >= 44 && card.h >= 44 && card.y + card.h < layout.hintY));
       assert.ok(layout.buttonY + 52 <= height - 8);
@@ -146,7 +153,7 @@ test('zero stock offers a voluntary video while returned stock and targetless it
     const game = gameFor(level), { r, texts } = renderer(); game.platform.kind = kind;
     game.state.inventory = { oil: 0, kite: 0, bridge: 0 }; game.state.bridges = [];
     drawItemTray(r, game, itemTrayLayout(game, null, 590));
-    const label = kind === 'browser' ? '微信内视频获取' : '看视频获取';
+    const label = kind === 'browser' ? '微信视频获取' : '看视频获取';
     assert.equal(texts.filter(text => text.value === label).length, 3);
     assert.equal(texts.filter(text => text.value === '×0').length, 3);
     assert.ok(texts.every(text => !text.value.includes('已用完')));

@@ -10,6 +10,7 @@ const STYLES = {
   light: { label: '风灯', objective: 0, icon: 'lamp', color: '#98683f', collection: true, duration: 2200 },
   bridge: { label: '纸桥碎了', icon: 'bridge', detail: '这格不能再走，回声仍能通过', duration: 1800 },
   repair: { label: '纸桥已修好', icon: 'bridge', detail: '可以再次踏上，离开后仍会碎', duration: 1800 },
+  'order-blocked': { label: '还没轮到这封信', icon: 'letter', detail: '先收发亮的编号信笺，再回来取这封', duration: 1800 },
   wait: { label: '等一拍', objective: 0, color: C.green, duration: 1300 },
   undo: { label: '已撤回', color: C.green, duration: 1300 },
   blocked: { label: '这边不通', icon: 'close', detail: '试试相邻亮格，这次没有消耗拍数', duration: 1800 }

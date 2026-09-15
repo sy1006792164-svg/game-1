@@ -58,20 +58,20 @@ function drawStampProgress(r, stamp, left, top, width) {
   r.text(stamp.stageCurrent + ' / ' + stamp.stageGoal + ' 星', right, top + 97, 11, C.muted, 'right');
 }
 
-function drawStampActions(r, game, stamp, replayLevels, left, top, width, close) {
+function drawStampActions(r, game, stamp, replayLevels, left, top, width, close, heights) {
   const replayLevel = replayLevels[0];
   if (stamp.owned) {
     r.text('每关只计最高星级，达到条件后自动收藏。', 195, top, 12, C.muted, 'center');
     r.text('重走邮路，不会减少已收获的星星。', 195, top + 20, 12, C.muted, 'center');
-    r.button('返回邮票册', left, top + 48, width, CONTROL.height, close, { style: 'primary', icon: 'stamp' });
+    r.button('返回邮票册', left, top + 48, width, heights.primary, close, { style: 'primary', icon: 'stamp' });
     return;
   }
   r.text(replayLevel ? '已送达的来信中，还有 ' + replayLevels.length + ' 封可补星。' : '通关新关卡，星星会自动计入收藏。',
     195, top, 12, C.muted, 'center');
   r.text('三星需达目标拍数，且不使用道具或续灯。', 195, top + 19, 11, C.muted, 'center');
-  r.button('去选关 · 继续旅程', left, top + 40, width, CONTROL.height,
+  r.button('去选关 · 继续旅程', left, top + 40, width, heights.primary,
     () => game.openLevelBrowser('all'), { style: 'primary', icon: 'route', size: 15 });
-  r.button(replayLevel ? '重访 ' + String(replayLevel.id).padStart(3, '0') + ' · 补星' : '暂无可补星关卡', left, top + 99, width, CONTROL.compactHeight,
+  r.button(replayLevel ? '重访 ' + String(replayLevel.id).padStart(3, '0') + ' · 补星' : '暂无可补星关卡', left, top + 48 + heights.primary, width, heights.secondary,
     () => replayLevel && game.openLevelBrowser('replay', replayLevel.id), { style: 'text', icon: 'restart', disabled: !replayLevel, size: 13 });
 }
 
@@ -79,8 +79,12 @@ function drawStampDetail(r, game, now) {
   const album = game.album(), stamps = visibleStamps(game, album);
   const index = stamps.findIndex(item => item.id === game.modal.stampId), stamp = stamps[index];
   if (!stamp) return null;
-  const artHeight = Math.min(190, Math.max(112, r.H - 466)), artWidth = artHeight * 106 / 144;
-  const x = 22, w = 346, h = artHeight + 434, y = Math.max(8, (r.H - h) / 2);
+  const touchHeight = 44 / (r.scale || 1);
+  const heights = { primary: Math.max(CONTROL.height, touchHeight), secondary: Math.max(CONTROL.compactHeight, touchHeight) };
+  // Reserve both real touch rows before sizing the artwork on compact screens.
+  const contentHeight = 339 + heights.primary + heights.secondary;
+  const artHeight = Math.min(190, Math.max(112, r.H - 32 - contentHeight)), artWidth = artHeight * 106 / 144;
+  const x = 22, w = 346, h = artHeight + contentHeight, y = Math.max(8, (r.H - h) / 2);
   const contentY = y + artHeight - 152;
   const left = x + 24, right = x + w - 24, width = w - 48;
   const filter = FILTERS.find(item => item.id === collectionFilter(game));
@@ -111,7 +115,7 @@ function drawStampDetail(r, game, now) {
 
   drawStampNote(r, stamp, left, contentY + 243, width);
   drawStampProgress(r, stamp, left, contentY + 306, width);
-  drawStampActions(r, game, stamp, replayLevels, left, contentY + 427, width, close);
+  drawStampActions(r, game, stamp, replayLevels, left, contentY + 427, width, close, heights);
   c.restore();
   return { x, y, w, h };
 }

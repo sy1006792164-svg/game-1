@@ -183,6 +183,19 @@ function drawFinish(r, type, x, y, unit, p, seed) {
   }
 }
 
+function drawOfficeOpening(r, x, y, unit, p) {
+  const c = r.ctx, reveal = ease(Math.min(1, p * 2.5));
+  c.save(); c.globalAlpha *= Math.sin(Math.PI * Math.min(1, p * 1.1)) * .82;
+  const top = y - unit * .76, height = unit * .63, width = unit * .4;
+  // The two door leaves open around the real destination, replacing its old
+  // generic confetti with a recognizable invitation to finish the route.
+  r.line([[x - width * reveal, top], [x - width * reveal, top + height], [x, top + height + unit * .1]], PALETTE.gold, 2);
+  r.line([[x + width * reveal, top], [x + width * reveal, top + height], [x, top + height + unit * .1]], PALETTE.gold, 2);
+  r.icon('letter', x, top + height * .45, unit * .3, '#fff1bd');
+  ring(r, x, y + 1, unit * (.34 + reveal * .27), .46, PALETTE.gold, 1.5);
+  c.restore();
+}
+
 function drawEventArt(r, type, x, y, unit, progress, seed, origin) {
   const p = clamp(progress);
   if (type === 'letter' || type === 'seal') drawPickup(r, type, x, y, unit, p, seed);
@@ -190,7 +203,8 @@ function drawEventArt(r, type, x, y, unit, progress, seed, origin) {
   else if (type === 'bridge' || type === 'repair') drawBridge(r, x, y, unit, p, seed, type === 'repair');
   else if (type === 'wind') drawWind(r, x, y, unit, p, origin || [x, y]);
   else if (['wait', 'echo-born', 'undo'].includes(type)) drawResonance(r, type, x, y, unit, p);
-  else if (['ready', 'win', 'fail'].includes(type)) drawFinish(r, type, x, y, unit, p, seed);
+  else if (type === 'ready') drawOfficeOpening(r, x, y, unit, p);
+  else if (['win', 'fail'].includes(type)) drawFinish(r, type, x, y, unit, p, seed);
   else if (type === 'move') {
     halo(r, x, y + 1, unit * .75, p, PALETTE.gold);
     if (r.effectsQuality !== 'low') motes(r, x, y, unit * .5, p, seed, PALETTE.gold, 'spark', 5);

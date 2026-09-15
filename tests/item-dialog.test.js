@@ -145,7 +145,7 @@ test('daily journey is a measured result button with a full target and no overla
         { text: '看看邮票册', icon: 'stamp', textOnly: true, action() {} }] };
     const bounds = h.draw(), label = `${metrics.width}x${metrics.height}/${saved}/${tutorial}`;
     const progress = h.r.hits.find(hit => hit.action === game.modal.progressAction);
-    assert.ok(progress && progress.h >= 44, label + ': daily journey uses a full touch target');
+    assert.ok(progress && progress.h * h.r.scale >= 44, label + ': daily journey uses a full screen-pixel touch target');
     assert.ok(bounds.progress, label + ': progress takes up real layout space');
     assert.ok(bounds.y >= 24 && bounds.y + bounds.h <= h.r.H - 24, label + ': panel retains safe insets');
     const lastParagraph = bounds.paragraphs.at(-1);

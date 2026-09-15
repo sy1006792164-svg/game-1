@@ -1,6 +1,6 @@
 'use strict';
 
-const PAGE_MS = 260, TOUCH_MS = 360;
+const PAGE_MS = 220, TOUCH_MS = 360;
 const clamp = value => Math.max(0, Math.min(1, value));
 const ease = value => 1 - (1 - clamp(value)) ** 3;
 const active = (now, at, duration) => Number.isFinite(at) && now >= at && now - at < duration;

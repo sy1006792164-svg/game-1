@@ -53,9 +53,12 @@ function unlockedForPlanning(level, id) {
 function preparationAdvice(level) {
   if (!level) return result(null, '先看清信笺、蓝票和邮局，给回声留出三拍。');
   const profile = level.difficulty || difficultyProfile(level) || {};
-  const preferred = profile.recommendedItem;
+  const stationItem = Object.values(level.supplies || {})[0];
+  const preferred = stationItem || profile.recommendedItem;
   const itemId = [preferred, 'oil'].find(id => unlockedForPlanning(level, id));
   if (!itemId) return result(null, profile.focus || '先掌握三拍回声，把收信与盖票串成一路。');
+  if (stationItem === itemId) return result(itemId, '沿路驿站可免费领取' + ITEMS.find(item => item.id === itemId).name +
+    '；领取不扣星，使用时不耗拍，本次最高二星。');
   if (itemId === 'bridge') return result(itemId, '先安排过桥顺序；走到断桥旁时，修桥包可修复一座。');
   if (itemId === 'kite') return result(itemId, '信笺分散；靠近两格内时，纸鸢可取一封，蓝票仍靠回声。');
   if (itemId === 'echo') return result(itemId, '先踩过蓝票，趁回声还没到时用笛提前盖好；离开后也能用，每次只盖一张。未踩过的票不能选，也不补灯火。');

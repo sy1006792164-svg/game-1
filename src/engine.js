@@ -2,6 +2,7 @@
 
 const { initialInventory, normalizeItemRewards, parseItemAction, applyItemAction } = require('./items');
 const { SUPPLY_ENERGY, RELIGHT_ACTION, normalizeSupplyPolicy } = require('./supply-rules');
+const { stationCells, collectSupply } = require('./supply-stations');
 
 const DIRECTIONS = Object.freeze({ up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] });
 const ACTIONS = Object.freeze(['up', 'down', 'left', 'right', 'wait']);
@@ -29,6 +30,7 @@ function neighbor(level, cell, direction, state) {
 
 function createState(level, itemRewards) {
   const startsOnLight = (level.lights || []).indexOf(level.start) >= 0;
+  const startsOnNextLetter = !level.letterOrder || level.letterOrder[0] === level.start;
   const state = {
     levelId: level.id,
     player: level.start,
@@ -36,16 +38,18 @@ function createState(level, itemRewards) {
     history: [level.start],
     turn: 0,
     energy: level.budget + (startsOnLight ? 3 : 0),
-    letters: (level.letters || []).filter(cell => cell !== level.start),
+    letters: (level.letters || []).filter(cell => cell !== level.start || !startsOnNextLetter),
     seals: (level.seals || []).slice(),
     lights: (level.lights || []).filter(cell => cell !== level.start),
     bridges: (level.bridges || []).slice(),
+    ...(level.supplies ? { supplies: stationCells(level) } : {}),
     inventory: initialInventory(level, itemRewards),
     itemsUsed: 0,
     status: 'playing',
     revived: false,
     reviveCount: 0
   };
+  collectSupply(level, state, []);
   if (state.player === level.exit && !state.letters.length && !state.seals.length) state.status = 'won';
   else if (state.energy <= 0) state.status = 'failed';
   return state;
@@ -81,7 +85,8 @@ function step(level, state, action, version = 2) {
     letters: state.letters.slice(),
     seals: state.seals.slice(),
     lights: state.lights.slice(),
-    bridges: (state.bridges || []).slice()
+    bridges: (state.bridges || []).slice(),
+    ...(state.supplies ? { supplies: state.supplies.slice() } : {})
   };
   const events = [{ type: action === 'wait' ? 'wait' : 'move', cell: destination }];
   // Entering a wind tile pushes once. Waiting does not re-trigger the tile.
@@ -104,8 +109,11 @@ function step(level, state, action, version = 2) {
   if (next.echo !== null) events.push({ type: 'echo', cell: next.echo });
 
   if (next.letters.indexOf(next.player) >= 0) {
-    next.letters = next.letters.filter(cell => cell !== next.player);
-    events.push({ type: 'letter', cell: next.player });
+    const expected = level.letterOrder && level.letterOrder.find(cell => next.letters.includes(cell));
+    if (!level.letterOrder || next.player === expected) {
+      next.letters = next.letters.filter(cell => cell !== next.player);
+      events.push({ type: 'letter', cell: next.player });
+    } else events.push({ type: 'order-blocked', cell: next.player, expected });
   }
   if (next.echo !== null && next.seals.indexOf(next.echo) >= 0) {
     next.seals = next.seals.filter(cell => cell !== next.echo);
@@ -116,6 +124,7 @@ function step(level, state, action, version = 2) {
     next.energy += 3;
     events.push({ type: 'light', cell: next.player });
   }
+  collectSupply(level, next, events);
   finishAction(level, next, events);
   return { state: next, moved: true, events };
 }

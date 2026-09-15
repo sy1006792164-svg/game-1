@@ -1,7 +1,9 @@
 'use strict';
+const { drawArtCourier } = require('./art-sprites');
 
 // The same tiny sculpted courier lives in the title scene and every real route.
 function drawCourier(r, x, y, size, ghost, pose = {}) {
+  if (drawArtCourier(r, x, y, size, ghost, pose)) return;
   const c = r.ctx, stride = pose.stride || 0, cloak = pose.cloak || 0;
   const scale = size / 40, groundOffset = size > 0 ? (pose.lift || 0) / scale : 0;
   const oval = (cx, cy, rx, ry, color) => {

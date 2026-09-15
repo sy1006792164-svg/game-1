@@ -4,6 +4,7 @@ const { CAMPAIGN, getLegacyLevel } = require('./levels');
 const { difficultyProfile } = require('./difficulty');
 const { preparationAdvice, supplyAdvice } = require('./supply-advice');
 const { ITEMS } = require('./items');
+const { pendingSupplyCells } = require('./supply-stations');
 const { C } = require('./theme');
 
 // Every entry returns to the existing campaign; there is no separate score,
@@ -23,7 +24,9 @@ function openRoutePlan(game, level) {
   const videoAvailable = !!(game.platform && game.platform.kind === 'wechat' && game.ads &&
     typeof game.ads.isConfigured === 'function' && game.ads.isConfigured());
   const heldSupply = item && current && game.state.inventory && game.state.inventory[item.id] > 0;
+  const stationAvailable = item && pendingSupplyCells(level, current ? game.state : null, item.id).length > 0;
   const supplyDetail = heldSupply ? '本次路线已有 ' + game.state.inventory[item.id] + ' 份，无需另看视频。' :
+    stationAvailable ? '本关补给驿站可免费领取 1 份；先走到补给箱，再点道具使用。' :
     videoAvailable ? '需要时自愿完整看视频获得 1 份，只用于本次路线；未看完不发放。' :
       '当前环境没有可用的视频补给，可直接无道具出发。';
   const credited = game.journey().creditedLevelIds.includes(level.id);
@@ -40,10 +43,13 @@ function openRoutePlan(game, level) {
     return true;
   };
   game.pendingAction = null; game.cancelItem(); game.pointer = null; game.stopListScrolling();
-  game.modal = { kind: 'route-plan', title: '第 ' + level.id + ' 封 · ' + difficulty.name,
+  game.modal = { kind: 'route-plan', title: '第 ' + level.id + ' 封 · ' + (level.experience ? level.experience.phaseName : difficulty.name),
     sections: [
       { title: level.title, icon: 'route', color: C.green,
         text: difficulty.summary + '\n起始灯火 ' + level.budget + ' 拍 · 可撤回 ' + level.undo + ' 次。\n' + difficulty.focus },
+      ...(level.experience && level.experience.features || []).map(feature => ({
+        title: feature.name, icon: feature.id === 'orderedLetters' ? 'letter' : 'lamp', color: C.green, text: feature.description
+      })),
       { title: '这次投递的收获', icon: 'stamp', color: C.goldText,
         text: (credited ? '本关今日邮程已记；仍可重投补星。' : '今日首次送达本关，获得 ' + difficulty.journeyPoints + ' 邮程。') +
           '\n星光同时用于邮票收藏与好友排行。\n道具或续灯助你送达，最高二星；' + level.par + ' 拍内无辅助送达可摘三星。' },
@@ -52,7 +58,7 @@ function openRoutePlan(game, level) {
       ...(savedAtOpen && savedAtOpen.levelId !== level.id ? [{ title: '出发前的存档提醒', icon: 'route', color: C.muted,
         text: '第 ' + savedAtOpen.levelId + ' 封还在投递中。开始这封信会替换该路线，原路线的视频补给随之清空。已有通关成绩保留。' }] : [])
     ], lines: [], buttons: [
-      { text: current || savedAtOpen && savedAtOpen.levelId === level.id ? '继续投递' : '出发 · 挑战这封信', primary: true, action: begin },
+      { text: current || savedAtOpen && savedAtOpen.levelId === level.id ? '继续投递' : '出发 · 送这封信', primary: true, action: begin },
       ...(item && (videoAvailable || heldSupply) ? [{ text: '查看' + item.name + (heldSupply ? ' · 已有补给' : ' · 视频补给'), icon: item.icon, action: () => {
         if (!begin()) return;
         if (game.guideStep()) { game.toast('先完成机关引导，再点道具查看补给'); return; }
@@ -68,7 +74,8 @@ function openJourney(game) {
   if (game.busy || game.hidden || game.startupActive()) return false;
   const old = game.modal, journey = game.journey(), album = game.album();
   game.pendingAction = null; game.cancelItem(); game.pointer = null; game.stopListScrolling();
-  game.modal = { kind: 'journey', title: journey.done ? '今日邮程已盖章' : '今日邮程 · ' + journey.points + ' / ' + journey.target,
+  game.modal = { kind: 'journey', journeyProgress: { points: journey.points, target: journey.target, done: journey.done },
+    title: journey.done ? '今日邮程已盖章' : '今日邮程 · ' + journey.points + ' / ' + journey.target,
     sections: [
       { title: '累计 ' + journey.earnedDays + ' 枚日邮戳', icon: 'stamp', color: C.goldText,
         text: '每天集满 6 邮程记一枚日邮戳，累计保留。\n每关每日计一次，难关贡献更多；使用视频道具送达也计入。' },

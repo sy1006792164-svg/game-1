@@ -1,6 +1,7 @@
 'use strict';
 
 const { windState } = require('./ambient-effects');
+const { drawArtSprite, drawPaving } = require('./art-sprites');
 
 // The miniature uses the same two-to-one perspective as the playable courtyard.
 // These buildings are home-screen scenery, never part of a puzzle's hit geometry.
@@ -83,6 +84,11 @@ function roof(r, u, v, width, length, z, height, detail = true) {
 }
 
 function gardenTree(r, u, v, size, now, color = '#7ea88a', sharedWind) {
+  if (r.artAssets && r.artAssets.ready) {
+    const [x, y] = point(u, v), c = r.ctx;
+    c.save(); c.translate(x, y); c.rotate(r.reducedMotion || r.effectsQuality === 'low' ? 0 : Math.sin(now / 2100 + u) * .015);
+    drawArtSprite(r, 'tree', 0, 0, size * .98, size * 1.1); c.restore(); return;
+  }
   const quiet = r.reducedMotion || r.effectsQuality === 'low';
   if (quiet) now = 0;
   const wind = sharedWind || windState(now, quiet), [x, y] = point(u, v);
@@ -113,6 +119,10 @@ function drawHomeArchitecture(r, now, options = {}) {
   const quiet = options.reducedMotion || r.reducedMotion || low;
   if (quiet) now = 0;
   const wind = windState(now, quiet);
+  if (r.artAssets && r.artAssets.ready) {
+    drawStorybookGarden(r, now, quiet);
+    return;
+  }
   const stone = (u, v, width, length, z, height, colors) => slab(r, u, v, width, length, z, height, colors, !low);
   // A stone garden plinth, with continuous masonry courses and a thin grass cap.
   ellipse(r, 20, 119, 123, 13, '#5b817012');
@@ -206,6 +216,55 @@ function drawHomeArchitecture(r, now, options = {}) {
     r.line([[x, y], [x - 2, y + drop], [x + 1, y + drop + 5]], '#82a281', 1.5);
     ellipse(r, x + 1, y + drop - 2, 3, 1.5, '#91ae84');
   });
+}
+
+function drawGardenBase(r) {
+  ellipse(r, 0, 111, 135, 12, '#476a501c');
+  slab(r, -82, -68, 158, 145, -28, 29, { front: '#aabb91', side: '#7e9477', top: '#b7c69b' });
+  slab(r, -84, -70, 162, 149, 1, 4, { front: '#ecdfb9', side: '#bdc598', top: '#d7d9af' });
+  for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) {
+    const [x, y] = point(-32 + col * 20, -6 + row * 20, 6);
+    polygon(r, [[x, y - 9], [x + 19, y], [x, y + 9], [x - 19, y]], (row + col) % 2 ? '#f3e8cc' : '#e8dcc0');
+    drawPaving(r, x, y, 19, 9);
+  }
+  drawArtSprite(r, 'tree', -106, -7, 64, 82);
+  drawArtSprite(r, 'tree', -72, -35, 55, 73);
+  drawArtSprite(r, 'office', 34, 9, 168, 171);
+  drawArtSprite(r, 'rocks', -119, 27, 40, 31);
+  drawArtSprite(r, 'flowers', 105, 40, 33, 35);
+  drawArtSprite(r, 'sign', -88, 68, 36, 40);
+  drawArtSprite(r, 'supply', -63, 37, 32, 30);
+  drawArtSprite(r, 'flowers', 8, 76, 28, 30);
+}
+
+function drawStorybookGarden(r, now, quiet) {
+  // One bounded 720x600 cache (~1.65 MiB), shared across startup/home frames.
+  if (!r.homeArtCache && r.createSurface) {
+    const surface = r.createSurface();
+    if (surface) {
+      surface.width = 720; surface.height = 600;
+      const ctx = surface.getContext('2d');
+      if (ctx) {
+        const painter = Object.create(r); painter.ctx = ctx;
+        ctx.setTransform(2, 0, 0, 2, 360, 344);
+        drawGardenBase(painter); r.homeArtCache = surface;
+      }
+    }
+  }
+  if (r.homeArtCache) r.ctx.drawImage(r.homeArtCache, -180, -172, 360, 300);
+  else drawGardenBase(r);
+  const breath = quiet ? .5 : .5 + Math.sin(now / 1000) * .5;
+  r.ctx.save(); r.ctx.globalAlpha *= .11 + breath * .045;
+  ellipse(r, 91, 40, 19, 7, '#efc26e'); r.ctx.restore();
+  drawArtSprite(r, 'lantern', 94, 43, 28, 51);
+  gardenTree(r, 63, -59, 54, now);
+  if (!quiet) {
+    for (let i = 0; i < 4; i++) {
+      const phase = (now / 5200 + i * .27) % 1;
+      r.ctx.save(); r.ctx.globalAlpha *= Math.sin(phase * Math.PI) * .5;
+      r.circle(87 + Math.sin(phase * 5 + i) * 19, 23 - phase * 35, 1, '#ffdb8a'); r.ctx.restore();
+    }
+  }
 }
 
 module.exports = { drawHomeArchitecture, gardenTree };

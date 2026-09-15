@@ -8,6 +8,7 @@ const { openStampDetail } = require('./stamp-detail-view');
 const { STAMPS } = require('./stamp-album');
 const { FILTERS, collectionFilter, visibleStamps, setCollectionFilter } = require('./stamp-collection');
 const { quiet, drawScrollEdges, drawProgressGlint, drawLocatedCorners } = require('./page-feedback');
+const { drawPostalPaper, drawPostalRules } = require('./postal-paper');
 
 const locatedStamps = new WeakMap();
 
@@ -16,7 +17,7 @@ function locateNextStamp(game) {
   if (!album.next || !setCollectionFilter(game, collectionFilter(game) === 'owned' ? 'all' : collectionFilter(game))) return false;
   const stamps = visibleStamps(game, album), index = stamps.findIndex(stamp => stamp.id === album.next.id);
   const scroll = game.collectionScroll;
-  scroll.setBounds(collectionLayout(game.renderer.H, stamps.length).maxScroll);
+  scroll.setBounds(collectionLayout(game.renderer.H, stamps.length, game.renderer.scale || 1).maxScroll);
   scroll.offset = Math.min(scroll.max, Math.floor(index / 3) * 160);
   scroll.activeAt = game.platform.now();
   // Locating is an immediate jump to one collectible, so don't replay the
@@ -29,7 +30,7 @@ function locateNextStamp(game) {
 
 function drawSummary(r, game, album) {
   const next = album.next, contentX = 151, contentWidth = 195, contentRight = contentX + contentWidth;
-  r.panel(24, 94, 342, 114, { fill: C.panel, stroke: C.line, radius: 16, flat: true });
+  drawPostalPaper(r, 24, 94, 342, 114);
   r.text('已收藏', 42, 116, 11, C.muted);
   r.text(album.ownedCount, 41, 146, 28, C.ink, 'left', '600');
   r.text('/ ' + album.stamps.length, 81, 149, 13, C.muted);
@@ -91,18 +92,19 @@ function drawStamp(r, game, stamp, rect, viewport, now) {
   r.hit(x, y, w, h, action, (px, py) => insideRect(viewport, px, py));
 }
 
-function collectionLayout(height, count = STAMPS.length) {
+function collectionLayout(height, count = STAMPS.length, scale = 1) {
   if (!Number.isInteger(count) || count < 0) count = STAMPS.length;
-  const viewport = { x: 18, y: 312, w: 354, h: Math.max(160, height - 340) };
+  const touchHeight = Math.max(CONTROL.compactHeight, 44 / scale), extra = touchHeight - CONTROL.compactHeight;
+  const viewport = { x: 18, y: 312 + extra * 2, w: 354, h: Math.max(160, height - 340 - extra * 2) };
   const rows = Math.ceil(count / 3), contentHeight = rows * 160 + 44;
-  return { viewport, contentHeight, maxScroll: Math.max(0, contentHeight - viewport.h) };
+  return { viewport, touchHeight, journeyY: 265 + extra, contentHeight, maxScroll: Math.max(0, contentHeight - viewport.h) };
 }
 
-function drawFilters(r, game, album) {
+function drawFilters(r, game, album, height) {
   const current = collectionFilter(game);
   FILTERS.forEach((filter, index) => {
     const count = filter.id === 'all' ? album.stamps.length : filter.id === 'owned' ? album.ownedCount : album.stamps.length - album.ownedCount;
-    r.button(filter.label + ' ' + count, 24 + index * 116, 217, 110, CONTROL.compactHeight,
+    r.button(filter.label + ' ' + count, 24 + index * 116, 217, 110, height,
       () => setCollectionFilter(game, filter.id), { style: 'tab', selected: current === filter.id, size: 13 });
   });
 }
@@ -119,7 +121,7 @@ function drawEmpty(r, game, viewport) {
 function drawCollection(r, game) {
   const album = game.album(), scroll = game.collectionScroll, stamps = visibleStamps(game, album);
   const now = Number.isFinite(r.pageNow) ? r.pageNow : r.now;
-  const { viewport, contentHeight, maxScroll } = collectionLayout(r.H, stamps.length);
+  const { viewport, touchHeight, journeyY, contentHeight, maxScroll } = collectionLayout(r.H, stamps.length, r.scale || 1);
   r.collectionRect = viewport;
   scroll.setBounds(maxScroll);
   if (r.reducedMotion && !scroll.touching) {
@@ -129,15 +131,18 @@ function drawCollection(r, game) {
   scroll.update(now);
   r.header('沿途邮票册', '把每一次抵达，慢慢收集起来', () => game.home());
   drawSummary(r, game, album);
-  drawFilters(r, game, album);
-  r.text('旅程纪念', 24, 287, 16, C.ink, 'left', '600');
+  drawFilters(r, game, album, touchHeight);
+  r.text('旅程纪念', 24, journeyY + touchHeight / 2, 16, C.ink, 'left', '600');
   if (typeof game.journey === 'function') {
     const journey = game.journey();
-    r.button('日邮戳 ' + journey.earnedDays + ' · 今日邮程', 190, 265, 176, CONTROL.compactHeight,
+    r.button('日邮戳 ' + journey.earnedDays + ' · 今日邮程', 190, journeyY, 176, touchHeight,
       () => game.openJourney(), { style: 'text', size: 12 });
-  } else r.text('轻触邮票 · 读纪念短笺', 365, 287, 11, C.muted, 'right');
+  } else r.text('轻触邮票 · 读纪念短笺', 365, journeyY + touchHeight / 2, 11, C.muted, 'right');
   const c = r.ctx;
   c.save(); c.beginPath(); c.rect(viewport.x, viewport.y, viewport.w, viewport.h); c.clip();
+  r.round(viewport.x + 1, viewport.y, viewport.w - 2, viewport.h, 13, '#eaddbc80');
+  r.round(viewport.x + 6, viewport.y + 1, 1, viewport.h - 2, .5, '#ad805e55');
+  r.round(viewport.x + viewport.w - 7, viewport.y + 1, 1, viewport.h - 2, .5, '#ad805e55');
   const first = Math.max(0, Math.floor((scroll.offset - 6) / 160)) * 3;
   const end = Math.min(stamps.length, (Math.floor((scroll.offset + viewport.h - 6) / 160) + 1) * 3);
   for (let index = first; index < end; index++) {
@@ -146,7 +151,12 @@ function drawCollection(r, game) {
     const rect = { x: (390 - (count * 106 + (count - 1) * 12)) / 2 + index % 3 * 118, y: viewport.y + 6 + row * 160 - scroll.offset, w: 106, h: 144 };
     if (rect.y + rect.h > viewport.y && rect.y < viewport.y + viewport.h) drawStamp(r, game, stamp, rect, viewport, now);
   }
-  if (stamps.length) r.text('每一次抵达，都成为珍藏。', 195, viewport.y + contentHeight - 17 - scroll.offset, 11, C.muted, 'center');
+  if (stamps.length) {
+    const footerY = viewport.y + contentHeight - 17 - scroll.offset;
+    drawPostalRules(r, 70, footerY - 5, 28);
+    drawPostalRules(r, 294, footerY - 5, 28);
+    r.text('每一次抵达，都成为珍藏。', 195, footerY, 11, C.muted, 'center');
+  }
   else drawEmpty(r, game, viewport);
   c.restore();
   drawScrollEdges(r, viewport, scroll);

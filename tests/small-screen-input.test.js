@@ -12,6 +12,7 @@ const { MOVE_MS } = require('../src/motion');
 const { captureBoardTap } = require('../src/board-input');
 const { createProjection } = require('../src/board-projection');
 const { createPlatform } = require('../src/platform');
+const { PREVIEW_HOLD_MS } = require('../src/action-preview');
 
 const mainPath = path.join(__dirname, '../src/main.js');
 const actualRequire = createRequire(mainPath);
@@ -29,9 +30,16 @@ function harness(metrics) {
   } });
   const platform = {
     kind: 'wechat', canvas: { getContext: () => context }, wx: {},
+    createImage() {
+      return { set src(file) {
+        const png = fs.readFileSync(path.join(__dirname, '..', file));
+        this.width = png.readUInt32BE(16); this.height = png.readUInt32BE(20); this.onload();
+      } };
+    },
     storage: { get: key => data.get(key), set: (key, value) => data.set(key, value), remove: key => data.delete(key) },
     resize: () => metrics, now: () => now, raf: () => 1, cancelRaf: noop, vibrate: noop,
-    onResize: fn => { callbacks.resize = fn; }, onPointer: noop, onKey: noop, onHide: noop, onShow: noop,
+    onResize: fn => { callbacks.resize = fn; }, onPointer: noop, onKey: fn => { callbacks.key = fn; },
+    onHide: fn => { callbacks.hide = fn; }, onShow: fn => { callbacks.show = fn; },
     onAudioInterruptionBegin: noop, onAudioInterruptionEnd: noop,
   };
   const module = { exports: {} };
@@ -78,6 +86,130 @@ test('small-screen finger jitter selects the pressed legal tile across redraws a
     assert.deepEqual(h.game.actions, [action], `${metrics.width}x${metrics.height}@${metrics.pixelRatio} level ${id}, zoom ${zoom}`);
     assert.deepEqual(h.game.state, replay(h.game.level, [action]));
     assert.deepEqual([h.game.camera.panX, h.game.camera.panY], beforePan);
+  }
+});
+
+test('holding a legal move previews its real result without changing or saving the route', t => {
+  for (const metrics of [screens[0], screens[4]]) {
+    const h = harness(metrics); t.after(() => h.destroy()); h.start(CAMPAIGN[19]);
+    const game = h.game, action = game.level.solution[0];
+    const cell = neighbor(game.level, game.state.player, action, game.state), [x, y] = h.devicePoint(cell);
+    const state = game.state, run = game.store.loadRun(), revision = game.store.revision(), cues = game.cueCount;
+    h.game.pointerEvent(x, y, 'start'); h.advance(PREVIEW_HOLD_MS - 1);
+    assert.equal(game.actionPreview, null);
+    h.advance(1);
+    assert.equal(game.actionPreview.action, action);
+    assert.deepEqual(game.actionPreview.state, replay(game.level, [action]));
+    assert.equal(game.state, state);
+    assert.deepEqual(game.actions, []);
+    assert.deepEqual(game.store.loadRun(), run);
+    assert.equal(game.store.revision(), revision);
+    assert.equal(game.cueCount, cues);
+    game.pointerEvent(x, y, 'end');
+    assert.equal(game.actionPreview, null);
+    assert.equal(game.state, state, 'releasing a preview never commits it');
+    game.pointerEvent(x, y, 'start'); game.pointerEvent(x, y, 'end');
+    assert.deepEqual(game.actions, [action], 'a separate short press commits exactly once');
+  }
+});
+
+test('long presses on the wait button and player tile preview a beat without spending it', t => {
+  for (const target of ['button', 'player']) {
+    const h = harness(screens[4]); t.after(() => h.destroy()); h.start(CAMPAIGN[0]);
+    const game = h.game, state = game.state, r = game.renderer;
+    const hit = r.hits.find(entry => entry.action.previewAction === 'wait');
+    const [x, y] = target === 'player' ? h.devicePoint(state.player)
+      : [(hit.x + hit.w / 2) * r.scale + r.ox, (hit.y + hit.h / 2) * r.scale + r.oy];
+    game.pointerEvent(x, y, 'start'); h.advance(PREVIEW_HOLD_MS);
+    assert.equal(game.actionPreview.action, 'wait');
+    assert.equal(game.actionPreview.state.turn, state.turn + 1);
+    assert.equal(game.actionPreview.state.energy, state.energy - 1);
+    game.pointerEvent(x, y, 'end');
+    assert.equal(game.state, state);
+    assert.deepEqual(game.actions, []);
+  }
+});
+
+test('hold cancellation cannot turn into an action after drag, cancel, resize, pause, hide, restart or a second contact', t => {
+  for (const cancel of ['drag', 'cancel', 'resize', 'pause', 'hide', 'restart', 'second-contact']) {
+    const h = harness(screens[4]); t.after(() => h.destroy()); h.start(CAMPAIGN[19]);
+    const game = h.game, cell = neighbor(game.level, game.state.player, game.level.solution[0], game.state);
+    const [x, y] = h.devicePoint(cell);
+    game.pointerEvent(x, y, 'start'); h.advance(PREVIEW_HOLD_MS);
+    assert.ok(game.actionPreview, cancel);
+    if (cancel === 'drag') game.pointerEvent(x + 30, y, 'move');
+    else if (cancel === 'cancel') game.pointerEvent(x, y, 'cancel');
+    else if (cancel === 'resize') h.callbacks.resize();
+    else if (cancel === 'pause') game.pause();
+    else if (cancel === 'hide') h.callbacks.hide();
+    else if (cancel === 'restart') game.start(game.level);
+    else game.pointerEvent(x + 2, y, 'start');
+    game.pointerEvent(x, y, 'end');
+    assert.equal(game.actionPreview, null, cancel);
+    assert.deepEqual(game.actions, [], cancel);
+  }
+});
+
+test('the hold threshold still cancels on release when no frame was drawn during the press', t => {
+  const h = harness(screens[4]); t.after(() => h.destroy()); h.start(CAMPAIGN[0]);
+  const [x, y] = h.devicePoint(h.game.state.player + 1);
+  h.game.pointerEvent(x, y, 'start'); h.draw(PREVIEW_HOLD_MS);
+  h.game.pointerEvent(x, y, 'end');
+  assert.deepEqual(h.game.actions, []);
+});
+
+test('holding wait during a move previews the settled action and never queues another beat', t => {
+  const h = harness(screens[4]); t.after(() => h.destroy()); h.start(CAMPAIGN[0]);
+  h.game.act('right'); h.draw(10);
+  const game = h.game, state = game.state, r = game.renderer;
+  const hit = r.hits.find(entry => entry.action.previewAction === 'wait');
+  const x = (hit.x + hit.w / 2) * r.scale + r.ox, y = (hit.y + hit.h / 2) * r.scale + r.oy;
+  game.pointerEvent(x, y, 'start'); h.advance(PREVIEW_HOLD_MS);
+  assert.equal(game.actionPreview.action, 'wait');
+  game.pointerEvent(x, y, 'end'); h.advance(MOVE_MS);
+  assert.equal(game.state, state);
+  assert.equal(game.pendingAction, null);
+  assert.deepEqual(game.actions, ['right']);
+});
+
+test('a buffered wall collision cannot turn a held neighbor into a short tap when the state stays unchanged', t => {
+  for (const drawBuffer of [true, false]) {
+    const h = harness(screens[4]); t.after(() => h.destroy()); h.start(CAMPAIGN[0]);
+    const game = h.game;
+    game.act('right'); h.callbacks.key('ArrowUp'); h.draw(0);
+    assert.equal(game.pendingAction.action, 'up', 'the wall direction is buffered during the arrival animation');
+    const state = game.state, saved = game.store.loadRun();
+    const [x, y] = h.devicePoint(state.player + 1);
+    game.pointerEvent(x, y, 'start');
+    if (drawBuffer) {
+      h.advance(MOVE_MS);
+      assert.equal(game.pendingAction, null);
+      assert.equal(game.state, state, 'the buffered collision spends no turn');
+      h.advance(PREVIEW_HOLD_MS - MOVE_MS);
+      assert.equal(game.actionPreview.action, 'right');
+    } else h.draw(PREVIEW_HOLD_MS);
+    game.pointerEvent(x, y, 'end');
+    h.advance(MOVE_MS);
+    assert.equal(game.actionPreview, null);
+    assert.equal(game.state, state, 'releasing the long press cannot move after an unchanged buffered state');
+    assert.deepEqual(game.actions, ['right']);
+    assert.deepEqual(game.store.loadRun(), saved);
+  }
+});
+
+test('a legal hit held while busy cannot submit after availability returns without changing state', t => {
+  for (const drawBusyFrame of [true, false]) {
+    const h = harness(screens[4]); t.after(() => h.destroy()); h.start(CAMPAIGN[0]);
+    const game = h.game, state = game.state, [x, y] = h.devicePoint(state.player + 1);
+    game.busy = true;
+    game.pointerEvent(x, y, 'start');
+    if (drawBusyFrame) h.advance(50);
+    game.busy = false;
+    h.advance(PREVIEW_HOLD_MS);
+    game.pointerEvent(x, y, 'end');
+    assert.equal(game.state, state);
+    assert.deepEqual(game.actions, []);
+    assert.equal(game.actionPreview, null);
   }
 });
 
@@ -131,7 +263,7 @@ test('short presses on moving mail keep its cell when the prop bobs out from und
   const prop = r.hits.filter(hit => hit.action.boardCell === cell).at(-1);
   assert.ok(prop);
   const x = (prop.x + prop.w / 2) * r.scale + r.ox, y = (prop.y + prop.h / 2) * r.scale + r.oy;
-  h.game.pointerEvent(x, y, 'start'); h.draw(400); h.game.pointerEvent(x, y - 3, 'end');
+  h.game.pointerEvent(x, y, 'start'); h.draw(200); h.game.pointerEvent(x, y - 3, 'end');
   assert.equal(h.game.state.player, cell);
   assert.deepEqual(h.game.actions, ['right', 'right', 'right']);
 });

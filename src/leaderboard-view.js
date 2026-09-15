@@ -3,6 +3,7 @@
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { decorativeTime, quiet } = require('./page-feedback');
+const { drawPostalPaper, drawPostmark, drawPostalRules } = require('./postal-paper');
 
 const HEADER_ACTION_X = 322;
 const CONTENT_Y = 94;
@@ -26,16 +27,17 @@ function drawIntro(r, game) {
 
 function drawStatusCard(r, box) {
   const height = Math.min(446, box.h), compact = height < 380;
-  r.panel(box.x, box.y, box.w, height, { fill: C.panel, stroke: C.line, radius: 22 });
+  drawPostalPaper(r, box.x, box.y, box.w, height, { radius: 22 });
   if (!compact) {
-    r.circle(195, box.y + 49, 29, C.soft);
-    r.actionIcon('community', 195, box.y + 49, C.green);
-    r.icon('star', 235, box.y + 61, 8, C.gold);
+    r.circle(195, box.y + 49, 29, '#eee4c9');
+    drawPostmark(r, 195, box.y + 49, 52, 'ranking', C.green);
   }
-  const buttonY = box.y + Math.min(280, height - 126);
+  const touchHeight = 44 / (r.scale || 1);
+  const primaryHeight = Math.max(48, touchHeight), secondaryHeight = Math.max(CONTROL.compactHeight, touchHeight);
+  const buttonY = box.y + Math.min(280, height - primaryHeight - secondaryHeight - 34);
   return { titleY: box.y + (compact ? 28 : 105), subtitleY: box.y + (compact ? 58 : 137),
     detailY: box.y + (compact ? 80 : 159), messageY: box.y + (compact ? 108 : 193),
-    buttonY, secondaryY: buttonY + 60, noteY: box.y + height - 30 };
+    buttonY, primaryHeight, secondaryHeight, secondaryY: buttonY + primaryHeight + 12, noteY: box.y + height - 30 };
 }
 
 function drawMessage(r, message, ui, warning) {
@@ -75,7 +77,7 @@ function drawRankPlaceholder(r, game, box) {
   const count = Math.min(3, Math.max(0, Math.floor((box.h - heroH - 52 - 20) / stride)));
   for (let i = 0; i < count; i++) {
     const y = box.y + heroH + 52 + i * stride;
-    r.panel(box.x, y, box.w, stride - 8, { fill: C.panel, stroke: C.line, radius: 13, flat: true });
+    drawPostalPaper(r, box.x, y, box.w, stride - 8, { radius: 13, binding: false });
     r.circle(49, y + (stride - 8) / 2, 17, C.soft);
     drawSkeletonLine(r, 80, y + 20, 116, 7, i * 170);
     drawSkeletonLine(r, 80, y + 38, 73, 6, i * 170 + 80);
@@ -87,6 +89,7 @@ function drawRankPlaceholder(r, game, box) {
 function drawFriends(r, game, box) {
   const friend = game.friendLeaderboard, state = friend.getState();
   if (state.status === 'ready' || state.status === 'preview') {
+    r.round(box.x - 3, box.y - 3, box.w + 6, box.h + 6, 19, '#efe5cb', '#c8b792');
     friend.resize({ width: box.w, height: box.h, pixelRatio: (game.metrics.pixelRatio || 1) * r.scale });
     friend.draw(r.ctx, box.x, box.y, box.w, box.h);
     // The host forwards complete gestures; scrolling and tap recognition both
@@ -126,11 +129,11 @@ function drawAuthorization(r, game, box, state) {
 
   auth.updateButton(null);
   if (!unavailable && ['idle', 'denied', 'error'].includes(state.status)) {
-    r.button(state.status === 'error' ? '重试' : '确认并查看好友榜', 55, ui.buttonY, 280, 48, () => auth.open(), { style: 'primary' });
+    r.button(state.status === 'error' ? '重试' : '确认并查看好友榜', 55, ui.buttonY, 280, ui.primaryHeight, () => auth.open(), { style: 'primary' });
   }
   if (!unavailable) {
-    r.button('隐私保护指引', 45, ui.secondaryY, 144, 44, () => auth.openContract(), { style: 'text', size: 12 });
-    r.button('暂不授权', 201, ui.secondaryY, 144, 44, () => game.home(), { style: 'text', size: 12 });
+    r.button('隐私保护指引', 45, ui.secondaryY, 144, ui.secondaryHeight, () => auth.openContract(), { style: 'text', size: 12 });
+    r.button('暂不授权', 201, ui.secondaryY, 144, ui.secondaryHeight, () => game.home(), { style: 'text', size: 12 });
   } else r.label('星光与本地进度，会留在你的旅途中', 195, ui.noteY, 306, 11, C.muted, 'center');
   drawFooter(r, '拒绝授权不影响单人游玩与本地存档');
 }
@@ -138,6 +141,7 @@ function drawAuthorization(r, game, box, state) {
 function drawLeaderboard(r, game) {
   drawIntro(r, game);
   const box = leaderboardRect(r.H);
+  drawPostalRules(r, 337, box.y - 16, 24);
   const state = game.rankingAuthorization.getState();
   if (!state.enabled && !state.canDisplay) {
     if (['privacy', 'authorizing', 'loading'].includes(state.status)) return drawRankPlaceholder(r, game, box);

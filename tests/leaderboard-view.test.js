@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { drawLeaderboard, leaderboardRect } = require('../src/leaderboard-view');
 const { CONTROL } = require('../src/controls');
+const { Renderer } = require('../src/renderer');
 
 function harness(options = {}) {
   const calls = [], events = [], hits = [], buttons = [];
@@ -63,6 +64,37 @@ test('privacy consent uses the game action without creating an avatar or nicknam
   h.buttons.find(button => button.label === '隐私保护指引').action();
   h.buttons.find(button => button.label === '暂不授权').action();
   assert.deepEqual(h.events.slice(-3), [['authorize'], ['contract'], ['home']]);
+});
+
+test('ranking consent action rows keep their real screen-pixel targets separate on small screens', () => {
+  for (const [H, scale] of [[490, .6], [700, 496 / 700], [700, .6], [844, 1]]) {
+    for (const status of ['idle', 'denied', 'error']) {
+      const h = harness({ H, scale, authorization: { enabled: false, status } });
+      const noop = () => {};
+      const ctx = new Proxy({ globalAlpha: 1, font: '14px sans-serif' }, {
+        get(target, key) {
+          if (key in target) return target[key];
+          if (key === 'measureText') return value => ({ width: String(value).length * 7 });
+          return noop;
+        }
+      });
+      const r = new Renderer({ getContext: () => ctx });
+      Object.assign(r, { H, scale, now: 1000, reducedMotion: true, effectsQuality: 'low' });
+      drawLeaderboard(r, h.game);
+      const primary = r.hits.find(hit => hit.label === (status === 'error' ? '重试' : '确认并查看好友榜'));
+      const secondary = r.hits.filter(hit => ['隐私保护指引', '暂不授权'].includes(hit.label));
+      assert.equal(secondary.length, 2);
+      assert.ok(secondary.every(hit => primary.y + primary.h <= hit.y), 'consent and secondary targets cannot intercept the same tap');
+      assert.ok(secondary[0].x + secondary[0].w <= secondary[1].x);
+      const box = leaderboardRect(H);
+      for (const hit of [primary, ...secondary]) {
+        assert.ok(hit.w * scale >= 44 - 1e-8 && hit.h * scale >= 44 - 1e-8);
+        assert.ok(hit.y >= box.y && hit.y + hit.h <= box.y + Math.min(446, box.h), 'expanded target remains inside the status card');
+      }
+      primary.action(); secondary.forEach(hit => hit.action());
+      assert.deepEqual(h.events.slice(-3), [['authorize'], ['contract'], ['home']]);
+    }
+  }
 });
 
 test('permission checks and loading use the normal ranking skeleton without another authorization waiting card', () => {

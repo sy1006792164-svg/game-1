@@ -3,6 +3,7 @@
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { togglePosition } = require('./ui-motion');
+const { drawPostalPaper, drawPostalRules } = require('./postal-paper');
 
 const ROWS = Object.freeze([
   Object.freeze({ key: 'sound', title: '操作音效', detail: '移动、收集与结果提示音' }),
@@ -56,7 +57,7 @@ function drawSettingGroup(r, game, title, rows, settings, y) {
   const height = entries.reduce((total, entry) => total + entry.height, 0);
   r.text(title, 42, y + 10, 12, C.muted, 'left', '600');
   let rowY = y + 28;
-  r.panel(24, rowY, 342, height, { fill: C.panel, stroke: C.line, radius: 13, flat: true });
+  drawPostalPaper(r, 24, rowY, 342, height, { radius: 13 });
   entries.forEach((entry, index) => {
     if (index) r.round(42, rowY, 306, .7, 0, C.line);
     drawToggle(r, game, entry, rowY);
@@ -80,7 +81,8 @@ function drawSettings(r, game) {
 
   const lines = r.wrapLines(storageMessage(game), 306, 12);
   const panelH = 48 + lines.length * 19;
-  r.panel(24, y, 342, panelH, { fill: C.raised, stroke: C.line, radius: 13, flat: true });
+  drawPostalPaper(r, 24, y, 342, panelH, { tone: 'moss', radius: 13 });
+  drawPostalRules(r, 316, y + 16, 24);
   r.text('本机数据', 42, y + 21, 13, C.ink, 'left', '600');
   lines.forEach((line, index) => r.text(line, 42, y + 47 + index * 19, 12, C.muted));
   r.button('清除这台设备的数据', 24, y + panelH + 10, 342, CONTROL.compactHeight,

@@ -8,6 +8,16 @@ const project = JSON.parse(read('project.config.json')), game = JSON.parse(read(
 const { estimatePackageSources, packageEstimateLines } = require('./package-size');
 const packageEstimate = estimatePackageSources(root, project, game);
 const includedFiles = new Set(packageEstimate.packages.flatMap(pkg => pkg.files));
+const { ART_FILE, ART_SIZE, ART_FRAMES, ART_MEMORY_LIMIT } = require('../src/art-assets');
+const artwork = fs.existsSync(path.join(root, ART_FILE)) ? fs.readFileSync(path.join(root, ART_FILE)) : null;
+check(includedFiles.has(ART_FILE) && artwork && artwork.length > 33 &&
+  artwork.subarray(1, 4).toString() === 'PNG' && artwork.readUInt32BE(16) === ART_SIZE &&
+  artwork.readUInt32BE(20) === ART_SIZE && artwork[25] === 6,
+  'Original RGBA storybook atlas is included and matches its source rectangles.');
+check(Object.values(ART_FRAMES).every(([x, y, w, h]) => x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= ART_SIZE && y + h <= ART_SIZE),
+  'Every sprite source rectangle stays inside the atlas.');
+check(ART_SIZE * ART_SIZE * 4 + 720 * 600 * 4 <= ART_MEMORY_LIMIT, 'Atlas and home artwork cache stay within the 16 MiB art budget.');
+check(packageEstimate.packages.every(pkg => pkg.sourceBytes <= 3.8 * 1024 * 1024), 'Package source estimate stays within the internal 3.8 MiB target.');
 check(project.appid === 'wxee6289f904a5d625' && project.appid === config.APP_ID, 'AppID matches requested project.');
 check(project.compileType === 'game' && game.deviceOrientation === 'portrait', 'Native portrait WeChat Mini Game.');
 check(read('game.js').includes("require('./src/main')"), 'Native entry points to the new game.');

@@ -15,6 +15,11 @@ const MARKERS = {
 };
 
 function guideCardLayout(r, guide) {
+  if (guide.interactive) {
+    const bodyLines = r.wrapLines(guide.text, 232, 12);
+    return { titleLines: [guide.title], bodyLines, tipLines: [],
+      height: 44 + bodyLines.length * 17, compact: true };
+  }
   const titleLines = r.wrapLines(guide.title, 186, 16, '600');
   const bodyLines = r.wrapLines(guide.text, 306, 14);
   const tipLines = guide.visual && guide.visual.echo ? [] : r.wrapLines(guide.tip, 282, 11);
@@ -28,6 +33,14 @@ function guideCardLayout(r, guide) {
 
 function drawGuideCard(r, game, guide, y) {
   const total = guide.total || 4, ui = guideCardLayout(r, guide);
+  if (ui.compact) {
+    r.panel(24, y, 342, ui.height, { fill: C.panel, stroke: C.line, radius: 12, flat: true });
+    r.label(guide.title, 38, y + 20, 232, 13, C.ink, 'left', '600');
+    ui.bodyLines.forEach((line, index) => r.text(line, 38, y + 41 + index * 17, 12, C.muted));
+    r.button('跳过', 284, y + 12, 64, CONTROL.compactHeight, () => game.dismissGuide(),
+      { style: 'text', size: 11, disabled: !!game.modal || game.busy });
+    return;
+  }
   r.panel(24, y, 342, ui.height, { fill: '#fffaf0', stroke: '#c9d2b9', radius: 16 });
   r.round(42, y + 18, 34, 28, 9, '#e5eddd', '#b9cdb1');
   r.text(guide.step + '/' + total, 59, y + 32, 11, '#316c5f', 'center', '600');
