@@ -13,6 +13,30 @@ function createAds(platform, config, onActiveChange) {
   let activeAttempt = null;
   let errorListener = null;
 
+  function defer(callback) {
+    Promise.resolve().then(callback).catch(function () { /* Never leak SDK callback failures. */ });
+  }
+
+  function errorText(value, seen) {
+    if (typeof value === 'string') return value;
+    if (value == null || typeof value !== 'object') return value == null ? '' : String(value);
+    seen = seen || new Set();
+    if (seen.has(value)) return '';
+    seen.add(value);
+    const parts = [];
+    for (const key of ['errMsg', 'message', 'stack', 'reason', 'error']) {
+      try {
+        const part = errorText(value[key], seen);
+        if (part) parts.push(part);
+      } catch (_) { /* Host error wrappers may expose throwing getters. */ }
+    }
+    return parts.join(' ');
+  }
+
+  function isAdSystemError(error) {
+    return /operateWXDataForAd|adOperateWXData/i.test(errorText(error));
+  }
+
   function setActive(attempt, active) {
     if (active ? activeAttempt === attempt : activeAttempt !== attempt) return;
     activeAttempt = active ? attempt : null;
@@ -24,38 +48,55 @@ function createAds(platform, config, onActiveChange) {
     return !destroyed && Boolean(platform && platform.kind === 'wechat' && configured && api && typeof api.createRewardedVideoAd === 'function');
   }
 
-  function detachErrorListener() {
+  function detachErrorListener(ad) {
     const listener = errorListener;
     errorListener = null;
-    try { if (listener && activeAd && typeof activeAd.offError === 'function') activeAd.offError(listener); } catch (_) { /* Cleanup only. */ }
+    try { if (listener && ad && typeof ad.offError === 'function') ad.offError(listener); } catch (_) { /* Cleanup only. */ }
+  }
+
+  function discardAd(ad) {
+    if (!ad || activeAd !== ad) return;
+    detachErrorListener(ad);
+    activeAd = null;
+    try { if (typeof ad.destroy === 'function') ad.destroy(); } catch (_) { /* A broken SDK object is already detached. */ }
   }
 
   function initializeAd() {
     if (!isConfigured()) return 'unsupported';
     try {
       // Reuse the SDK singleton for the lifetime of this game instance.
-      if (!activeAd) activeAd = api.createRewardedVideoAd({ adUnitId });
-      if (!activeAd || typeof activeAd.show !== 'function' || typeof activeAd.onClose !== 'function' || typeof activeAd.onError !== 'function') return 'unsupported';
+      // Mini Games default to a global singleton. Multiton mode (base library
+      // 2.8.0+) is required so destroy/recreate yields an isolated emitter.
+      if (!activeAd) activeAd = api.createRewardedVideoAd({ adUnitId, multiton: true });
+      if (!activeAd || typeof activeAd.show !== 'function' || typeof activeAd.onClose !== 'function' || typeof activeAd.onError !== 'function') {
+        discardAd(activeAd);
+        return 'unsupported';
+      }
       if (!errorListener) {
         const ad = activeAd;
-        const listener = function () {
+        const listener = function (error) {
           if (destroyed || activeAd !== ad || errorListener !== listener) return;
           const attempt = pending || activeAttempt;
-          if (attempt && attempt.ad === ad && attempt.error) attempt.error();
+          if (!attempt || attempt.ad !== ad || !attempt.error) return;
+          const systemError = isAdSystemError(error);
+          // Capture the owning attempt now. A synchronous error emitted while
+          // registering this listener must remain an idle preload error.
+          defer(function () {
+            if (!destroyed && activeAd === ad && errorListener === listener) attempt.error(systemError);
+          });
         };
         // Automatic preloads also emit errors while no user request is pending.
         // Keep one listener from initialization through destroy; idle errors
         // must neither display an ad nor consume a future revive attempt.
         errorListener = listener;
-        try { ad.onError(listener); } catch (error) { detachErrorListener(); throw error; }
+        try { ad.onError(listener); } catch (error) { detachErrorListener(ad); throw error; }
       }
       return null;
-    } catch (_) { return 'error'; }
+    } catch (_) {
+      discardAd(activeAd);
+      return 'error';
+    }
   }
-
-  // Prepare at startup without showing an ad or taking the game's audio lock.
-  // If the SDK is not ready yet, the next user request can retry initialization.
-  initializeAd();
 
   function showRevive() {
     if (destroyed) return Promise.resolve(result('destroyed'));
@@ -68,17 +109,25 @@ function createAds(platform, config, onActiveChange) {
 
     let resolvePromise;
     const promise = new Promise(function (resolve) { resolvePromise = resolve; });
-    const attempt = { resolve: resolvePromise, settled: false, started: false, displayEnded: false, timer: null, stage: 'starting', ad: null, close: null, error: null };
+    const attempt = { resolve: resolvePromise, settled: false, started: false, displayEnded: false, timer: null, stage: 'starting', generation: 1, ad: null, close: null, error: null };
     pending = attempt;
+
+    function detachCloseListener(ad) {
+      const close = attempt.close;
+      attempt.close = null;
+      try { if (close && ad && typeof ad.offClose === 'function') ad.offClose(close); } catch (_) { /* Cleanup only. */ }
+    }
+
+    function releaseDisplay() {
+      if (attempt.displayEnded) return;
+      attempt.displayEnded = true;
+      setActive(attempt, false);
+    }
 
     function endDisplay() {
       if (attempt.displayEnded) return;
-      attempt.displayEnded = true;
-      const ad = attempt.ad;
-      if (ad) {
-        try { if (typeof ad.offClose === 'function') ad.offClose(attempt.close); } catch (_) { /* Cleanup only. */ }
-      }
-      setActive(attempt, false);
+      detachCloseListener(attempt.ad);
+      releaseDisplay();
     }
     attempt.endDisplay = endDisplay;
 
@@ -90,54 +139,90 @@ function createAds(platform, config, onActiveChange) {
         if (pending === attempt) pending = null;
         attempt.resolve(result(reason));
       }
-      // A watchdog cannot close a native video. Keep its audio lock and listeners
-      // until the SDK confirms closure/failure, even after denying the reward.
-      if (reason !== 'timeout' || !attempt.started) endDisplay();
+      endDisplay();
     }
     attempt.settle = settle;
+
+    function failClosed(reason) {
+      if (attempt.settled) return;
+      // Quarantine the suspect emitter while this attempt still owns both the
+      // pending slot and active lock. Only after native cleanup may callbacks
+      // synchronously start a fresh request.
+      attempt.settled = true;
+      clearTimeout(attempt.timer);
+      attempt.started = false;
+      const ad = attempt.ad;
+      detachCloseListener(ad);
+      attempt.ad = null;
+      discardAd(ad);
+      attempt.generation += 1;
+      if (pending === attempt) pending = null;
+      try { releaseDisplay(); } finally { attempt.resolve(result(reason)); }
+    }
+    attempt.failClosed = failClosed;
 
     function armTimer(milliseconds, reason) {
       if (attempt.settled) return;
       clearTimeout(attempt.timer);
-      attempt.timer = setTimeout(function () { settle(reason); }, milliseconds);
+      attempt.timer = setTimeout(function () { failClosed(reason); }, milliseconds);
       // Node-based acceptance checks should not be kept alive by an abandoned ad.
       if (attempt.timer && typeof attempt.timer.unref === 'function') attempt.timer.unref();
     }
 
     try {
-      attempt.ad = activeAd;
-      attempt.close = function (event) {
-        if (!attempt.started) return;
+      function attachAttemptAd(ad) {
+        const generation = attempt.generation;
+        const close = function (event) {
+          if (!attempt.started || attempt.ad !== ad || attempt.close !== close || attempt.generation !== generation) return;
+          let completed = false;
+          try { completed = !!(event && event.isEnded === true); } catch (_) { /* Treat malformed native events as cancellation. */ }
+          defer(function () {
+            if (attempt.settled) { endDisplay(); return; }
+            if (pending !== attempt || attempt.ad !== ad || attempt.close !== close || attempt.generation !== generation) return;
+            settle(completed ? 'completed' : 'cancelled');
+          });
+        };
+        attempt.ad = ad;
+        attempt.close = close;
+        ad.onClose(close);
+      }
+      attempt.error = function (systemError) {
         if (attempt.settled) { endDisplay(); return; }
         if (pending !== attempt) return;
-        settle(event && event.isEnded === true ? 'completed' : 'cancelled');
-      };
-      attempt.error = function () {
-        if (attempt.settled) { endDisplay(); return; }
-        if (pending !== attempt) return;
+        if (systemError) { failClosed('system-error'); return; }
         // The SDK may emit onError and reject show for the same failure. The
         // stage guard in retry ensures that pair starts only one load attempt.
         if (attempt.stage === 'starting') retry();
-        else if (attempt.stage === 'playing') settle('error');
-        else if (attempt.stage === 'retrying') settle('load-failed');
-        else settle('show-failed');
+        else if (attempt.stage === 'playing') failClosed('error');
+        else if (attempt.stage === 'retrying') failClosed('load-failed');
+        else failClosed('show-failed');
       };
-      activeAd.onClose(attempt.close);
+      attachAttemptAd(activeAd);
       armTimer(30000, 'timeout');
       function showing() {
         if (attempt.settled) return;
         attempt.stage = 'playing';
         // Allow long videos, end cards and store detours; loading gets a separate,
         // short deadline. Closing or destroy always clears this watchdog.
-        armTimer(15 * 60 * 1000, 'timeout');
+        armTimer(platform && platform.isDevelopment ? 60 * 1000 : 15 * 60 * 1000, 'timeout');
       }
       function retry() {
         if (attempt.stage !== 'starting') return;
         if (attempt.settled) { endDisplay(); return; }
-        setActive(attempt, false);
-        if (typeof attempt.ad.load !== 'function') { settle('load-failed'); return; }
         attempt.stage = 'retrying';
         attempt.started = false;
+        const failedAd = attempt.ad;
+        detachCloseListener(failedAd);
+        attempt.ad = null;
+        discardAd(failedAd);
+        attempt.generation += 1;
+        try { setActive(attempt, false); } catch (_) { failClosed('load-failed'); return; }
+        if (attempt.settled || destroyed) return;
+        const initializationError = initializeAd();
+        if (initializationError) { failClosed('load-failed'); return; }
+        try { attachAttemptAd(activeAd); } catch (_) { failClosed('load-failed'); return; }
+        armTimer(30000, 'timeout');
+        if (typeof attempt.ad.load !== 'function') { failClosed('load-failed'); return; }
         Promise.resolve().then(function () {
           if (attempt.settled) return;
           return attempt.ad.load();
@@ -146,8 +231,8 @@ function createAds(platform, config, onActiveChange) {
           attempt.stage = 'showing';
           return Promise.resolve().then(function () {
             if (!attempt.settled) { attempt.started = true; setActive(attempt, true); return attempt.ad.show(); }
-          }).then(function () { if (attempt.stage === 'showing') showing(); }, function () { settle('show-failed'); });
-        }, function () { settle('load-failed'); });
+          }).then(function () { if (attempt.stage === 'showing') showing(); }, function () { failClosed('show-failed'); });
+        }, function () { failClosed('load-failed'); });
       }
       Promise.resolve().then(function () {
         if (!attempt.settled && attempt.stage === 'starting') { attempt.started = true; setActive(attempt, true); return attempt.ad.show(); }
@@ -160,12 +245,9 @@ function createAds(platform, config, onActiveChange) {
     if (destroyed) return;
     destroyed = true;
     if (pending) pending.settle('destroyed');
-    detachErrorListener();
-    if (activeAd && typeof activeAd.destroy === 'function') {
-      try { activeAd.destroy(); } catch (_) { /* SDK destroy is optional. */ }
-    }
+    const ad = activeAd;
+    discardAd(ad);
     if (activeAttempt) activeAttempt.endDisplay();
-    activeAd = null;
   }
 
   return { isConfigured, isActive: function () { return activeAttempt !== null; }, showRewarded: showRevive, showRevive, destroy };

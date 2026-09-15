@@ -3,8 +3,9 @@
 const { CAMPAIGN, PER_CHAPTER } = require('./levels');
 
 const CARD_HEIGHT = 144, ROW_HEIGHT = 158, CHAPTER_HEADER = 44, DIRECTORY_ROW = 108;
-// One existing PageUp/PageDown step turns a map page, at every viewport height.
-const CHAPTER_HEIGHT = 340;
+// A map chapter is one continuous section: its heading, three route rows and
+// breathing room all move together under the fixed tabs.
+const CHAPTER_HEIGHT = 432;
 const MODES = ['all', 'replay', 'chapters'];
 const replayCache = new WeakMap();
 
@@ -27,9 +28,9 @@ function listLayout(height, contentHeight) {
 
 function levelListLayout(height, count = CAMPAIGN.length) {
   const layout = listLayout(height, 0), chapters = Math.ceil(count / PER_CHAPTER);
-  // Keep the established scroll/keyboard contract, with one chapter per map page.
-  const chapterHeight = CHAPTER_HEIGHT, maxScroll = Math.max(0, (chapters - 1) * chapterHeight);
-  return { ...layout, chapterHeight, contentHeight: count ? maxScroll + layout.viewport.h : 0, maxScroll };
+  const chapterHeight = CHAPTER_HEIGHT, contentHeight = count ? chapters * chapterHeight : 0;
+  return { ...layout, chapterHeight, contentHeight,
+    maxScroll: Math.max(0, contentHeight - layout.viewport.h) };
 }
 
 function levelBrowserLayout(game, height) {
@@ -52,7 +53,7 @@ function levelChapterAtOffset(offset, height, count = CAMPAIGN.length, mode = 'a
   const chapters = Math.max(1, Math.ceil(count / PER_CHAPTER));
   const { viewport, chapterHeight } = levelListLayout(height, count);
   const focus = Math.max(0, Number(offset) || 0) + viewport.h * .3;
-  const index = mode === 'chapters' ? Math.floor(focus / DIRECTORY_ROW) : Math.round(Math.max(0, Number(offset) || 0) / chapterHeight);
+  const index = mode === 'chapters' ? Math.floor(focus / DIRECTORY_ROW) : Math.floor(focus / chapterHeight);
   return Math.min(chapters - 1, Math.max(0, index));
 }
 

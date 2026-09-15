@@ -6,7 +6,7 @@ const { CONTROL } = require('./controls');
 const { drawVignette } = require('./scene');
 const { drawTitle } = require('./brand-title');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
-const { VIGNETTE_SOURCE, featuredVignetteRect, startupVignetteScale } = require('./startup-layout');
+const { VIGNETTE_SOURCE, featuredVignetteRect } = require('./startup-layout');
 
 function homeLayout(height, scale = 1) {
   const compactHeight = Math.max(CONTROL.compactHeight, 44 / scale);
@@ -15,9 +15,12 @@ function homeLayout(height, scale = 1) {
   const linksY = journeyY - 10 - linksHeight, buttonY = linksY - 28 - primaryHeight;
   const routeY = buttonY - 84, top = Math.max(0, (height - 844) * .2), heroY = 150 + top;
   const heroH = Math.max(120, routeY - heroY - 26), hero = featuredVignetteRect(heroY, heroH);
-  const artScale = startupVignetteScale(height);
+  // Safe areas make the home hero shorter than the startup hero on many phones.
+  // Contain the complete island instead of preserving a larger shared scale and
+  // clipping its lower edge behind the route copy.
+  const artScale = Math.min(hero.w / VIGNETTE_SOURCE.w, hero.h / VIGNETTE_SOURCE.h);
   return { top, heroY, heroH, hero, artScale,
-    artAlignY: heroH < VIGNETTE_SOURCE.h * artScale ? 'top' : 'center', routeY, buttonY,
+    artAlignY: 'center', routeY, buttonY,
     primaryHeight, compactHeight, linksHeight, linksY, journeyY };
 }
 

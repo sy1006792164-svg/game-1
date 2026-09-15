@@ -1,17 +1,35 @@
 'use strict';
 
+function isBridgeNotReady(error) {
+  try {
+    const text = typeof error === 'string' ? error : [error && error.errMsg, error && error.message].filter(Boolean).join(' ');
+    return /jsbridge\s+(?:is\s+)?not\s+ready/i.test(text);
+  } catch (_) { return false; }
+}
+
 function getWindowInfo(api) {
   let info = {};
+  const modern = typeof api.getWindowInfo === 'function';
+  let bridgePending = false;
   try {
-    if (typeof api.getWindowInfo === 'function') info = api.getWindowInfo() || {};
-  } catch (_) { /* Older WeChat versions expose the combined system API. */ }
+    if (modern) info = api.getWindowInfo() || {};
+  } catch (error) {
+    // Calling another synchronous bridge API in the same startup tick only
+    // repeats DevTools' "jsbridge not ready" error. A later resize retries it.
+    bridgePending = isBridgeNotReady(error);
+  }
   const fields = ['windowWidth', 'windowHeight', 'pixelRatio'];
   const valid = value => Number.isFinite(value) && value > 0;
   if (fields.every(key => valid(info[key]))) return info;
   let legacy = {};
-  try {
-    if (typeof api.getSystemInfoSync === 'function') legacy = api.getSystemInfoSync() || {};
-  } catch (_) { /* Use the available window fields. */ }
+  // Preserve compatibility with hosts whose modern method is stubbed,
+  // unsupported or incomplete. Only an explicit transient bridge error skips
+  // this call; otherwise the legacy API can fill missing required fields.
+  if (!bridgePending) {
+    try {
+      if (typeof api.getSystemInfoSync === 'function') legacy = api.getSystemInfoSync() || {};
+    } catch (_) { /* Use defaults until a later resize can retry. */ }
+  }
   const merged = {};
   // Recent SDKs expose lazy getters on the legacy system-info object. Copying
   // the entire object also invokes unrelated orientation/authorization APIs.
@@ -30,10 +48,15 @@ function getWindowInfo(api) {
 }
 
 function getDeviceInfo(api) {
+  const modern = typeof api.getDeviceInfo === 'function';
   try {
-    const device = typeof api.getDeviceInfo === 'function' && api.getDeviceInfo();
+    const device = modern && api.getDeviceInfo();
     if (device && device.platform) return device;
-  } catch (_) { /* Read platform identification from the older system API. */ }
+  } catch (error) {
+    // Do not turn a transient failure of the maintained API into a second
+    // deprecated bridge call. A later resize/onShow retries the modern API.
+    if (isBridgeNotReady(error)) return {};
+  }
   try { return api.getSystemInfoSync() || {}; } catch (_) { return {}; }
 }
 

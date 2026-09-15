@@ -4,15 +4,15 @@ const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { insideRect } = require('./board-projection');
 const { campaignRecord } = require('./campaign-progress');
-const { levelBrowserChapter, navigateLevelBrowser } = require('./level-navigation');
+const { CHAPTER_HEIGHT } = require('./level-navigation');
 
-function chapterMapNodes(chapter, viewport) {
-  const first = viewport.y + 121, last = viewport.y + viewport.h - 130;
-  const span = Math.max(130, Math.min(330, last - first)), top = first + Math.max(0, last - first - span) / 2;
+const NODE_TOP = 116, NODE_ROW = 120;
+
+function chapterMapNodes(chapter, section) {
   const positions = chapter.levels.length <= 3 ? [[96, 0], [280, .5], [174, 1]] :
     [[96, 0], [280, 0], [280, .5], [96, .5], [96, 1], [280, 1]];
   return chapter.levels.map((level, index) => {
-    const [x, fraction] = positions[index], y = top + span * fraction;
+    const [x, fraction] = positions[index], y = section.y + NODE_TOP + NODE_ROW * 2 * fraction;
     return { level, x, y, rect: { x: x - 72, y: y - 45, w: 144, h: 96 } };
   });
 }
@@ -46,22 +46,36 @@ function drawMapNode(r, game, node, profile, current, saved, viewport) {
     '第 ' + level.id + ' 封 ' + level.title + ' ' + status);
 }
 
-function drawChapterMap(r, game, progress, profile, current, saved, viewport) {
-  const index = levelBrowserChapter(game, r.H), chapter = progress.chapters[index];
-  const nodes = chapterMapNodes(chapter, viewport);
-  r.text('第 ' + (index + 1) + ' 章', 25, viewport.y + 14, 12, C.muted);
-  r.label(chapter.name, 25, viewport.y + 42, 232, 22, C.ink, 'left', '600');
-  r.text(chapter.stars + ' / ' + chapter.maxStars + ' 星光', 365, viewport.y + 17, 12, C.goldText, 'right');
-  r.text('送达 ' + chapter.completedCount + ' / ' + chapter.count, 365, viewport.y + 40, 12, C.muted, 'right');
+function drawChapterSection(r, game, chapter, index, profile, current, saved, section, viewport, lastChapter) {
+  const nodes = chapterMapNodes(chapter, section);
+  r.text('第 ' + (index + 1) + ' 章', 25, section.y + 17, 12, C.muted);
+  r.label(chapter.name, 25, section.y + 42, 232, 22, C.ink, 'left', '600');
+  r.text(chapter.stars + ' / ' + chapter.maxStars + ' 星光', 365, section.y + 17, 12, C.goldText, 'right');
+  r.text('送达 ' + chapter.completedCount + ' / ' + chapter.count, 365, section.y + 40, 12, C.muted, 'right');
   drawMailRoute(r, game, nodes);
   nodes.forEach(node => drawMapNode(r, game, node, profile, current, saved, viewport));
-  const footerY = viewport.y + viewport.h - CONTROL.height - 6;
-  if (index > 0) r.button('上一章', 24, footerY, 104, CONTROL.height,
-    () => navigateLevelBrowser(game, 'all', progress.chapters[index - 1].firstId), { style: 'secondary', size: 13 });
-  r.button('回到进度', 141, footerY, 108, CONTROL.height,
-    () => game.scrollToProgress(), { style: 'primary', size: 13 });
-  if (index + 1 < progress.chapters.length) r.button('下一章', 262, footerY, 104, CONTROL.height,
-    () => navigateLevelBrowser(game, 'all', progress.chapters[index + 1].firstId), { style: 'secondary', size: 13 });
+  if (!lastChapter) {
+    const dividerY = section.y + CHAPTER_HEIGHT - 7;
+    r.line([[42, dividerY], [348, dividerY]], C.line, 1);
+  }
+}
+
+function drawChapterMap(r, game, progress, profile, current, saved, viewport) {
+  const offset = game.levelScroll.offset;
+  const tabHitHeight = Math.max(CONTROL.compactHeight, 44 / (r.scale || 1));
+  const interactiveTop = Math.max(viewport.y,
+    151 + CONTROL.compactHeight / 2 + tabHitHeight / 2);
+  const interactiveViewport = { ...viewport, y: interactiveTop,
+    h: Math.max(0, viewport.y + viewport.h - interactiveTop) };
+  const first = Math.max(0, Math.floor(Math.max(0, offset) / CHAPTER_HEIGHT));
+  const last = Math.min(progress.chapters.length - 1,
+    Math.floor(Math.max(0, offset + viewport.h) / CHAPTER_HEIGHT));
+  for (let index = first; index <= last; index++) {
+    const section = { x: viewport.x, y: viewport.y + index * CHAPTER_HEIGHT - offset,
+      w: viewport.w, h: CHAPTER_HEIGHT };
+    drawChapterSection(r, game, progress.chapters[index], index, profile, current, saved,
+      section, interactiveViewport, index === progress.chapters.length - 1);
+  }
 }
 
 module.exports = { chapterMapNodes, drawChapterMap };

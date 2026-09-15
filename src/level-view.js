@@ -71,7 +71,6 @@ function drawLevels(r, game) {
   else if (mode === 'replay') drawReplayLevels(r, game, profile, progress, current, saved, viewport);
   else drawChapterMap(r, game, progress, profile, current, saved, viewport);
   c.restore();
-  if (mode === 'all') return;
   drawScrollEdges(r, viewport, scroll);
   const alpha = scroll.touching || Math.abs(scroll.velocity) > 4 ? .65 : clamp(1 - (now - scroll.activeAt - 600) / 450) * .65;
   if (maxScroll > 0 && alpha > 0) {

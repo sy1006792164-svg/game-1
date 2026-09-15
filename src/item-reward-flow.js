@@ -7,8 +7,10 @@ const { MOVE_MS } = require('./motion');
 // A video is tied to the selected tool, target and exact route that requested it.
 // The reward ledger survives undo; consumption is recorded in the route actions.
 async function requestItemReward(game, id, cell) {
+  const guide = typeof game.guideStep === 'function' ? game.guideStep() : null;
   if (game.page !== 'game' || game.hidden || game.busy || game.modal || game.reviewing || game.ads.isActive() ||
-      !game.state || game.state.status !== 'playing' || game.guideStep() || game.platform.now() - game.transitionAt < MOVE_MS) return;
+      !game.state || game.state.status !== 'playing' || guide && guide.interactive !== true ||
+      game.platform.now() - game.transitionAt < MOVE_MS) return;
   const offer = itemOffer(game.level, game.state, id);
   if (!offer.eligible || !offer.targets.includes(cell) || itemAvailability(game.level, game.state, id).available) return;
   if (!game.ads.isConfigured()) { game.toast('请在微信小游戏内观看视频获取道具'); return; }

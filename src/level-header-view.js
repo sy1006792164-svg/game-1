@@ -7,7 +7,9 @@ const { CONTROL } = require('./controls');
 function drawLevelHeader(r, game, progress, mode) {
   const journey = typeof game.journey === 'function' ? game.journey() : null;
   r.header(mode === 'all' ? '选择一封来信' : mode === 'chapters' ? '邮路章节' : '再收一颗星', game.development ? '开发试玩 · 独立存档' : journey ? '今日邮程 ' + Math.min(journey.points, journey.target) + '/' + journey.target + ' · 每一程都算数' : '沿着邮路，把来信送向远方',
-    () => game.home());
+    () => game.home(), { actionWidth: 52 });
+  r.button('', 322, 10, CONTROL.compactHeight, CONTROL.compactHeight,
+    () => game.scrollToProgress(), { style: 'quiet', icon: 'route', label: '回到当前进度' });
 
   const developerPicker = game.development && mode === 'chapters';
   const width = developerPicker ? 212 : 342;

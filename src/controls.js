@@ -88,7 +88,8 @@ function drawButton(r, text, x, y, w, h, action, style) {
   c.restore();
   if (!disabled) {
     const minimum = 44 / (r.scale || 1), hitW = Math.max(w, minimum), hitH = Math.max(h, minimum);
-    r.hit(x - (hitW - w) / 2, y - (hitH - h) / 2, hitW, hitH, action, undefined, String(text) || options.icon);
+    r.hit(x - (hitW - w) / 2, y - (hitH - h) / 2, hitW, hitH, action, undefined,
+      options.label || String(text) || options.icon);
   }
 }
 

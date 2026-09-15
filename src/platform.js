@@ -24,12 +24,14 @@ function positive(value, fallback) {
 function createPlatform(environment) {
   const env = environment || defaultEnvironment();
   const api = env.wx && typeof env.wx.createCanvas === 'function' ? env.wx : null;
-  const device = api ? getDeviceInfo(api) : null;
+  let device = null;
   const win = env.window;
   const doc = env.document;
   const canvas = api ? api.createCanvas() : doc && doc.getElementById('game');
   if (api && typeof GameGlobal !== 'undefined') GameGlobal.canvas = canvas;
   if (!canvas) throw new Error('Game canvas is unavailable.');
+  let development = isDevelopmentEnvironment(api, win && win.location);
+  let bridgeRetryNeeded = false;
   let dimensions = { width: 390, height: 844, pixelRatio: 1, safeTop: 0, safeBottom: 0 };
   let reducedMotionQuery = null;
   if (!api && win && typeof win.matchMedia === 'function') {
@@ -52,7 +54,18 @@ function createPlatform(environment) {
   function resize(event) {
     let width, height, pixelRatio, safeTop = 0, safeBottom = 0;
     if (api) {
+      // Account information can share the same temporarily unavailable bridge
+      // during DevTools startup. Retry until a positive development channel is
+      // observed so ad watchdogs do not remain at the production duration.
+      if (!development) development = isDevelopmentEnvironment(api, win && win.location);
+      // Device APIs can be temporarily unavailable while DevTools brings up
+      // its JS bridge. Keep the last good value and retry on resize/onShow.
+      const latestDevice = getDeviceInfo(api);
+      if (latestDevice && latestDevice.platform) device = latestDevice;
       const info = getWindowInfo(api);
+      bridgeRetryNeeded = (typeof api.getWindowInfo === 'function' &&
+          !['windowWidth', 'windowHeight', 'pixelRatio'].every(key => Number.isFinite(info[key]) && info[key] > 0)) ||
+        (typeof api.getDeviceInfo === 'function' && (!device || !device.platform));
       // Mini Game resize events carry windowWidth/windowHeight at the top level.
       // Use them immediately even if the synchronous window snapshot is older.
       width = positive(event && event.windowWidth, positive(info.windowWidth, 390));
@@ -186,10 +199,19 @@ function createPlatform(environment) {
       // DevTools returns its real DOM canvas. Its iPhone simulator only forwards
       // mouse clicks when the tool's touch-emulation mode is enabled; keep the
       // canvas usable when that mode is off. This path never runs on a phone.
-      if (device && device.platform === 'devtools' && typeof canvas.addEventListener === 'function' && typeof canvas.getBoundingClientRect === 'function') {
+      if ((!device || !device.platform || device.platform === 'devtools') &&
+          typeof canvas.addEventListener === 'function' && typeof canvas.getBoundingClientRect === 'function') {
         const releaseTarget = canvas.ownerDocument && typeof canvas.ownerDocument.addEventListener === 'function' ? canvas.ownerDocument : canvas;
         const windowTarget = releaseTarget.defaultView || win;
         const mouse = function (type, event) {
+          // The first bridge read may be unavailable. Recheck at gesture start,
+          // and permanently reject this DOM fallback once a physical platform
+          // is identified even though the listeners are already installed.
+          if (type === 'start') {
+            const latestDevice = getDeviceInfo(api);
+            if (latestDevice && latestDevice.platform) device = latestDevice;
+          }
+          if (device && device.platform && device.platform !== 'devtools') { if (source === 'mouse') cancel(); return; }
           if (event.sourceCapabilities && event.sourceCapabilities.firesTouchEvents) return;
           if (type === 'start') {
             if (event.button != null && event.button !== 0) return;
@@ -306,14 +328,35 @@ function createPlatform(environment) {
 
   function onResize(listener) {
     // Consumers call resize before repainting; changing canvas size resets its context.
-    const handler = function (event) { listener(event); };
+    const delays = [50, 250, 1000];
+    let retryIndex = 0, retryTimer = null;
+    const cancelRetry = function () {
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+    };
+    const scheduleRetry = function () {
+      if (!bridgeRetryNeeded || retryTimer !== null || retryIndex >= delays.length) return;
+      retryTimer = setTimeout(function () {
+        retryTimer = null; retryIndex++;
+        handler();
+      }, delays[retryIndex]);
+      if (retryTimer && typeof retryTimer.unref === 'function') retryTimer.unref();
+    };
+    const handler = function (event) {
+      listener(event);
+      if (bridgeRetryNeeded) scheduleRetry();
+      else cancelRetry();
+    };
+    scheduleRetry();
+    let removeNative = function () {};
     if (api && typeof api.onWindowResize === 'function') {
       api.onWindowResize(handler);
-      return function () { if (typeof api.offWindowResize === 'function') api.offWindowResize(handler); };
+      removeNative = function () { if (typeof api.offWindowResize === 'function') api.offWindowResize(handler); };
+    } else if (win) {
+      win.addEventListener('resize', handler);
+      removeNative = function () { win.removeEventListener('resize', handler); };
     }
-    if (!win) return function () {};
-    win.addEventListener('resize', handler);
-    return function () { win.removeEventListener('resize', handler); };
+    return function () { cancelRetry(); removeNative(); };
   }
 
   const storage = api ? {
@@ -356,7 +399,7 @@ function createPlatform(environment) {
     kind: api ? 'wechat' : 'browser', wx: api, canvas, createSurface, createImage, resize, onPointer, onKey, onResize, storage, setFrameRate,
     get reducedMotion() { return !!(reducedMotionQuery && reducedMotionQuery.matches); },
     effectsQuality: 'high',
-    isDevelopment: isDevelopmentEnvironment(api, win && win.location),
+    get isDevelopment() { return development; },
     onMemoryWarning: function (listener) {
       if (!api || typeof api.onMemoryWarning !== 'function') return function () {};
       try { api.onMemoryWarning(listener); } catch (_) { return function () {}; }
