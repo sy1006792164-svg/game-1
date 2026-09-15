@@ -140,6 +140,16 @@ test('home architecture and vignettes respect both renderer and explicit quiet s
   }
 });
 
+test('a shared vignette scale can preserve its top edge inside a shorter page band', () => {
+  const record = recorder({ reducedMotion: true });
+  const rect = { x: 13, y: 150, w: 364, h: 238 }, artScale = 364 / 360;
+  drawVignette(record.r, 1000, rect, { artScale, alignY: 'top' });
+  const translate = record.commands.find(command => command[0] === 'translate');
+  const scale = record.commands.find(command => command[0] === 'scale');
+  assert.deepEqual(translate[1], [195, rect.y + 172 * artScale]);
+  assert.deepEqual(scale[1], [artScale, artScale]);
+});
+
 test('decorative glows inherit parent opacity and use one fill at low quality', () => {
   const glows = options => {
     const { r, commands } = recorder({ alpha: .25, ...options });

@@ -429,10 +429,14 @@ function drawBackdrop(r, now, chapter, options = {}) {
 function drawVignette(r, now, rect, options = {}) {
   const quietScenery = options.reducedMotion || r.reducedMotion || options.quality === 'low' || r.effectsQuality === 'low';
   if (quietScenery) now = 0;
-  // Contain the complete cached island (-180, -172, 360, 300), including
-  // the post office roof, in short portrait and startup scene bands.
-  const c = r.ctx, scale = Math.min(rect.w / 360, rect.h / 300), x = rect.x + rect.w / 2;
-  const y = rect.y + (rect.h - 300 * scale) / 2 + 172 * scale;
+  // Contain the complete cached island (-180, -172, 360, 300) by default.
+  // A page may share another scene's art scale and choose which vertical edge
+  // remains visible when its own content band is shorter.
+  const fittedScale = Math.min(rect.w / 360, rect.h / 300);
+  const scale = Number.isFinite(options.artScale) && options.artScale > 0 ? options.artScale : fittedScale;
+  const freeHeight = rect.h - 300 * scale;
+  const offsetY = options.alignY === 'top' ? 0 : options.alignY === 'bottom' ? freeHeight : freeHeight / 2;
+  const c = r.ctx, x = rect.x + rect.w / 2, y = rect.y + offsetY + 172 * scale;
   c.save(); c.beginPath(); c.rect(rect.x, rect.y, rect.w, rect.h); c.clip(); c.translate(x, y); c.scale(scale, scale);
   drawHomeArchitecture(r, now, { ...options, reducedMotion: quietScenery });
   r.line([[-28, 36], [-9, 45], [11, 35], [26, 27]], '#5a9f9c99', 1.3, [2, 5]);

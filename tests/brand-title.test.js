@@ -9,6 +9,8 @@ const { createRequire } = require('node:module');
 const { drawTitle } = require('../src/brand-title');
 const { C } = require('../src/theme');
 const { CAMPAIGN } = require('../src/levels');
+const { homeLayout } = require('../src/home-view');
+const { VIGNETTE_SOURCE, startupLayout, startupVignetteScale } = require('../src/startup-layout');
 
 // Deliberately expose only baseline Canvas geometry. Font, text, image, transforms and Path2D
 // access fails instead of being silently accepted by the broader renderer mocks.
@@ -116,5 +118,25 @@ test('real page views retain four outlined characters at their responsive title 
       assert.ok(text.includes(draw === drawHome ? '风 起 · 信 至' : '一封信，一段小小的旅程'), 'ordinary labels remain text');
       assert.equal(text.some(value => /^(风|笺|回|廊|风笺回廊)$/.test(value)), false, 'the page must not replace its outlined title with system text');
     }
+  }
+});
+
+test('home artwork keeps the startup house scale without entering the route content', () => {
+  // The cached office occupies source y -162..9 inside the vignette's -172..128 image.
+  const houseTop = 10, houseBottom = 181;
+  for (const height of [680, 714, 844, 1000]) {
+    const home = homeLayout(height), startup = startupLayout(height);
+    const expectedScale = Math.min(364 / VIGNETTE_SOURCE.w, startup.heroH / VIGNETTE_SOURCE.h);
+    assert.equal(home.artScale, expectedScale);
+    assert.equal(home.artScale, startupVignetteScale(height));
+    assert.deepEqual({ x: home.hero.x, w: home.hero.w }, { x: 13, w: 364 });
+    assert.ok(home.hero.y + home.hero.h <= home.routeY - 20,
+      'the enlarged illustration remains clipped above route copy');
+
+    const artHeight = VIGNETTE_SOURCE.h * home.artScale;
+    const offsetY = home.artAlignY === 'top' ? 0 : (home.hero.h - artHeight) / 2;
+    assert.equal(home.artAlignY, home.hero.h < artHeight ? 'top' : 'center');
+    assert.ok(offsetY + houseTop * home.artScale >= 0, 'the post-office roof remains visible');
+    assert.ok(offsetY + houseBottom * home.artScale <= home.hero.h, 'the complete post office remains visible');
   }
 });

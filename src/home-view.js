@@ -6,6 +6,7 @@ const { CONTROL } = require('./controls');
 const { drawVignette } = require('./scene');
 const { drawTitle } = require('./brand-title');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
+const { VIGNETTE_SOURCE, featuredVignetteRect, startupVignetteScale } = require('./startup-layout');
 
 function homeLayout(height, scale = 1) {
   const compactHeight = Math.max(CONTROL.compactHeight, 44 / scale);
@@ -13,7 +14,10 @@ function homeLayout(height, scale = 1) {
   const journeyY = height - 24 - compactHeight;
   const linksY = journeyY - 10 - linksHeight, buttonY = linksY - 28 - primaryHeight;
   const routeY = buttonY - 84, top = Math.max(0, (height - 844) * .2), heroY = 150 + top;
-  return { top, heroY, heroH: Math.max(120, routeY - heroY - 26), routeY, buttonY,
+  const heroH = Math.max(120, routeY - heroY - 26), hero = featuredVignetteRect(heroY, heroH);
+  const artScale = startupVignetteScale(height);
+  return { top, heroY, heroH, hero, artScale,
+    artAlignY: heroH < VIGNETTE_SOURCE.h * artScale ? 'top' : 'center', routeY, buttonY,
     primaryHeight, compactHeight, linksHeight, linksY, journeyY };
 }
 
@@ -48,14 +52,15 @@ function drawHome(r, game, now) {
   const mood = r.atmosphereMood, quietMotion = r.reducedMotion || r.effectsQuality === 'low';
   const sceneNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   drawBrand(r, ui.top);
-  const hero = { x: 24, y: ui.heroY, w: 342, h: ui.heroH };
+  const hero = ui.hero;
   r.ctx.save();
   r.round(hero.x, hero.y, hero.w, hero.h, 24);
   r.ctx.clip();
   drawAmbientOverlay(r, sceneNow, 'home', hero,
     { reducedMotion: quietMotion, quality: r.effectsQuality, mood, treatment: atmosphereTreatment('home') });
-  drawVignette(r, sceneNow, { x: 29, y: ui.heroY + 4, w: 332, h: ui.heroH - 8 },
-    { reducedMotion: quietMotion, mood, deliveryStory: r.effectsQuality !== 'low' });
+  drawVignette(r, sceneNow, hero, { reducedMotion: quietMotion, mood, artScale: ui.artScale,
+    alignY: ui.artAlignY,
+    deliveryStory: r.effectsQuality !== 'low' });
   r.ctx.restore();
 
   r.text(saved ? '接着上次的旅程' : completed ? '下一站' : '你的第一封信', 26, ui.routeY, 11, C.muted);
@@ -75,4 +80,4 @@ function drawHome(r, game, now) {
     195, ui.journeyY + ui.compactHeight / 2, 12, C.muted, 'center');
 }
 
-module.exports = { drawHome };
+module.exports = { drawHome, homeLayout };

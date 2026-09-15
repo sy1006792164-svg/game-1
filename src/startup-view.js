@@ -7,16 +7,9 @@ const { HEALTH_ADVICE_TITLE, HEALTH_ADVICE_LINES } = require('./startup');
 const { drawTitle } = require('./brand-title');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
 const { drawStartupJourney } = require('./startup-journey');
+const { startupLayout, featuredVignetteRect, startupVignetteScale } = require('./startup-layout');
 
 const PUBLICATION_LINE_HEIGHT = 23;
-
-function startupLayout(height) {
-  const contentHeight = Math.min(height, 840), top = (height - contentHeight) / 2;
-  const loadingY = top + contentHeight - 88, adviceH = 164;
-  const adviceY = loadingY - 18 - adviceH;
-  const heroY = top + 116, heroH = Math.min(380, adviceY - heroY - 20);
-  return { top, heroY, heroH, adviceY, adviceH, loadingY };
-}
 
 function drawBrand(r, top) {
   r.text('一封信，一段小小的旅程', 195, top + 22, 13, C.green, 'center');
@@ -52,8 +45,9 @@ function drawStartup(r, game, now) {
   drawBrand(r, ui.top);
   drawAmbientOverlay(r, sceneNow, 'startup', { x: bounds.x, y: ui.heroY, w: bounds.w, h: ui.heroH },
     { reducedMotion: quietMotion, quality: r.effectsQuality, mood, treatment: atmosphereTreatment('startup') });
-  const hero = { x: 13, y: ui.heroY, w: 364, h: ui.heroH };
-  drawVignette(r, sceneNow, hero, { reducedMotion: quietMotion, mood });
+  const hero = featuredVignetteRect(ui.heroY, ui.heroH);
+  drawVignette(r, sceneNow, hero,
+    { reducedMotion: quietMotion, mood, artScale: startupVignetteScale(r.H) });
   drawStartupJourney(r, game.startup && game.startup.progress, hero, sceneNow, { reducedMotion: quietMotion });
   r.panel(24, ui.adviceY, 342, ui.adviceH, { fill: C.panel, radius: 18, flat: true });
   r.text(HEALTH_ADVICE_TITLE, 44, ui.adviceY + 27, 15, C.green, 'left', '600');
