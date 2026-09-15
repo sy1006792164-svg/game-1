@@ -115,6 +115,10 @@ function drawEffectBatch(renderer, batch, now, point, scale) {
     if (!event || !validCell(event.cell)) return;
     const timing = EVENT_TIMINGS[event.type];
     if (!timing || age < timing.delay || age >= timing.delay + timing.duration) return;
+    // A same-cell pickup already owns the landing halo and particles. Keep the
+    // source event intact: wind paths and particle seeds still use its position.
+    if (event.type === 'move' && events.some(other => other && other.cell === event.cell &&
+        ['letter', 'seal', 'light'].includes(other.type))) return;
     const progress = (age - timing.delay) / timing.duration;
     const [x, y] = position(point, event.cell);
     const entry = event.type === 'wind' ? events.slice(0, index).find(item => item && item.type === 'move') : null;

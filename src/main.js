@@ -292,7 +292,11 @@ class Game {
     if (this.modal && this.modal.kind !== 'developer-level') return false;
     if (!this.ensureStoredProgressReady() || !this.unlocked(id - 1)) return false;
     const saved = this.savedRun();
-    if (saved && saved.mode === 'campaign' && saved.levelId === id && this.restore()) return true;
+    const savedLevelId = saved && Number(saved.levelId);
+    if (saved && saved.mode === 'campaign' && savedLevelId === id && this.restore()) return true;
+    const hasProgress = saved && (Array.isArray(saved.actions) && saved.actions.length > 0 || saved.state || saved.undosUsed > 0 ||
+      (saved.reviveHistory || []).length > 0 || Object.values(saved.itemRewards || {}).some(count => count > 0));
+    if (saved && savedLevelId !== id && hasProgress) return this.openRoutePlan(CAMPAIGN[id - 1]);
     this.start(CAMPAIGN[id - 1], 'campaign');
     return true;
   }
@@ -534,7 +538,7 @@ class Game {
     const now = this.platform.now();
     const guide = this.guideStep();
     if (guide && !guide.interactive && action !== guide.action) { this.guideMisstep(); return; }
-    if (now - this.transitionAt < MOVE_MS) { this.pendingAction = guide || item ? null : { action, at: now }; return; }
+    if (now - this.transitionAt < MOVE_MS) { this.pendingAction = guide && !guide.interactive || item ? null : { action, at: now }; return; }
     this.pendingAction = null;
     const result = step(this.level, this.state, action);
     if (!result.moved) {
@@ -617,9 +621,6 @@ class Game {
     const next = this.mode === 'campaign' ? candidate : null;
     const saved = this.store.getStatus().persisted;
     const lines = deliveryResultLines(this.level, this.state, rating, before, saved);
-    if (this.guideEnabled && canGuide(this.level, this.mode)) {
-      lines.push('你收信；回声晚 3 次行动，替你收蓝票。', '收齐信和票，再走进邮局就能过关。');
-    }
     const rewards = this.album().stamps.filter(stamp => stamp.owned && !albumBefore.stamps[stamp.index].owned);
     if (rewards.length) lines.push(rewards.length > 1 ? '收到 ' + rewards.length + ' 枚新邮票' : '收到新邮票「' + rewards[0].name + '」');
     this.modal = {
@@ -632,7 +633,7 @@ class Game {
       buttons: [
         { text: next ? '下一封信' : '返回邮局', primary: true, action: () => next ? this.start(next, this.mode) : this.home() },
         { text: '再走一次', textOnly: true, icon: 'restart', action: () => this.start(this.level, this.mode) },
-        ...(rewards.length ? [{ text: '看看邮票册', textOnly: true, icon: 'stamp', action: () => this.openPage('collection') }] : [])
+        ...(next ? [{ text: '返回邮局', textOnly: true, icon: 'home', action: () => this.home() }] : [])
       ]
     };
   }

@@ -7,12 +7,13 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const { CAMPAIGN } = require('../src/levels');
-const { neighbor, replay } = require('../src/engine');
+const { neighbor, replay, createState, step } = require('../src/engine');
 const { MOVE_MS } = require('../src/motion');
 const { captureBoardTap } = require('../src/board-input');
 const { createProjection } = require('../src/board-projection');
 const { createPlatform } = require('../src/platform');
-const { PREVIEW_HOLD_MS } = require('../src/action-preview');
+const { PREVIEW_HOLD_MS, forecastAction, drawActionPreview } = require('../src/action-preview');
+const { Renderer } = require('../src/renderer');
 
 const mainPath = path.join(__dirname, '../src/main.js');
 const actualRequire = createRequire(mainPath);
@@ -127,6 +128,58 @@ test('long presses on the wait button and player tile preview a beat without spe
     game.pointerEvent(x, y, 'end');
     assert.equal(game.state, state);
     assert.deepEqual(game.actions, []);
+  }
+});
+
+test('real move previews draw dashed wind paths and arrows aligned with the selected isometric direction', () => {
+  const samples = new Map();
+  for (const level of CAMPAIGN.slice(0, 20)) {
+    let state = createState(level);
+    if (!samples.has('wait')) samples.set('wait', { level, state, preview: forecastAction(level, state, 'wait') });
+    for (const action of level.solution) {
+      const preview = forecastAction(level, state, action);
+      if (!samples.has(action)) samples.set(action, { level, state, preview });
+      if (!samples.has('wind') && preview.events.some(event => event.type === 'wind'))
+        samples.set('wind', { level, state, preview });
+      state = step(level, state, action).state;
+    }
+  }
+  for (const kind of ['left', 'right', 'up', 'down', 'wait', 'wind']) {
+    assert.ok(samples.has(kind), 'sample is drawn from a shipped route: ' + kind);
+    const { level, state, preview } = samples.get(kind);
+    for (const width of [320, 390]) {
+      const projection = createProjection(level, { x: 0, y: 0, w: width, h: 420 }, { scale: 1, panX: 0, panY: 0 });
+      const paints = [], icons = [], stack = [];
+      let points = [], dash = [7, 3], angle = 0;
+      const values = { globalAlpha: .6 };
+      const methods = {
+        save() { stack.push({ ...values, dash: dash.slice(), angle }); },
+        restore() { const saved = stack.pop(); Object.assign(values, saved); dash = saved.dash; angle = saved.angle; },
+        beginPath() { points = []; },
+        moveTo(x, y) { points.push([x, y]); }, lineTo(x, y) { points.push([x, y]); },
+        setLineDash(value) { dash = value.slice(); }, rotate(value) { angle += value; },
+        stroke() { paints.push({ color: values.strokeStyle, points: points.slice(), dash: dash.slice() }); }
+      };
+      const ctx = new Proxy(values, { get(target, key) { return key in target ? target[key] : methods[key] || (() => {}); } });
+      const renderer = new Renderer({ getContext: () => ctx });
+      renderer.icon = type => icons.push({ type, angle });
+      drawActionPreview(renderer, { page: 'game', level, state, actionPreview: preview }, projection);
+      const badge = icons.find(icon => icon.type === 'arrow-right' || icon.type === 'hourglass');
+      const route = paints.find(paint => paint.color === '#f3be68');
+      if (preview.action === 'wait') {
+        assert.equal(badge.type, 'hourglass'); assert.equal(badge.angle, 0);
+        assert.equal(route, undefined, 'waiting has no fictitious movement segment');
+      } else {
+        const from = projection.point(state.player), to = projection.point(preview.entry);
+        assert.ok(Math.abs(Math.cos(badge.angle) * (to[1] - from[1]) - Math.sin(badge.angle) * (to[0] - from[0])) < 1e-9);
+        assert.ok(Math.cos(badge.angle) * (to[0] - from[0]) + Math.sin(badge.angle) * (to[1] - from[1]) > 0);
+        assert.deepEqual(route.dash, [4, 4]);
+        const cells = [state.player, preview.entry, preview.state.player].filter((cell, index, all) => !index || cell !== all[index - 1]);
+        assert.deepEqual(route.points, cells.map(projection.point), 'the dashed path includes the actual wind corner');
+      }
+      assert.ok(paints.filter(paint => paint.color === '#f8d398').every(paint => paint.dash.length === 0), 'landing markers remain solid');
+      assert.deepEqual(dash, [7, 3]); assert.equal(values.globalAlpha, .6); assert.equal(stack.length, 0);
+    }
   }
 });
 

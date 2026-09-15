@@ -47,6 +47,13 @@ function gameFor(level = CAMPAIGN[19]) {
     selected, acted, targeted };
 }
 
+const routeTools = {
+  4: ['oil'], 7: ['oil', 'kite'], 16: ['oil', 'kite', 'bridge'], 20: ['oil', 'kite', 'bridge'],
+  31: ['oil', 'kite', 'echo'], 53: ['oil', 'kite', 'bridge', 'echo'],
+  121: ['oil', 'kite', 'bridge', 'echo'], 301: ['oil', 'kite', 'bridge', 'echo'],
+  601: ['oil', 'kite', 'bridge', 'echo'], 999: ['oil', 'kite', 'bridge', 'echo']
+};
+
 test('supplies fit the board above their controls on short and wide screens', () => {
   for (const [width, height] of [[390, 700], [452, 700], [500, 700], [390, 844]]) {
     for (const id of [4, 7, 16, 20, 121, 301, 601, 999]) {
@@ -57,7 +64,7 @@ test('supplies fit the board above their controls on short and wide screens', ()
       game.selectItem = selectItem; r.hits = []; ellipses.length = 0;
       drawGame(r, game, 1000);
       const layout = controlLayout(r, game), cards = r.hits.filter(hit => hit.action.itemId);
-      assert.equal(cards.length, id >= 31 ? 4 : 3);
+      assert.deepEqual(cards.map(card => card.action.itemId), routeTools[id]);
       assert.ok(r.boardProjection.halfW > 0 && r.boardProjection.halfW <= previousHalfW,
         `level ${id}: opening the satchel allocates its own space at ${width}x${height}`);
       const bounds = r.boardRect, projection = r.boardGeometry.projection;
@@ -82,7 +89,7 @@ test('first lessons and mechanic guides leave the satchel hidden', () => {
   assert.equal(itemTrayLayout(review, null, 590).visible, false);
 });
 
-test('supply labels fit their paper cards and unavailable supplies explain themselves when tapped', () => {
+test('route-specific supply cards omit locked and impossible tools while keeping explanations for later use', () => {
   for (const id of [4, 7, 16, 20, 31, 53, 301, 999]) {
     const game = gameFor(CAMPAIGN[id - 1]), { r, texts } = renderer();
     const layout = itemTrayLayout(game, null, 590);
@@ -95,7 +102,12 @@ test('supply labels fit their paper cards and unavailable supplies explain thems
       assert.ok(text.y >= card.y + 10 && text.y <= card.y + card.h - 10);
     }
     r.hits.forEach(hit => hit.action());
-    assert.deepEqual(game.selected, id >= 31 ? ['oil', 'kite', 'bridge', 'echo'] : ['oil', 'kite', 'bridge'], 'locked and targetless supplies retain explanation taps');
+    assert.deepEqual(game.selected, routeTools[id]);
+    assert.ok(!texts.some(text => /关开启|本关没有纸桥/.test(text.value)));
+    const before = layout.cards.map(card => ({ id: card.item.id, x: card.x, w: card.w }));
+    game.state.letters = []; game.state.seals = [];
+    assert.deepEqual(itemTrayLayout(game, null, 590).cards.map(card => ({ id: card.item.id, x: card.x, w: card.w })), before,
+      'collecting a target never moves another tool under the player\'s finger');
     assert.equal(game.state.turn, 0);
     assert.equal(game.state.itemsUsed, 0);
   }

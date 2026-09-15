@@ -37,12 +37,17 @@ function controlLayout(r, game) {
   // bottom spacer for readable guidance while retaining an 8px touch inset.
   const aiming = !!game.selectedItem;
   const preview = game.actionPreview && game.actionPreview.source === game.state ? game.actionPreview : null;
-  const hintLines = r.wrapLines(preview ? previewMessage(preview) : aiming ? itemAimHint(game) : game.playHint(), !aiming && ready && !preview ? 278 : 310, 12), buttonY = r.H - CONTROL.height - 8;
-  const hintHeight = preview ? Math.max(64, hintLines.length * 18 + 30)
-    : guide ? guideCardLayout(r, guide).height : Math.max(PLAY_HINT_HEIGHT, hintLines.length * 18 + 14);
+  const normalLines = r.wrapLines(aiming ? itemAimHint(game) : game.playHint(), !aiming && ready ? 278 : 310, 12);
+  const buttonY = r.H - CONTROL.height - 8;
+  const normalHeight = guide ? guideCardLayout(r, guide).height : Math.max(PLAY_HINT_HEIGHT, normalLines.length * 18 + 14);
+  const boardHintY = buttonY - normalHeight - 8;
+  const tray = itemTrayLayout(game, guide && !guide.interactive ? guide : null, boardHintY);
+  const hintLines = preview ? r.wrapLines(previewMessage(preview), 310, 12) : normalLines;
+  // A held forecast temporarily uses the satchel area when it needs more room.
+  // Keep the board and the pressed tile in their original positions throughout.
+  const hintHeight = preview ? Math.max(normalHeight, hintLines.length * 16 + 18) : normalHeight;
   const hintY = buttonY - hintHeight - 8;
-  return { buttonY, hintY, hintHeight, hintLines, ready, guide, aiming, preview,
-    tray: itemTrayLayout(game, guide && !guide.interactive ? guide : null, hintY) };
+  return { buttonY, hintY, hintHeight, hintLines, boardHintY, ready, guide, aiming, preview, tray };
 }
 
 function drawControls(r, game, layout, now, feedback) {
@@ -52,8 +57,9 @@ function drawControls(r, game, layout, now, feedback) {
   const warning = game.state.status === 'failed' || game.state.energy <= 3;
   if (layout.preview) {
     r.panel(24, hintY, 342, hintHeight, { radius: 12, fill: C.panel, stroke: C.blue, flat: true });
-    hintLines.forEach((line, index) => r.text(line, 195, hintY + 18 + index * 18, 12, C.ink, 'center', '600'));
-    r.text('预览中 · 松手取消，再点一次行动', 195, hintY + hintHeight - 13, 10, C.blueText, 'center');
+    const textY = hintY + (hintHeight - 18 - (hintLines.length - 1) * 16) / 2;
+    hintLines.forEach((line, index) => r.text(line, 195, textY + index * 16, 12, C.ink, 'center', '600'));
+    r.text('松手不行动 · 轻点确认这一步', 195, hintY + hintHeight - 9, 10, C.blueText, 'center');
   } else if (guide) drawGuideCard(r, game, guide, hintY);
   else if (!drawItemAimHint(r, game, layout) && !drawContextFeedback(r, feedback, layout, now)) {
     r.panel(24, hintY, 342, hintHeight, { radius: 13, fill: warning ? '#fbebdf' : ready ? '#e6f0e2' : '#f8faf1',
@@ -95,7 +101,7 @@ function gameBoardRect(r, layout) {
   const top = 148 + timelineSpace, gap = 4;
   const itemSpace = layout.tray ? layout.tray.reserve : 0;
   return { x: r.viewport.x, y: top, w: r.viewport.w,
-    h: layout.hintY - top - gap - itemSpace,
+    h: (layout.boardHintY ?? layout.hintY) - top - gap - itemSpace,
     paddingY: 52, centerOffsetY: 2 };
 }
 
@@ -125,7 +131,10 @@ function drawGame(r, game, now) {
   drawObjectives(r, game, now, feedback);
   const timeline = { x: 24, y: 151, w: 342, h: ECHO_TIMELINE_HEIGHT };
   const blockingGuide = layout.guide && !layout.guide.interactive;
-  const stageNotice = drawStageNotice(r, game, now, timeline, !!blockingGuide || layout.aiming || !!layout.preview);
+  // Pending blue tickets need the forecast even when all orange letters were
+  // just collected; the objectives already acknowledge that milestone.
+  const stageNotice = drawStageNotice(r, game, now, timeline,
+    !!blockingGuide || layout.aiming || !!layout.preview || game.state.seals.length > 0);
   if (!blockingGuide && !stageNotice) drawEchoTimeline(r, game, timeline);
   // Gameplay ambience is clipped to the dynamic board band and painted beneath
   // the island, keeping the HUD and controls still while the scenery breathes.
@@ -136,7 +145,7 @@ function drawGame(r, game, now) {
   drawBoard(r, game, now, boardRect, game.modal ? null : layout.guide);
   drawCollectionFlights(r, game, now);
   drawGuideOverlay(r, game, layout.guide, now);
-  drawItemTray(r, game, layout.tray);
+  if (!layout.preview) drawItemTray(r, game, layout.tray);
   drawControls(r, game, layout, now, feedback);
 }
 

@@ -83,15 +83,20 @@ function drawActionPreview(r, game, projection) {
     c.strokeStyle = color; c.lineWidth = 2; c.stroke();
   };
   c.save();
-  c.setLineDash([4, 4]);
   const route = [preview.source.player, preview.entry, preview.state.player].filter((cell, i, cells) => !i || cell !== cells[i - 1]);
-  if (route.length > 1) r.line(route.map(point), '#f3be68', 2.5);
-  ring(preview.state.player, preview.state.status === 'failed' ? '#e29b87' : '#f8d398');
+  if (route.length > 1) r.line(route.map(point), '#f3be68', 2.5, [4, 4]);
   c.setLineDash([]);
+  ring(preview.state.player, preview.state.status === 'failed' ? '#e29b87' : '#f8d398');
   const [x, y] = point(preview.state.player);
   c.globalAlpha *= .82;
   r.circle(x, y - halfH * .3, Math.max(7, halfW * .19), '#f6d995', '#fff3d0');
-  r.icon(preview.action === 'wait' ? 'hourglass' : 'arrow-right', x, y - halfH * .3, Math.max(10, halfW * .27), '#544c45');
+  c.save(); c.translate(x, y - halfH * .3);
+  if (preview.action !== 'wait') {
+    const [dx, dy] = projection.vector(preview.action);
+    c.rotate(Math.atan2(dy, dx));
+  }
+  r.icon(preview.action === 'wait' ? 'hourglass' : 'arrow-right', 0, 0, Math.max(10, halfW * .27), '#544c45');
+  c.restore();
   if (preview.state.echo !== null) {
     ring(preview.state.echo, '#78e1e8', .46);
     const [ex, ey] = point(preview.state.echo);

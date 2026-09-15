@@ -17,16 +17,19 @@ function measureModal(r, modal, navigation = null, helpHeight = 0, compact = fal
   const titleSize = 22, titleHeight = 30, lineHeight = compact ? 20 : 22;
   const touchHeight = Math.max(CONTROL.compactHeight, 44 / (r.scale || 1));
   const result = modal.kind === 'win' || modal.kind === 'fail';
-  let cursor = modal.journeyProgress ? 86 : modal.sections ? 24 : result ? compact ? 64 : 96 : 76;
+  let cursor = 76;
+  if (modal.journeyProgress) cursor = compact ? 72 : 86;
+  else if (modal.sections) cursor = compact ? 18 : 24;
+  else if (result) cursor = compact ? 64 : 96;
   const kickerY = modal.kicker ? cursor + 5 : null;
   if (modal.kicker) cursor += 22;
   const title = r.wrapLines(modal.title, width, titleSize, '700');
   const titleY = cursor + titleHeight / 2;
   cursor += title.length * titleHeight;
   let starsY = null;
-  if (modal.stars) { cursor += compact ? 10 : 16; starsY = cursor + 18; cursor += 36; }
+  if (modal.stars) { cursor += compact ? 6 : 16; starsY = cursor + 18; cursor += 36; }
   const help = modal.sections ? layoutHelp(r, modal.sections, width) : null;
-  const helpY = help ? cursor + 22 : null;
+  const helpY = help ? cursor + (compact ? 14 : 22) : null;
   if (help) cursor = helpY + Math.max(help.height, helpHeight);
   const paragraphs = [];
   if (modal.lines.length) cursor += compact ? 14 : 18;
@@ -41,39 +44,41 @@ function measureModal(r, modal, navigation = null, helpHeight = 0, compact = fal
     const style = { style: 'text', icon: 'stamp', trailing: 'chevron', size: 12,
       disabled: typeof modal.progressAction !== 'function' };
     const layout = buttonLayout(r, modal.progressLine, width, style);
-    cursor += 12;
+    cursor += compact ? 8 : 12;
     progress = { text: modal.progressLine, action: modal.progressAction, x: x + inset,
       y: cursor, w: width, h: Math.max(touchHeight, layout.lines.length * layout.lineHeight + 16), style };
     cursor += progress.h;
   }
   if (navigation) {
-    cursor += 20;
+    cursor += compact ? 12 : 20;
     navigation = { ...navigation, y: cursor, h: touchHeight };
     cursor += touchHeight;
   }
-  if (modal.buttons.length) cursor += navigation ? 14 : progress ? 12 : 24;
+  const actionGap = compact ? 8 : navigation ? 14 : 12;
+  if (modal.buttons.length) cursor += navigation || progress ? actionGap : compact ? 16 : 24;
   const buttons = modal.buttons.map((button, index) => {
     const style = button.primary ? 'primary' : button.textOnly ? 'text' : 'secondary';
     const layout = buttonLayout(r, button.text, width, { style, icon: button.icon });
     const buttonHeight = Math.max(button.primary ? CONTROL.height : CONTROL.compactHeight, touchHeight,
       layout.lines.length * layout.lineHeight + 20);
-    if (index) cursor += 8;
+    if (index) cursor += compact ? 6 : 8;
     const result = { ...button, x: x + inset, y: cursor, w: width, h: buttonHeight, style };
     cursor += buttonHeight;
     return result;
   });
-  const h = cursor + 24;
+  const h = cursor + (compact ? 20 : 24);
   return { x, y: Math.max(24, (r.H - h) / 2), w, h, width, compact, kickerY, title, titleY, titleSize, titleHeight, starsY, help, helpY, paragraphs, lineHeight, progress, buttons, navigation };
 }
 
 function modalLayout(r, modal) {
   const available = r.H - 48;
   let full = measureModal(r, modal);
-  if (full.h > available && (modal.kind === 'win' || modal.kind === 'fail')) full = measureModal(r, modal, null, 0, true);
+  const compact = full.h > available;
+  if (compact) full = measureModal(r, modal, null, 0, true);
   if (!modal.sections || full.h <= available) return full;
-  // Keep whole help topics together and preserve readable type and full-sized
-  // close controls. Only the longer current-map help needs another page.
-  const frame = measureModal(r, { ...modal, sections: [] }, { page: 0, count: 1 });
+  // Keep topics intact and retain readable type and full-sized controls.
+  // Page bodies share the action frame's spacing and physical touch budget.
+  const frame = measureModal(r, { ...modal, sections: [] }, { page: 0, count: 1 }, 0, compact);
   const bodyHeight = Math.max(0, available - frame.h), pages = [];
   let sections = [];
   for (const section of modal.sections) {
@@ -93,7 +98,7 @@ function modalLayout(r, modal) {
   const pageHeight = Math.max(...pages.map(topics => layoutHelp(r, topics, full.width).height));
   return measureModal(r, { ...modal, sections: pages[page] }, {
     page, count: pages.length, previous: turn(-1), next: turn(1)
-  }, pageHeight);
+  }, pageHeight, compact);
 }
 
 function drawModal(r, modal, now, resultAge = null) {

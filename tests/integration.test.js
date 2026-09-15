@@ -859,6 +859,68 @@ test('new mechanics teach through the actual board action while preserving free 
   }
 });
 
+test('interactive mechanic guidance preserves one buffered action during movement', t => {
+  const h = harness({ mechanics: true, development: true }); t.after(() => h.destroy());
+  h.start(CAMPAIGN[12]); h.advance(1200);
+  for (const action of h.game.level.solution) {
+    if (h.game.guideStep()?.mechanic === 'wind') break;
+    h.act(action);
+  }
+  assert.equal(h.game.guideStep().interactive, true);
+  h.act('wait');
+  const turn = h.game.state.turn;
+  h.game.act('wait');
+  assert.equal(h.game.pendingAction.action, 'wait');
+  assert.equal(h.game.state.turn, turn);
+  h.advance(MOVE_MS);
+  assert.equal(h.game.pendingAction, null);
+  assert.equal(h.game.state.turn, turn + 1);
+  assert.deepEqual(h.game.state, replayItems(h.game.level, h.game.actions));
+});
+
+test('held forecasts preserve board geometry and restore the same tool targets on release', t => {
+  for (const [id, guide, turns, action] of [[1, false, 0, 'right'], [1, true, 0, 'right'], [20, false, 9, 'up'], [31, false, 0, 'wait'], [999, false, 0, 'wait']]) {
+    for (const metrics of [{ width: 320, height: 568, pixelRatio: 2, safeTop: 72, safeBottom: 0 },
+      { width: 390, height: 844, pixelRatio: 3, safeTop: 96, safeBottom: 34 }]) {
+      const h = harness({ guide, metrics, development: true }); t.after(() => h.destroy());
+      h.start(CAMPAIGN[id - 1]);
+      h.game.level.solution.slice(0, turns).forEach(step => h.act(step));
+      h.game.camera.reset(); h.draw(1200);
+      const game = h.game, r = game.renderer;
+      const intent = guide ? game.guideStep().action : action;
+      const cell = intent === 'wait' ? game.state.player : require('../src/engine').neighbor(game.level, game.state.player, intent, game.state);
+      const [px, py] = r.boardProjection.point(cell), x = px * r.scale + r.ox, y = py * r.scale + r.oy;
+      const bounds = { ...r.boardRect }, positions = game.state.history.map(r.boardProjection.point);
+      const tools = r.hits.filter(hit => hit.action.itemId).map(hit => [hit.action.itemId, hit.x, hit.y, hit.w]);
+      const state = game.state, saved = game.store.loadRun();
+      game.pointerEvent(x, y, 'start'); h.advance(require('../src/action-preview').PREVIEW_HOLD_MS);
+      assert.equal(game.actionPreview.action, intent);
+      assert.deepEqual(r.boardRect, bounds, `level ${id}: long press must not reframe the island`);
+      assert.deepEqual(game.state.history.map(r.boardProjection.point), positions);
+      assert.equal(r.hits.some(hit => hit.action.itemId), false);
+      game.pointerEvent(x, y, 'end'); h.draw();
+      assert.deepEqual(r.boardRect, bounds);
+      assert.deepEqual(r.hits.filter(hit => hit.action.itemId).map(hit => [hit.action.itemId, hit.x, hit.y, hit.w]), tools);
+      assert.equal(game.state, state);
+      assert.deepEqual(game.store.loadRun(), saved);
+    }
+  }
+});
+
+test('collecting the last orange letter keeps the pending blue-ticket forecast visible', t => {
+  const h = harness({ development: true }); t.after(() => h.destroy());
+  h.start(CAMPAIGN[19]);
+  for (const action of h.game.level.solution) {
+    h.act(action);
+    if (!h.game.state.letters.length && h.game.state.seals.length) break;
+  }
+  assert.equal(h.game.state.letters.length, 0);
+  assert.ok(h.game.state.seals.length > 0);
+  h.draw(MOVE_MS + 200);
+  assert.ok(h.calls.some(call => call.method === 'fillText' && call.args[0] === '回声预告'));
+  assert.ok(!h.calls.some(call => call.method === 'fillText' && call.args[0] === '信笺已收齐'));
+});
+
 test('the first-route teaching callout supports a safe hold preview before its real tap', t => {
   const h = harness({ guide: true }); t.after(() => h.destroy()); h.start(); h.draw(1200);
   const game = h.game, guide = game.guideStep(), state = game.state;
@@ -2207,7 +2269,9 @@ test('every campaign screen renders finite geometry on small phones and tablets'
       assert.equal(controls[0].x, 201, 'the disabled undo button has no click target');
       const boardBottom = h.game.renderer.boardRect.y + h.game.renderer.boardRect.h;
       assert.ok(controls.every(hit => hit.y > boardBottom && hit.y + hit.h <= h.game.renderer.H));
-      assert.equal(h.calls.some(call => call.method === 'fillText' && call.args[0] === '回声预告'), false);
+      const forecastLabels = h.calls.filter(call => call.method === 'fillText' && call.args[0] === '回声预告');
+      assert.equal(forecastLabels.length, 1);
+      assert.ok(forecastLabels[0].args[2] < h.game.renderer.boardRect.y, 'the forecast belongs above the board');
       h.game.help(); h.draw();
     }
     for (const page of ['home', 'levels', 'collection']) { h.game.openPage(page); h.draw(); }
@@ -2774,7 +2838,8 @@ test('the game screen keeps one route target, undo and wait without duplicate bo
   assert.ok(texts().includes('等一拍'));
   assert.equal(texts().filter(text => text.includes('已走 0 拍') && text.includes('三星目标')).length, 1,
     'one compact header communicates the current route target');
-  assert.equal(texts().some(text => /回声预告|1×|^[A-F][1-6]$|^[A-F]$/.test(text)), false);
+  assert.equal(texts().filter(text => text === '回声预告').length, 1, 'the timeline has one clear heading');
+  assert.equal(texts().some(text => /1×|^[A-F][1-6]$|^[A-F]$/.test(text)), false);
   assert.equal(h.game.renderer.hits.some(hit => hit.w === 50 && hit.h === 42), false, 'the direction pad is removed');
   h.act(CAMPAIGN[15].solution[0]);
   h.game.undo();

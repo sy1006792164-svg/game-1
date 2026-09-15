@@ -18,7 +18,9 @@ function itemTrayLayout(game, guide, hintY) {
   const visible = !guide && !game.reviewing && game.level.id >= 4 && typeof game.selectItem === 'function';
   if (!visible) return { visible: false, height: 0, reserve: 0, cards: [] };
   const y = hintY - ITEM_TRAY_HEIGHT - ITEM_TRAY_GAP;
-  const items = ITEMS.filter(item => item.id !== 'echo' || game.level.id >= item.unlock);
+  // Keep the row stable during a route, but omit tools this route cannot use.
+  const items = ITEMS.filter(item => game.level.id >= item.unlock &&
+    (item.id !== 'bridge' || (game.level.bridges || []).length > 0));
   const gap = 6;
   const width = (342 - (items.length - 1) * gap) / items.length;
   return { visible: true, y, height: ITEM_TRAY_HEIGHT, reserve: ITEM_TRAY_HEIGHT + ITEM_TRAY_GAP,
@@ -74,7 +76,6 @@ function drawItemTray(r, game, layout) {
     const { item, x, y, w, h } = card, tone = TONES[item.id];
     const compact = w < 100;
     const offer = itemOffer(game.level, game.state, item.id);
-    const locked = game.level.id < item.unlock;
     const remaining = game.state.inventory && game.state.inventory[item.id] || 0;
     const selected = game.selectedItem === item.id;
     const muted = !offer.eligible && !selected;
@@ -87,23 +88,20 @@ function drawItemTray(r, game, layout) {
     const nameInset = compact ? 31 : 38;
     r.label(item.name, x + nameInset, y + 16, w - nameInset - 8, compact ? 12 : 13,
       muted ? C.muted : C.ink, 'left', '600');
-    if (locked) r.icon('lock', x + w - 12, y + 30, 10, C.muted);
-    else r.label('×' + remaining, x + w - 9, y + 30, 38, 10, C.muted, 'right', '600');
-    const video = !selected && !locked && offer.eligible && remaining === 0;
+    r.label('×' + remaining, x + w - 9, y + 30, 38, 10, C.muted, 'right', '600');
+    const video = !selected && offer.eligible && remaining === 0;
     const station = remaining === 0 && pendingSupplyCells(game.level, game.state, item.id).length > 0;
-    let detail = selected ? '请点亮起的目标' : locked ? '第 ' + item.unlock + ' 关开启' :
-      item.id === 'bridge' && !(game.level.bridges || []).length ? '本关没有纸桥' :
+    let detail = selected ? '请点亮起的目标' :
       !offer.eligible ? offer.reason : video ? game.platform.kind === 'browser' ? '微信视频获取' :
         advice && advice.itemId === item.id ? '建议·看视频获取' : '看视频获取' : item.short;
     if (compact) {
       if (selected) detail = '点亮起的目标';
-      else if (locked) detail = item.unlock + '关开启';
       else if (video) detail = game.platform.kind === 'browser' ? '微信视频获取' : advice && advice.itemId === item.id ? '建议·看视频' : '看视频获取';
       else if (!offer.eligible) detail = item.id === 'echo' ? !(game.state.seals || []).length ? '蓝票已齐' : '先走过蓝票' :
         item.id === 'kite' ? (game.state.letters || []).length ? '信笺不在范围' : '信笺已齐' :
         !(game.level.bridges || []).length ? '本关没有纸桥' : (game.level.bridges || []).some(cell => !(game.state.bridges || []).includes(cell)) ? '靠近断桥再修' : '纸桥完好';
     }
-    if (!selected && !locked && station) detail = '驿站免费领取';
+    if (!selected && station) detail = '驿站免费领取';
     if (video && !station && !compact) {
       r.round(x + 9, y + 40, 13, 10, 2, null, tone.ink);
       const c = r.ctx; c.beginPath(); c.moveTo(x + 14, y + 42); c.lineTo(x + 18, y + 45); c.lineTo(x + 14, y + 48); c.closePath();
@@ -111,7 +109,7 @@ function drawItemTray(r, game, layout) {
     }
     r.label(detail, x + w / 2 + (video && !station && !compact ? 9 : 0), y + 45,
       w - (video && !station && !compact ? 34 : 14), 11, selected || station ? C.green : C.muted, 'center');
-    // Locked and temporarily unavailable tools stay inspectable, explaining their rule.
+    // Temporarily unavailable tools explain their rule without changing row order.
     if (canInspect) {
       const action = Object.assign(() => game.selectItem(item.id), { itemId: item.id });
       r.hit(x, y, w, h, action);

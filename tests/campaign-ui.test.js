@@ -15,6 +15,8 @@ const { chapterMapNodes } = require('../src/chapter-map');
 const { ART_SIZE } = require('../src/art-assets');
 const { visibleStamps, setCollectionFilter } = require('../src/stamp-collection');
 const { openStampDetail, stampDetailKey } = require('../src/stamp-detail-view');
+const { replay } = require('../src/engine');
+const { PROFILE_KEY, RUN_KEY } = require('../src/storage');
 
 // Minimal canvas and platform stubs: enough to run the renderer and read back the text it draws.
 function harness(options = {}) {
@@ -359,6 +361,117 @@ test('collection targets and return-to-progress preserve and locate a saved repl
   assert.equal(h.game.nextLevel().id, 15, 'the saved replay and next campaign route remain distinct');
   assert.equal(h.game.selectLevel(7), true);
   assert.deepEqual(h.game.store.loadRun(), run, 'selecting the same saved route restores it');
+});
+
+test('choosing another route preserves played progress until its departure is confirmed', () => {
+  const h = harness(), game = h.game;
+  game.store.recordWin(1, 3, CAMPAIGN[0].par, 'campaign');
+  game.selectLevel(2);
+  game.openPage('levels');
+  game.selectLevel(1);
+  assert.equal(game.level.id, 1, 'an untouched route does not add a confirmation step');
+  game.actions = CAMPAIGN[0].solution.slice(0, 1);
+  game.state = replay(game.level, game.actions); game.persist();
+  game.openPage('levels');
+  const saved = game.store.loadRun();
+  assert.equal(game.selectLevel(2), true);
+  assert.equal(game.modal.kind, 'route-plan');
+  assert.deepEqual(game.store.loadRun(), saved, 'opening preparation preserves the active route');
+  assert.equal(game.level.id, 1);
+  assert.ok(game.modal.sections.some(section => section.text.includes('开始这封信会替换该路线')));
+  game.modal.buttons.at(-1).action();
+  assert.equal(game.modal, null);
+  assert.deepEqual(game.store.loadRun(), saved, 'returning keeps progress and its supplies');
+  assert.equal(game.selectLevel(1), true);
+  assert.deepEqual(game.actions, saved.actions, 'the active route still restores directly');
+  game.openPage('levels'); game.selectLevel(2);
+  game.modal.buttons.find(button => button.primary).action();
+  assert.equal(game.page, 'game'); assert.equal(game.level.id, 2);
+  assert.deepEqual(game.store.loadRun().actions, []);
+});
+
+test('returning home from a delivery retains settled scores and retries a failed save', () => {
+  for (const firstDelivery of [true, false]) for (const failSave of [false, true]) {
+    const h = harness(), game = h.game, level = CAMPAIGN[0];
+    if (!firstDelivery) game.store.recordWin(level.id, 3, level.par, 'campaign');
+    game.start(level); game.guideEnabled = false;
+    game.actions = level.solution.slice(0, -1);
+    game.state = replay(level, game.actions); game.persist();
+    const diskRun = game.platform.storage.get(RUN_KEY), set = game.platform.storage.set;
+    if (failSave) game.platform.storage.set = (key, value) => {
+      if (key === PROFILE_KEY) throw new Error('storage temporarily unavailable');
+      set(key, value);
+    };
+    game.actions = level.solution.slice(); game.state = replay(level, game.actions);
+    assert.equal(game.state.status, 'won'); game.victory();
+    assert.equal(game.modal.kind, 'win');
+    assert.equal(game.modal.delivery.rewards.length > 0, firstDelivery, 'new stamp art remains part of the delivery');
+    assert.equal(game.modal.buttons.length, 3, 'receipt navigation stays consistent when a stamp is earned');
+    const settled = game.profile().completed[level.id], journey = game.journey();
+    const home = game.modal.buttons.find(button => button.text === '返回邮局');
+    assert.ok(home && !home.primary, 'every completed route offers an explicit secondary exit');
+    home.action();
+    assert.equal(game.page, 'home'); assert.equal(game.modal, null);
+    assert.deepEqual(game.profile().completed[level.id], settled);
+    assert.deepEqual(game.journey(), journey);
+    assert.equal(game.store.loadRun(), null, 'returning does not recreate a won route');
+    if (failSave) {
+      assert.equal(game.store.getStatus().persisted, false);
+      assert.deepEqual(game.platform.storage.get(RUN_KEY), diskRun, 'the recoverable route remains on disk until its score is safe');
+      game.platform.storage.set = set; game.store.flush();
+    }
+    assert.equal(game.store.getStatus().persisted, true);
+    assert.deepEqual(game.platform.storage.get(PROFILE_KEY).completed[level.id], settled);
+    assert.equal(game.platform.storage.get(RUN_KEY), undefined);
+  }
+});
+
+test('legacy state snapshots stay intact when a different route is only being considered', () => {
+  for (const levelId of [1, '1']) {
+    const h = harness(), game = h.game;
+    game.store.recordWin(1, 3, CAMPAIGN[0].par, 'campaign');
+    const saved = { mode: 'campaign', levelId, state: { tiles: [0, 1, 2], turns: 4 } };
+    assert.equal(game.store.saveRun(saved), true);
+    game.openPage('levels');
+    assert.equal(game.selectLevel(2), true);
+    assert.equal(game.modal.kind, 'route-plan');
+    assert.deepEqual(game.store.loadRun(), saved);
+    game.modal.buttons.at(-1).action();
+    assert.deepEqual(game.store.loadRun(), saved, 'returning keeps the legacy snapshot byte-for-byte');
+    game.selectLevel(2); game.modal.buttons.find(button => button.primary).action();
+    assert.equal(game.level.id, 2); assert.deepEqual(game.store.loadRun().actions, []);
+    game.home(); game.store.saveRun(saved);
+    assert.equal(game.selectLevel(1), true, 'selecting the original legacy route still has a usable recovery path');
+    assert.equal(game.page, 'game'); assert.equal(game.level.id, 1); assert.equal(game.modal, null);
+  }
+});
+
+test('the first delivery keeps every result action within compact safe areas', () => {
+  const screens = [
+    { width: 240, height: 480, pixelRatio: 1, safeTop: 60, safeBottom: 0 },
+    { width: 320, height: 568, pixelRatio: 2, safeTop: 72, safeBottom: 0 },
+    { width: 390, height: 844, pixelRatio: 3, safeTop: 96, safeBottom: 34 }
+  ];
+  for (const metrics of screens) {
+    const h = harness({ metrics }), game = h.game, r = game.renderer;
+    r.ctx.measureText = text => {
+      const size = Number(r.ctx.font.match(/([\d.]+)px/)[1]);
+      return { width: [...String(text)].reduce((sum, char) => sum + size * (char.charCodeAt(0) > 255 ? 1 : .55), 0) };
+    };
+    r.wrapCache.clear(); r.labelCache.clear();
+    game.start(CAMPAIGN[0]); game.guideEnabled = true;
+    game.actions = game.level.solution.slice(); game.state = replay(game.level, game.actions); game.victory();
+    h.draw(); r.hits = [];
+    const bounds = r.modal(game.modal, game.platform.now());
+    assert.ok(bounds.y >= 24 && bounds.y + bounds.h <= r.H - 24, 'the full receipt keeps both safe insets');
+    for (const button of game.modal.buttons) {
+      const hit = r.hits.find(entry => entry.action === button.action);
+      assert.ok(hit && hit.h * r.scale >= 44 - 1e-7, 'each action has a full physical touch target');
+      assert.ok(hit.y >= bounds.y + 20 - 1e-7 && hit.y + hit.h <= bounds.y + bounds.h - 20 + 1e-7,
+        metrics.width + ': ' + button.text + ' keeps its inset');
+    }
+    assert.ok(game.modal.buttons.some(button => button.text === '返回邮局'));
+  }
 });
 
 test('album filters, detail paging and next-stamp locating share the same real collection', () => {

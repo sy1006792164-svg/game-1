@@ -119,7 +119,7 @@ test('assisted deliveries with relights and a stamp reward keep all result actio
     game.modal = { kind: 'win', title: '信已送达', stars: 1,
       lines: [...deliveryResultLines(game.level, game.state, 1, { stars: 3, bestTurns: 30 }, true), '收到新邮票「山间的问候」'],
       buttons: [{ text: '下一封信', primary: true, action() {} }, { text: '再走一次', textOnly: true, action() {} },
-        { text: '看看邮票册', textOnly: true, action() {} }] };
+        { text: '返回邮局', textOnly: true, icon: 'home', action() {} }] };
     const bounds = h.draw();
     assert.ok(bounds.y + bounds.h <= h.r.H, 'combined tool and relight details fit the safe viewport');
     assert.equal(h.r.hits.length, 3);
@@ -129,6 +129,7 @@ test('assisted deliveries with relights and a stamp reward keep all result actio
 
 test('daily journey is a measured result button with a full target and no overlap on compact screens', () => {
   const resultScreens = [...screens,
+    { width: 240, height: 480, safeTop: 60, safeBottom: 0, pixelRatio: 1 },
     { width: 390, height: 700, safeTop: 0, safeBottom: 0, pixelRatio: 1 },
     { width: 390, height: 844, safeTop: 0, safeBottom: 0, pixelRatio: 1 }];
   for (const metrics of resultScreens) for (const saved of [false, true]) for (const tutorial of [false, true]) {
@@ -137,12 +138,11 @@ test('daily journey is a measured result button with a full target and no overla
     game.state = { status: 'won', turn: 2048, itemsUsed: tutorial ? 0 : 2048, revived: true, reviveCount: 340 };
     let opened = 0;
     const lines = deliveryResultLines(game.level, game.state, 1, { stars: 3, bestTurns: 30 }, saved);
-    if (tutorial) lines.push('你收信；回声晚 3 次行动，替你收蓝票。', '收齐信和票，再走进邮局就能过关。');
     lines.push('收到新邮票「山间的问候」');
     game.modal = { kind: 'win', title: '信已送达', stars: 1,
       progressLine: '今日邮程 6/6 · 本关今日已记', progressAction: () => { opened++; }, lines,
       buttons: [{ text: '下一封信', primary: true, action() {} }, { text: '再走一次', icon: 'restart', textOnly: true, action() {} },
-        { text: '看看邮票册', icon: 'stamp', textOnly: true, action() {} }] };
+        { text: '返回邮局', icon: 'home', textOnly: true, action() {} }] };
     const bounds = h.draw(), label = `${metrics.width}x${metrics.height}/${saved}/${tutorial}`;
     const progress = h.r.hits.find(hit => hit.action === game.modal.progressAction);
     assert.ok(progress && progress.h * h.r.scale >= 44, label + ': daily journey uses a full screen-pixel touch target');

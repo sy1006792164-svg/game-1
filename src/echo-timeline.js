@@ -23,7 +23,7 @@ function drawEchoTimeline(r, game, rect) {
   const titleWidth = 83, column = (w - titleWidth - 6) / 3;
   c.save();
   r.icon('echo', x + 12, y + h / 2, 17, C.blueText);
-  r.text('三拍之后', x + 26, y + h / 2, 11, C.muted);
+  r.text('回声预告', x + 26, y + h / 2, 11, C.muted);
   r.line([[x + titleWidth + 8, y + h / 2], [x + w - 20, y + h / 2]], C.line, 1.5);
   for (const entry of getEchoForecast(game)) {
     const left = x + titleWidth + (entry.beat - 1) * column;

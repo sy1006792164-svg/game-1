@@ -235,6 +235,28 @@ test('post office hints recommend only enough waiting to finish the real queued 
   assert.equal(step(level, short, 'wait').state.status, 'failed');
 });
 
+test('ordered mail keeps immediate route feedback ahead of the next numbered letter', () => {
+  const level = CAMPAIGN[8], initial = createState(level);
+  const game = { level, state: initial, mode: 'campaign' };
+  assert.match(playHint(game, 2000), /先收第 1 封信/);
+  assert.match(playHint({ ...game, blockedAt: 1900 }, 2000), /这边不通/);
+  assert.match(playHint({ ...game, blockedAt: 0 }, 2000), /先收第 1 封信/,
+    'the numbered objective returns after collision feedback expires');
+
+  const echoState = replay(level, level.solution.slice(0, 12));
+  assert.ok(echoState.letters.length && echoState.energy > 3);
+  assert.ok(step(level, echoState, level.solution[12]).events.some(event => event.type === 'seal'));
+  assert.match(playHint({ ...game, state: echoState }, 2000), /下一步回声会收起蓝票/);
+
+  const postalLevel = CAMPAIGN[32], postalState = replay(postalLevel, postalLevel.solution.slice(0, 27));
+  assert.equal(postalState.player, postalLevel.exit);
+  assert.ok(postalState.letters.length && postalState.energy > 3);
+  assert.match(playHint({ ...game, level: postalLevel, state: postalState }, 2000), /已到邮局，还差.*封信/);
+
+  const lowLight = replay(level, Array(level.budget - 2).fill('wait'));
+  assert.match(playHint({ ...game, state: lowLight }, 2000), /只剩 2 拍/);
+});
+
 test('waiting recommendations along all 999 current and resumed v6 routes always complete the delivery', () => {
   let checked = 0, finalEchoTurns = 0;
   for (const level of CAMPAIGN.concat(CAMPAIGN.map(current => getLegacyLevel(current.id, '6')))) {

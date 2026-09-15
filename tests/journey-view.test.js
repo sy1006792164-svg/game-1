@@ -9,8 +9,9 @@ const { getJourney } = require('../src/journey');
 const { openJourney, openRoutePlan } = require('../src/journey-view');
 const { Renderer } = require('../src/renderer');
 const { drawModal } = require('../src/modal-view');
+const { mechanicStep } = require('../src/mechanic-guide');
 
-function harness(height, profile) {
+function harness(height, profile, scale = 1) {
   const noop = () => {}, labels = [];
   const ctx = new Proxy({ globalAlpha: 1, font: '14px sans-serif' }, {
     get(target, key) {
@@ -22,7 +23,7 @@ function harness(height, profile) {
     }
   });
   const renderer = new Renderer({ getContext: () => ctx });
-  renderer.H = height; renderer.reducedMotion = true; renderer.modalAt = 0;
+  renderer.H = height; renderer.scale = scale; renderer.reducedMotion = true; renderer.modalAt = 0;
   const game = { page: 'home', session: 1, renderer, modal: null,
     platform: { kind: 'wechat' }, ads: { isConfigured: () => true },
     busy: false, hidden: false, startupActive: () => false, unlocked: () => true,
@@ -43,6 +44,7 @@ function checkPages(h) {
     assert.ok(labels.every(label => label.y >= ui.y && label.y <= ui.y + ui.h), 'no text outside modal');
     for (const button of modal.buttons) assert.ok(renderer.hits.some(hit => hit.action === button.action), 'every action remains visible');
     assert.ok(renderer.hits.every(hit => hit.y >= ui.y && hit.y + hit.h <= ui.y + ui.h), 'all targets stay on screen');
+    assert.ok(renderer.hits.every(hit => hit.h * renderer.scale >= 44 - 1e-7), 'all actions retain a full physical touch target');
     seen.push(...ui.help.blocks.map(block => block.title));
     if (!ui.navigation || ui.navigation.page + 1 === ui.navigation.count) break;
     ui.navigation.next();
@@ -52,8 +54,8 @@ function checkPages(h) {
 
 test('journey plans and all difficulty tiers fit the minimum safe height with reachable actions', () => {
   const completed = Object.fromEntries(CAMPAIGN.slice(0, 400).map(level => [level.id, { stars: level.id % 2 ? 2 : 3, bestTurns: level.par }]));
-  for (const height of [700, 844]) {
-    const h = harness(height, { completed });
+  for (const [height, scale] of [[700, 1], [844, 1], [700, .6], [700, 496 / 732]]) {
+    const h = harness(height, { completed }, scale);
     openJourney(h.game); checkPages(h);
     for (const id of [1, 4, 7, 16, 31, 121, 301, 361, 999]) {
       h.game.modal = null;
@@ -110,4 +112,26 @@ test('route preparation keeps already earned supplies accessible when video is u
   supply.action();
   assert.equal(selected, 'oil');
   assert.equal(h.game.state.inventory.oil, 1, 'opening the supply chooser does not spend the item');
+});
+
+test('interactive station guidance keeps the route plan supply action available', () => {
+  const h = harness(700, { completed: {} }), level = CAMPAIGN[13];
+  h.game.page = 'game'; h.game.level = level; h.game.state = createState(level);
+  for (const action of level.solution.slice(0, 7)) h.game.state = step(level, h.game.state, action).state;
+  h.game.mechanicGuide = { ids: ['supply'], phase: 0 };
+  h.game.guideStep = () => mechanicStep(h.game);
+  assert.equal(h.game.guideStep().interactive, true);
+  assert.equal(h.game.guideStep().mechanic, 'supply');
+  let selected = null;
+  const messages = [];
+  h.game.selectItem = id => { selected = id; };
+  h.game.toast = message => messages.push(message);
+  const state = h.game.state;
+  openRoutePlan(h.game, level);
+  const supply = h.game.modal.buttons.find(button => button.text.startsWith('查看纸鸢'));
+  assert.ok(supply, 'the real route offers a nearby letter and an optional supply');
+  supply.action();
+  assert.equal(selected, 'kite', 'a freely playable mechanic introduction does not block opening supplies');
+  assert.deepEqual(messages, []);
+  assert.equal(h.game.state, state, 'inspecting supplies cannot move or award an item');
 });

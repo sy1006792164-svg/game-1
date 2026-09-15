@@ -83,10 +83,6 @@ function playHint(game, now) {
   if (!l || !s) return '';
   if (game.reviewing) return game.failureHint();
   if (s.status === 'won') return '信已送达。';
-  if (l.letterOrder && s.letters.length && s.energy > 3) {
-    const next = l.letterOrder.find(cell => s.letters.includes(cell));
-    return '顺序来信 · 先收第 ' + (l.letterOrder.indexOf(next) + 1) + ' 封信，再按编号继续；蓝票仍交给回声。';
-  }
   if (s.status === 'failed') return '灯火已耗尽。' + game.failureHint();
   if (game.blockedAt != null && now - game.blockedAt < 1400) return '这边不通，点亮起的相邻地砖试试。';
   if (!s.letters.length && !s.seals.length) return '收集完成，' + (s.energy <= 3 ? '只剩 ' + s.energy + ' 拍，' : '') + '前往亮起的邮局。';
@@ -107,6 +103,10 @@ function playHint(game, now) {
     return lowLight + '蓝票已在回声路上，不用折返，继续向邮局走。';
   }
   if (lowLight) return lowLight + '移动和等待都会耗灯；留好回邮局的路。';
+  if (l.letterOrder && s.letters.length) {
+    const next = l.letterOrder.find(cell => s.letters.includes(cell));
+    return '顺序来信 · 先收第 ' + (l.letterOrder.indexOf(next) + 1) + ' 封信，再按编号继续；蓝票仍交给回声。';
+  }
   if (s.turn === 0) {
     if (l.id <= 3) return '点亮起的相邻地砖移动，先走过蓝票。';
     if (l.experience) return l.experience.guidance;

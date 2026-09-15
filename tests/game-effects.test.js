@@ -73,6 +73,54 @@ function sample(record, game, age, options = {}, point = project, unit = 42) {
   return record.paints.length;
 }
 
+function campaignTurn(id, turn) {
+  const level = CAMPAIGN[id - 1], actions = level.solution.slice(0, turn);
+  let state = createState(level), previousState, moveEvents;
+  for (const action of actions) {
+    previousState = state;
+    const result = step(level, state, action);
+    assert.ok(result.moved, 'the sample follows a legal shipped route');
+    state = result.state; moveEvents = result.events;
+  }
+  return { level, previousState, state, moveEvents, actions, transitionAt: 1000, session: 1, undosUsed: 0 };
+}
+
+test('same-cell real pickups replace only the ordinary landing burst without changing event order or remaining effects', () => {
+  for (const [id, turn, type] of [[1, 3, 'letter'], [19, 3, 'light'], [73, 26, 'seal']]) {
+    const game = campaignTurn(id, turn), original = JSON.stringify(game.moveEvents);
+    const move = game.moveEvents.find(event => event.type === 'move');
+    assert.ok(game.moveEvents.some(event => event.type === type && event.cell === move.cell));
+    // Retain the original index so this expected frame also checks that other
+    // particles keep their deterministic trajectories and wind references.
+    const pickupOnly = { ...game, moveEvents: game.moveEvents.map(event => event === move ? { ...event, type: 'omitted' } : event) };
+    for (const quality of ['high', 'low']) for (const age of [126, 200, 400, 539, 620]) {
+      const actual = recorder(quality), expected = recorder(quality);
+      sample(actual, game, age); sample(expected, pickupOnly, age);
+      assert.deepEqual(actual.commands, expected.commands, `${type}: only the duplicate move geometry is omitted`);
+      assert.deepEqual(actual.paints, expected.paints, `${type}: collection and any bridge effects keep their colors and opacity`);
+      assert.ok(actual.paints.length > 0, `${type}: the collection stays visible`);
+      assert.deepEqual(actual.r.motionEffects.batches[0].events.slice(0, game.moveEvents.length), game.moveEvents);
+    }
+    assert.equal(JSON.stringify(game.moveEvents), original, 'rendering cannot edit engine events');
+  }
+});
+
+test('remote echo pickups and wind landings retain the original ordinary step feedback', () => {
+  for (const [id, turn, type] of [[1, 4, 'seal'], [14, 24, 'letter'], [34, 21, 'light']]) {
+    const game = campaignTurn(id, turn), move = game.moveEvents.find(event => event.type === 'move');
+    const pickup = game.moveEvents.find(event => event.type === type);
+    assert.notEqual(move.cell, pickup.cell, 'these legal pickups happen away from the ordinary landing');
+    for (const quality of ['high', 'low']) {
+      const actual = recorder(quality), stepOnly = recorder(quality);
+      sample(actual, game, 280);
+      sample(stepOnly, { ...game, previousState: null, moveEvents: [move] }, 280);
+      assert.deepEqual(actual.commands.slice(0, stepOnly.commands.length), stepOnly.commands);
+      assert.deepEqual(actual.paints.slice(0, stepOnly.paints.length), stepOnly.paints);
+      assert.ok(actual.paints.length > stepOnly.paints.length, 'the separate collection remains visible too');
+    }
+  }
+});
+
 test('a turn is consumed once and cannot replay after the last particle expires', () => {
   const record = recorder(), game = gameFor();
   assert.ok(sample(record, game, 200) > 0);

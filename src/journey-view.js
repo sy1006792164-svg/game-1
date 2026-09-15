@@ -61,7 +61,8 @@ function openRoutePlan(game, level) {
       { text: current || savedAtOpen && savedAtOpen.levelId === level.id ? '继续投递' : '出发 · 送这封信', primary: true, action: begin },
       ...(item && (videoAvailable || heldSupply) ? [{ text: '查看' + item.name + (heldSupply ? ' · 已有补给' : ' · 视频补给'), icon: item.icon, action: () => {
         if (!begin()) return;
-        if (game.guideStep()) { game.toast('先完成机关引导，再点道具查看补给'); return; }
+        const guide = game.guideStep();
+        if (guide && !guide.interactive) { game.toast('先完成操作引导，再点道具查看补给'); return; }
         game.selectItem(item.id);
       } }] : []),
       { text: '返回', textOnly: true, action: close }
