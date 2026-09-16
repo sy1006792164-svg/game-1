@@ -4,10 +4,9 @@ const { createState, step } = require('./engine');
 const { strengthenObjectives, difficultyProfile, challengeBrief } = require('./difficulty');
 const { phaseFor, practiceReserve, addCampaignMechanics, campaignExperience } = require('./campaign-design');
 
-// Version 7 preserves every map, v6 objective and verified shortest route.
-// Selected routes add ordered deliveries and optional supply stations. Chapter
-// pacing restores practice room; v5/v6 runs keep their original rules.
-const CONTENT_VERSION = '7';
+// Version 8 removes automatic supplies and adds clock/echo cooperation gates.
+// Every map ships a replayed, item-free route including its required waits.
+const CONTENT_VERSION = '8';
 const PER_CHAPTER = 6;
 const chapterNames = [
   '初寄微光', '双生回廊', '风过纸巷', '灯火借路', '星夜长信',
@@ -34,18 +33,18 @@ const specs = [
   ["南北来风",["#L...L","E=#T#v","#....T","..##.#","T#....","#S.##L"],"邮局旁的纸桥只能踏过一次；回声是记忆，不会压垮它。先想好从哪边回家。"],
   ["逆风绕行",["###..L","##T.##","#T#..v","S.#.#.","#...L.","E.#T#L"],"每条长支路都藏着目标；决定顺序再动身。"],
   ["风中的回廊",["v.....","L.#S#.","#..#T.","##.E#.","...##L","L#TT##"],"先分清哪些角落需要往返，再把整条邮路连成一笔。"],
-  ["灯下暂歇",["Tv#L..","....#+","##E#.T","TL#..#","#.#.##","L+..S#"],"灯只补三拍、每盏一次。预算已计入路上的两盏灯。"],
-  ["借来的三步",["+L#T#S",".#....","..+##L",".#=E.L","T#.#..","##^T.#"],"先看补给在哪；邮局左侧的纸桥只承一次脚步，别把它用在往返的路上。"],
+  ["灯下暂歇",["Tv#L..","....#+","##E#.T","TL#..#","#.#.##","L+..S#"],"先安排远端的信与票，再留意门的开放时机。"],
+  ["借来的三步",["+L#T#S",".#....","..+##L",".#=E.L","T#.#..","##^T.#"],"邮局左侧的纸桥只承一次脚步，别把它用在往返的路上。"],
   ["灯塔往返",["##L#T.","#T+L#+","E#.#..",".....<",".#.#.#","T#.L=S"],"起点旁就是纸桥。三条远路共用狭巷，踏碎纸桥之后就只剩一条回路。"],
-  ["两盏纸灯",["#.<L#T","L.#.+.","#.##T#","S..+..","#.#E#.","#.L#T."],"最后的票要提前三拍，灯火补给也要顺路拿到。"],
-  ["折巷灯影",["...###","E#.S##","#L.#Tv","L#....","+..##.","#T#LT+"],"留意补给与远端目标；多绕一次可能耗尽最后的灯。"],
+  ["双门留白",["#.<L#T","L.#.+.","#.##T#","S..+..","#.#E#.","#.L#T."],"最后的票要提前三拍，让回声盖好票再到邮局。"],
+  ["折巷灯影",["...###","E#.S##","#L.#Tv","L#....","+..##.","#T#LT+"],"先看远端目标，回程把收信、盖票与机关接在一起。"],
   ["一夜的余光",["#LT#.E","v.##.#","..+..L","T##.#S","##...#","L+.#.T"],"一段长路多次回访，先确定最后盖章的位置。"],
   ["三封远信",[".+..v<","T#....","#T=.#S","#E#.L#","###.#L","#L+.T."],"两处风口不会连推；邮票旁的纸桥只能走一次，落点不同会改变下一次折返。"],
   ["星图折线",["S..#T+","##T.#.","#L#...","L+#E#.","#.L#v.","##.T.."],"长支路藏着连续目标，先找能一起完成的投递段。"],
-  ["风与灯的约定",["L#L<#T","......","#+=#.#","#+#S.E","...#T#","L#.T##"],"上下远端都要走到，两盏灯是路线的一部分；灯旁的纸桥是一次性的近路。"],
+  ["风与灯的约定",["L#L<#T","......","#+=#.#","#+#S.E","...#T#","L#.T##"],"上下远端都要走到，中央纸桥是一次性的近路。"],
   ["回廊九转",["#E##L.","S..L#.","#=T#.+","T#...#",".+.#..","#><L#T"],"风口交错的路段可进可退，纸桥却只让你过一次；每一次回头都有代价。"],
   ["黎明前的邮局",["#L#.+.","T.L.#T","#.#.+#","S.E#.v","=.##.<","#..T#L"],"四十拍的远信：起点下方的纸桥架起一条近路，先分配两端顺序，再留出回声的三拍。"],
-  ["寄给明天",["+.....","L#><#+","#T.#T.","E#.L#T","...###","S#.L##"],"这是最终长信：远端、风口、两盏灯与三拍回声都要算进路线。"]
+  ["寄给明天",["+.....","L#><#+","#T.#T.","E#.L#T","...###","S#.L##"],"这一封长信：远端、风口、机关与三拍回声都要算进路线。"]
 ];
 
 const encodedSolutions = [
@@ -91,30 +90,10 @@ function reserveFor(index, par = (encodedSolutions[index] || '').length) {
   return practiceReserve(index, par);
 }
 
-function versionSixReserveFor(index) {
-  if (index < 3) return 2;
-  if (index < 18) return 1;
-  return 0;
-}
-
-function legacyReserveFor(index) {
-  if (index < 3) return null;
-  if (index < 6) return 3;
-  if (index < 18) return 2;
-  if (index < 300) return 1;
-  return 0;
-}
-
 /** A correction stays affordable even on long routes and chapter finales. */
 function undoFor(index) { return phaseFor(index).undo; }
 
-function legacyUndoFor(index) {
-  if (index < 6) return 3;
-  if (index < 18) return 2;
-  return 1;
-}
-
-/** Initial light = what the verified witness actually spends after its lamp income, plus the chapter reserve. */
+/** Initial light covers every verified move/wait and a chapter practice reserve. */
 function budgetFor(level, reserve) {
   const probe = { ...level, budget: level.solution.length + 1 };
   let state = createState(probe);
@@ -129,10 +108,9 @@ function budgetFor(level, reserve) {
   return Math.max(required, probe.budget - state.energy + reserve);
 }
 
-function parseLevel(spec, index, code, revision = CONTENT_VERSION) {
+function parseLevel(spec, index, code) {
   const rows = spec[1];
-  const legacy = revision === '5' || revision === '6';
-  const level = { id: index + 1, revision, title: spec[0], chapter: Math.floor(index / PER_CHAPTER), width: rows[0].length, height: rows.length, walls: [], start: 0, exit: 0, letters: [], seals: [], winds: {}, lights: [], bridges: [], budget: 100, par: 100, undo: legacy ? legacyUndoFor(index) : undoFor(index), brief: spec[2], solution: decode(code === undefined ? encodedSolutions[index] || '' : code) };
+  const level = { id: index + 1, revision: CONTENT_VERSION, title: spec[0], chapter: Math.floor(index / PER_CHAPTER), width: rows[0].length, height: rows.length, walls: [], start: 0, exit: 0, letters: [], seals: [], winds: {}, lights: [], bridges: [], budget: 100, par: 100, undo: undoFor(index), brief: spec[2], solution: decode(code === undefined ? encodedSolutions[index] || '' : code) };
   const windNames = { '^': 'up', 'v': 'down', '<': 'left', '>': 'right' };
   rows.forEach((row, y) => {
     if (row.length !== level.width) throw new Error('Invalid map width: ' + level.id);
@@ -149,28 +127,24 @@ function parseLevel(spec, index, code, revision = CONTENT_VERSION) {
     });
   });
   level.par = level.solution.length || 100;
-  if (!level.solution.length) return level;
-  if (revision !== '5') level.difficultyAdditions = strengthenObjectives(level);
-  if (!legacy) addCampaignMechanics(level);
-  const reserve = revision === '5' ? legacyReserveFor(index) : revision === '6' ? versionSixReserveFor(index) : reserveFor(index, level.par);
-  level.budget = budgetFor(level, reserve === null ? Math.max(4, Math.ceil(level.par * 0.6)) : reserve);
-  if (!legacy) level.experience = campaignExperience(level);
+  if (!level.solution.length) { level.lights = []; return level; }
+  // Preserve the established objective placement before retiring old lamp tiles.
+  level.difficultyAdditions = strengthenObjectives(level);
+  level.lights = [];
+  addCampaignMechanics(level);
+  level.budget = budgetFor(level, reserveFor(index, level.par));
+  level.experience = campaignExperience(level);
   level.difficulty = difficultyProfile(level);
-  if (revision !== '5') level.brief = challengeBrief(level, level.brief);
+  level.brief = challengeBrief(level, level.brief);
   return level;
 }
 
 const CAMPAIGN = specs.map((spec, index) => parseLevel(spec, index));
-const legacyLevels = new Map();
-
-/** Resume old runs faithfully; new departures always use CAMPAIGN's current maps. */
+/** Old runs restart under v8; recorded campaign results are managed separately. */
 function getLegacyLevel(id, revision) {
   if (!Number.isSafeInteger(id) || id < 1 || id > CAMPAIGN.length) return null;
   if (revision === CONTENT_VERSION) return CAMPAIGN[id - 1];
-  if (revision !== '5' && revision !== '6') return null;
-  const key = revision + ':' + id;
-  if (!legacyLevels.has(key)) legacyLevels.set(key, parseLevel(specs[id - 1], id - 1, encodedSolutions[id - 1], revision));
-  return legacyLevels.get(key);
+  return null;
 }
 
 module.exports = { CAMPAIGN, chapterNames, CONTENT_VERSION, PER_CHAPTER, parseLevel, reserveFor, undoFor, getLegacyLevel, SPECS: specs.map(spec => spec[1]) };

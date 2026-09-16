@@ -22,7 +22,8 @@ function failureHint(game, blocked = routeBlocked(game)) {
   if (!s.letters.length && !s.seals.length) return '下次为回到邮局留出更多拍数。';
   if ((l.bridges || []).length && !s.bridges.length) return '纸桥都碎了。先想清楚哪一段只走一次，再踏上去。';
   if (!s.letters.length) return '先踩过蓝色邮票，再给回声留出三拍。';
-  if (s.lights.length) return '试着把剩余风灯串进路线，每盏补充三拍。';
+  if (Object.keys(l.echoGates || {}).length) return '先踩门的机关，再让回声接力压住，安排好过门时机。';
+  if (Object.keys(l.tideGates || {}).length) return '把潮汐门开放的时机排进路线，少等一拍就多留一拍灯火。';
   return '先安排远端目标，再把回邮局的路留到最后。';
 }
 

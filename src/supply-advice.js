@@ -4,6 +4,7 @@ const { ITEMS, itemOffer } = require('./items');
 const { DIRECTIONS, STAR_TWO_MARGIN, neighbor, step } = require('./engine');
 const { SUPPLY_ENERGY } = require('./supply-rules');
 const { difficultyProfile } = require('./difficulty');
+const { gateStatus } = require('./route-mechanics');
 
 const LABELS = Object.freeze({ oil: '灯油留余量', kite: '纸鸢省绕行', bridge: '修桥接回路', echo: '回声笛提前盖票' });
 const result = (itemId, reason) => ({ itemId, reason, label: LABELS[itemId] || '先规划路线' });
@@ -16,14 +17,17 @@ function distance(level, from, to) {
 // A local topology estimate, not a solution: future bridge damage, collection
 // order and the echo's timing still have to be planned by the player.
 function routeDistances(level, state) {
+  // Door timing is handled separately below. A closed door is not a permanent
+  // wall and must not create a false repair or paper-kite recommendation.
+  const topology = level.tideGates || level.echoGates ? { ...level, tideGates: {}, echoGates: {} } : level;
   const distances = new Map([[state.player, 0]]), queue = [state.player];
   for (let index = 0; index < queue.length; index++) {
     const from = queue[index];
     for (const direction of Object.keys(DIRECTIONS)) {
-      const entered = neighbor(level, from, direction, state);
+      const entered = neighbor(topology, from, direction, state);
       if (entered === null) continue;
       const wind = level.winds && level.winds[entered];
-      const pushed = wind ? neighbor(level, entered, wind, state) : null;
+      const pushed = wind ? neighbor(topology, entered, wind, state) : null;
       const landing = pushed === null ? entered : pushed;
       if (distances.has(landing)) continue;
       distances.set(landing, distances.get(from) + 1);
@@ -53,18 +57,16 @@ function unlockedForPlanning(level, id) {
 function preparationAdvice(level) {
   if (!level) return result(null, '先看清信笺、蓝票和邮局，给回声留出三拍。');
   const profile = level.difficulty || difficultyProfile(level) || {};
-  const stationItem = Object.values(level.supplies || {})[0];
-  const preferred = stationItem || profile.recommendedItem;
-  const itemId = [preferred, 'oil'].find(id => unlockedForPlanning(level, id));
+  const itemId = [profile.recommendedItem, 'oil'].find(id => unlockedForPlanning(level, id));
   if (!itemId) return result(null, profile.focus || '先掌握三拍回声，把收信与盖票串成一路。');
-  if (stationItem === itemId) return result(itemId, '沿路驿站可免费领取' + ITEMS.find(item => item.id === itemId).name +
-    '；领取不扣星，使用时不耗拍，本次最高二星。');
   if (itemId === 'bridge') return result(itemId, '先安排过桥顺序；走到断桥旁时，修桥包可修复一座。');
   if (itemId === 'kite') return result(itemId, '信笺分散；靠近两格内时，纸鸢可取一封，蓝票仍靠回声。');
-  if (itemId === 'echo') return result(itemId, '先踩过蓝票，趁回声还没到时用笛提前盖好；离开后也能用，每次只盖一张。未踩过的票不能选，也不补灯火。');
+  if (itemId === 'echo') return result(itemId, '先踩过蓝票，趁回声还没到时用笛提前盖好；离开后也能用，每次只盖一张。未踩过的票不能选，不补灯火，也不能代踩回声门机关。');
   const reserve = profile.reserve;
   const context = reserve === 0 ? '本关灯火零余量；' : Number.isFinite(reserve) && reserve <= 2 ? '本关灯火余量' + reserve + '拍；' : '';
-  return result(itemId, context + '灯油可补' + SUPPLY_ENERGY + '拍，仍需安排剩余路线。');
+  const timing = Object.keys(level.tideGates || {}).length ? '把潮汐开门的时机排进路线；' :
+    Object.keys(level.echoGates || {}).length ? '过回声门前先安排机关接力；' : '';
+  return result(itemId, context + timing + '灯油可补' + SUPPLY_ENERGY + '拍，仍需安排剩余路线。');
 }
 
 /** Recommend only an unlocked tool with a valid current target, even at zero stock. */
@@ -124,6 +126,14 @@ function supplyAdvice(level, state) {
   }
 
   if (offers.oil.eligible) {
+    const gates = [...Object.keys(level.tideGates || {}), ...Object.keys(level.echoGates || {})]
+      .map(Number).filter(cell => distance(level, state.player, cell) === 1)
+      .map(cell => gateStatus(level, state, cell)).filter(gate => gate && !gate.open);
+    const tide = gates.find(gate => gate.type === 'tide' && state.energy <= gate.waitTurns + 3);
+    if (tide) return result('oil', '眼前潮汐门还需推进' + tide.waitTurns + '拍后才能进入；当前余下' + state.energy +
+      '拍。灯油可补' + SUPPLY_ENERGY + '拍，道具不会改变潮汐时机。');
+    if (state.energy <= SUPPLY_ENERGY && gates.some(gate => gate.type === 'echo'))
+      return result('oil', '回声门仍需机关接力；灯油可补' + SUPPLY_ENERGY + '拍用于布置路线，仍要让回声压住机关才能过门。');
     const count = (state.letters || []).length + (state.seals || []).length;
     if (state.energy <= 6 || state.energy <= count * 2 + 3) {
       const goal = count ? '还有' + count + '个收集目标' : '还需抵达邮局';

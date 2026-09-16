@@ -24,34 +24,43 @@ async function requestItemReward(game, id, cell) {
     lines: ['完整观看后获得并使用 1 份' + item.name + '。', '未看完不会发放，也不会消耗拍数。'], buttons: [] };
   game.sound.suspend('ad'); game.syncMusic();
   let reward, earnedReward = false;
-  try { reward = await game.ads.showRewarded(); } catch (_) { reward = { rewarded: false, reason: 'error' }; }
-  game.busy = false;
-  if (session === game.session && game.page === 'game' && game.level === level && game.state === before) {
-    game.modal = null;
-    if (reward && reward.rewarded === true) {
-      const earned = { ...game.itemRewards, [id]: (game.itemRewards[id] || 0) + 1 };
-      const granted = replay(level, game.actions, game.reviveHistory, earned, game.supplyPolicy);
-      const action = itemAction(id, cell), used = step(level, granted, action);
-      game.itemRewards = earned;
-      earnedReward = true;
-      if (used.moved) {
-        // A winning action does not save its terminal route. Preserve the newly
-        // earned supply on the playable fallback before score settlement, so a
-        // failed profile write cannot make the player watch the video again.
-        if (used.state.status === 'won') game.persist();
-        game.blockedAt = null;
-        game.commitAction(used, action, game.platform.now());
-        if (game.state.status === 'playing') game.toast(item.name + '已使用，观看奖励已保存');
-      } else {
-        // Keep a completed reward even if a future rule change invalidates its target.
-        game.state = granted; game.persist(); game.toast(item.name + '已领取，点道具选择目标');
-      }
-    } else game.toast(reward && reward.reason === 'cancelled' ? '视频未看完，未发放道具；可稍后重试' : '广告暂时不可用，未发放道具；可稍后重试');
-    if (game.hidden && game.state.status === 'playing') game.pause();
+  try {
+    try { reward = await game.ads.showRewarded(); } catch (_) { reward = { rewarded: false, reason: 'error' }; }
+    game.busy = false;
+    if (session === game.session && game.page === 'game' && game.level === level && game.state === before) {
+      game.modal = null;
+      if (reward && reward.rewarded === true) {
+        game.itemRewards = { ...game.itemRewards, [id]: (game.itemRewards[id] || 0) + 1 };
+        earnedReward = true;
+        // Record completion before replay, effects or score settlement can fail.
+        // The fallback route restores with this reward still held.
+        game.persist();
+        const granted = replay(level, game.actions, game.reviveHistory, game.itemRewards, game.supplyPolicy);
+        game.state = granted;
+        const action = itemAction(id, cell), used = step(level, granted, action);
+        if (used.moved) {
+          game.blockedAt = null;
+          game.commitAction(used, action, game.platform.now());
+          if (game.state.status === 'playing') game.toast(item.name + '已使用，奖励计入本次路线');
+        } else {
+          // Keep a completed reward even if a future rule change invalidates its target.
+          game.toast(item.name + '已领取，点道具选择目标');
+        }
+      } else game.toast(reward && reward.reason === 'cancelled' ? '视频未看完，未发放道具；可稍后重试' : '广告暂时不可用，未发放道具；可稍后重试');
+      if (game.hidden && game.state.status === 'playing') game.pause();
+    }
+  } catch (_) {
+    if (earnedReward && session === game.session && game.page === 'game' && game.level === level) {
+      game.modal = { kind: 'item-reward-recovery', title: '道具处理暂未完成',
+        lines: ['完整视频奖励已计入本次路线。', '返回邮局后点「继续投递」恢复，无需重复看视频。'],
+        buttons: [{ text: '返回邮局恢复', primary: true, action: () => game.home() }] };
+    } else if (session === game.session && game.page === 'game' && game.level === level) {
+      game.modal = null; game.toast('道具处理未完成，请稍后重试');
+    }
+  } finally {
+    game.busy = false; game.pointer = null; game.renderer.hits = []; game.lastFrame = -Infinity;
+    try { game.syncMusic(); } finally { if (!game.ads.isActive()) game.sound.resume('ad'); }
   }
-  game.pointer = null; game.renderer.hits = []; game.lastFrame = -Infinity;
-  game.syncMusic();
-  if (!game.ads.isActive()) game.sound.resume('ad');
   if (earnedReward && session === game.session && game.page === 'game' && game.level === level &&
       !game.hidden && !game.modal && !game.ads.isActive()) game.cue('reward');
 }

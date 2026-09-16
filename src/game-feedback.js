@@ -1,6 +1,7 @@
 'use strict';
 
 const { C } = require('./theme');
+const { gateMessage } = require('./route-mechanic-view');
 const { COLLECTION_DELAY_MS, COLLECTION_FLIGHT_MS, COLLECTION_IMPACT_MS,
   FEEDBACK_ENTER_MS, FEEDBACK_FADE_MS } = require('./feedback-timing');
 
@@ -67,7 +68,12 @@ function gameFeedback(r, game, now) {
     // Collection acknowledgements survive subsequent moves; undo removes their gains.
     recordEvents(buffer.items, events, game.transitionAt);
   }
-  if (blocked) recordEvents(buffer.items, [{ type: 'blocked' }], game.blockedAt);
+  if (blocked) {
+    recordEvents(buffer.items, [{ type: 'blocked' }], game.blockedAt);
+    if (game.blockedGate) Object.assign(buffer.items.get('blocked'), {
+      gate: true, detail: gateMessage(game.level, game.state, game.blockedGate)
+    });
+  }
   const items = [...buffer.items.values()].filter(item => now >= item.at && now - item.at < item.duration);
   return items.length ? { items } : null;
 }
@@ -110,6 +116,12 @@ function drawContextFeedback(r, notice, layout, now) {
   r.panel(24, y, 342, h, { fill: C.peach, stroke: C.line, radius: 14, flat: true });
   r.icon(item.icon, 46, y + h / 2, 18, C.dangerText);
   c.save(); c.globalAlpha *= feedbackOpacity(r, item, now);
+  if (item.gate) {
+    const lines = r.wrapLines(item.detail, 276, 12);
+    lines.forEach((line, index) => r.text(line, 70, y + h / 2 + (index - (lines.length - 1) / 2) * 16, 12, C.muted));
+    c.restore();
+    return true;
+  }
   r.text(item.label, 70, y + h / 2 - 9, 14, C.ink, 'left', '600');
   r.text(item.detail, 70, y + h / 2 + 10, 12, C.muted);
   c.restore();

@@ -11,8 +11,8 @@ const { enableSharing } = require('./sharing');
 const { isAction, createState, step, replay, normalizeReviveHistory, stars, scoredTurns, neighbor } = require('./engine');
 const { ITEMS, itemAvailability, itemOffer, itemAction, parseItemAction, normalizeItemRewards } = require('./items');
 const { requestItemReward } = require('./item-reward-flow');
+const { upgradeVideoRewards } = require('./run-migration');
 const { SUPPLY_ENERGY, RELIGHT_ACTION, normalizeSupplyPolicy } = require('./supply-rules');
-const { pendingSupplyCells } = require('./supply-stations');
 const { deliveryResultLines } = require('./delivery-result');
 const reviveFlow = require('./revive-flow');
 const { CAMPAIGN, CONTENT_VERSION, getLegacyLevel } = require('./levels');
@@ -270,7 +270,7 @@ class Game {
   guideMisstep() {
     const guide = this.guideStep();
     if (!guide) return false;
-    this.pendingAction = null; this.blockedAt = this.platform.now();
+    this.pendingAction = null; this.blockedAt = this.platform.now(); this.blockedGate = null;
     if (guide.interactive) return false;
     this.toast(guide.control === 'undo' ? '先点下方“撤回”，恢复拍数后继续学。'
       : guide.control === 'restart' ? '点下方“重新学一遍”，从起点跟着走。'
@@ -398,9 +398,9 @@ class Game {
       if (!currentLevel || (run.mode === 'campaign' && !this.unlocked(CAMPAIGN.indexOf(currentLevel)))) throw new Error('invalid level');
       const level = getLegacyLevel(run.levelId, run.revision || '1') || currentLevel;
       if ((run.revision || '1') !== (level.revision || '1')) {
-        this.store.clearRun();
-        this.start(level, run.mode);
-        this.toast('路线已升级，已重新出发；通关成绩保留');
+        const carried = upgradeVideoRewards(level, run);
+        this.start(level, run.mode, carried);
+        this.toast('旧路线已重开；成绩保留，本局视频道具已返还');
         return true;
       }
       const reviveHistory = normalizeReviveHistory(run.reviveHistory === undefined ? run.reviveAt : run.reviveHistory, run.actions.length);
@@ -432,9 +432,9 @@ class Game {
       return true;
     } catch (_) { this.store.clearRun(); this.toast('旧进度无法恢复，已保留通关记录'); return false; }
   }
-  start(level, mode = 'campaign') {
+  start(level, mode = 'campaign', carriedRewards) {
     if (this.busy || this.startupActive() || mode !== 'campaign' || !level) return;
-    // Saved routes finish under their original rules; a new attempt uses the current edition.
+    // Every new departure uses the current rules, including upgraded saves.
     if (level.revision !== CONTENT_VERSION && CAMPAIGN[level.id - 1]) level = CAMPAIGN[level.id - 1];
     this.cancelRankingPointer();
     const keepGuide = this.guideEnabled && this.level === level && this.state && this.state.status !== 'won';
@@ -443,8 +443,8 @@ class Game {
     this.level = level; this.mode = mode || 'campaign';
     this.guideEnabled = canGuide(level, this.mode) && (keepGuide || autoGuide(this.profile(), level, this.mode));
     this.beginMechanicGuide();
-    this.state = createState(level); this.previousState = null; this.moveEvents = []; this.motionPath = null; this.actions = []; this.reviveHistory = []; this.undosUsed = 0;
-    this.itemRewards = { oil: 0, kite: 0, bridge: 0 };
+    this.itemRewards = normalizeItemRewards(level, carriedRewards);
+    this.state = createState(level, this.itemRewards); this.previousState = null; this.moveEvents = []; this.motionPath = null; this.actions = []; this.reviveHistory = []; this.undosUsed = 0;
     this.supplyPolicy = normalizeSupplyPolicy(undefined, 0, 0);
     this.page = 'game'; this.modal = null; this.reviewing = false; this.session++; this.transitionAt = this.platform.now() - MOVE_MS; this.toastUntil = 0;
     this.pointer = null; this.camera.enter(this.platform.now());
@@ -472,17 +472,15 @@ class Game {
     this.cancelItem();
     const offer = itemOffer(this.level, this.state, id);
     const needsVideo = !(this.state.inventory && this.state.inventory[id] > 0), canWatch = this.ads.isConfigured();
-    const stationAvailable = pendingSupplyCells(this.level, this.state, id).length > 0;
     const canUse = offer.eligible && (!needsVideo || canWatch);
     const session = this.session, state = this.state;
     const close = () => { this.modal = null; this.cancelItem(); this.syncMusic(); };
     this.modal = {
       kind: 'item', itemId: id, title: item.name,
-      lines: [item.description, needsVideo ? stationAvailable
-        ? '本关驿站可免费领取这件道具。\n先走到对应补给箱，再点道具使用。'
-        : '看完一段视频，可使用一次。\n重新开始或换关后，需要重新领取。' : '你已领取，可直接使用。',
+      lines: [item.description, needsVideo
+        ? '完整观看一段视频，领取并使用 1 份。\n未看完或加载失败不会发放。\n本次路线有效，重开或换关后清空。' : '你已通过视频领取，可直接使用。',
         '使用时不扣步数，也不会让回声前进。\n本次通关最多二星。',
-        ...(!offer.eligible ? [offer.reason] : needsVideo && !canWatch ? [stationAvailable ? '拾取驿站道具无需广告。' : this.platform.kind === 'browser' ? '请在微信小游戏内观看视频获取。' : '广告暂时不可用，请稍后再试。'] :
+        ...(!offer.eligible ? [offer.reason] : needsVideo && !canWatch ? [this.platform.kind === 'browser' ? '请在微信小游戏内观看视频获取。' : '广告暂时不可用，请稍后再试。'] :
           [id === 'oil' ? '当前 ' + state.energy + ' 拍 → 使用后 ' + (state.energy + SUPPLY_ENERGY) + ' 拍' : needsVideo ? '先选目标，再看视频；未看完不发放。' : '点棋盘上亮起的目标使用。'])],
       buttons: [
         ...(canUse ? [{ text: id === 'oil' ? (needsVideo ? '看视频使用灯油 · +' : '使用灯油 · +') + SUPPLY_ENERGY + ' 拍' : needsVideo ? '选择目标 · 看视频使用' : '选择目标', primary: true, action: () => {
@@ -522,12 +520,19 @@ class Game {
       if (item) { this.toast(itemAvailability(this.level, this.state, item.id).reason || '这个目标无法使用道具'); return; }
       if (this.blockedAt === null || now - this.blockedAt >= 300) this.cue('blocked');
       this.blockedAt = now;
+      this.blockedGate = result.events.find(event => event.type === 'gate-blocked') || null;
+      const gate = this.blockedGate;
+      if (gate) {
+        this.toast(gate.gate === 'tide' ? '再行动 ' + gate.waitTurns + ' 拍后可进门，道具不会推进潮汐'
+          : '先踩对应机关，让三拍后的回声压住，再趁开门时通过');
+        return;
+      }
       const entered = neighbor(this.level, this.state.player, action);
       if (entered !== null && (this.level.bridges || []).includes(entered) && !this.state.bridges.includes(entered))
         this.toast('纸桥已断，点“修桥包”查看修复方式');
       return;
     }
-    this.blockedAt = null;
+    this.blockedAt = null; this.blockedGate = null;
     if (item) this.cancelItem();
     if (guide) this.toastUntil = 0;
     this.commitAction(result, action, now);
@@ -593,9 +598,9 @@ class Game {
     const journeyBefore = this.journey();
     this.store.settleWin(this.level.id, rating, scoredTurns(this.level, this.state), this.mode, { date: localDate(new Date()) });
     this.syncFriendScore();
-    const index = CAMPAIGN.findIndex(l => l.id === this.level.id);
-    const candidate = index >= 0 ? CAMPAIGN[index + 1] : null;
-    const next = this.mode === 'campaign' ? candidate : null;
+    // Replaying for stars must continue the main route, just like the home page.
+    const candidate = this.nextLevel();
+    const next = this.mode === 'campaign' && !this.record(candidate, this.mode) ? candidate : null;
     const saved = this.store.getStatus().persisted;
     const lines = deliveryResultLines(this.level, this.state, rating, before, saved);
     const rewards = this.album().stamps.filter(stamp => stamp.owned && !albumBefore.stamps[stamp.index].owned);

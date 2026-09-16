@@ -2,7 +2,7 @@
 
 const { initialInventory, normalizeItemRewards, parseItemAction, applyItemAction } = require('./items');
 const { SUPPLY_ENERGY, RELIGHT_ACTION, normalizeSupplyPolicy } = require('./supply-rules');
-const { stationCells, collectSupply } = require('./supply-stations');
+const { canEnter, gateStatus } = require('./route-mechanics');
 
 const DIRECTIONS = Object.freeze({ up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] });
 const ACTIONS = Object.freeze(['up', 'down', 'left', 'right', 'wait']);
@@ -24,12 +24,12 @@ function neighbor(level, cell, direction, state) {
   const y = Math.floor(cell / level.width) + delta[1];
   if (x < 0 || x >= level.width || y < 0 || y >= level.height) return null;
   const next = y * level.width + x;
-  if ((level.walls || []).indexOf(next) >= 0 || collapsed(level, state, next)) return null;
+  if ((level.walls || []).indexOf(next) >= 0 || collapsed(level, state, next) ||
+      (state && !canEnter(level, state, next))) return null;
   return next;
 }
 
 function createState(level, itemRewards) {
-  const startsOnLight = (level.lights || []).indexOf(level.start) >= 0;
   const startsOnNextLetter = !level.letterOrder || level.letterOrder[0] === level.start;
   const state = {
     levelId: level.id,
@@ -37,19 +37,17 @@ function createState(level, itemRewards) {
     echo: null,
     history: [level.start],
     turn: 0,
-    energy: level.budget + (startsOnLight ? 3 : 0),
+    energy: level.budget,
     letters: (level.letters || []).filter(cell => cell !== level.start || !startsOnNextLetter),
     seals: (level.seals || []).slice(),
-    lights: (level.lights || []).filter(cell => cell !== level.start),
+    lights: [],
     bridges: (level.bridges || []).slice(),
-    ...(level.supplies ? { supplies: stationCells(level) } : {}),
     inventory: initialInventory(level, itemRewards),
     itemsUsed: 0,
     status: 'playing',
     revived: false,
     reviveCount: 0
   };
-  collectSupply(level, state, []);
   if (state.player === level.exit && !state.letters.length && !state.seals.length) state.status = 'won';
   else if (state.energy <= 0) state.status = 'failed';
   return state;
@@ -74,7 +72,14 @@ function step(level, state, action, version = 2) {
     return result;
   }
   const destination = action === 'wait' ? state.player : neighbor(level, state.player, action, state);
-  if (destination === null) return { state, moved: false, events: [{ type: 'blocked', cell: state.player }] };
+  if (destination === null) {
+    const delta = DIRECTIONS[action], x = state.player % level.width + delta[0];
+    const y = Math.floor(state.player / level.width) + delta[1];
+    const gate = x >= 0 && x < level.width && y >= 0 && y < level.height
+      ? gateStatus(level, state, y * level.width + x) : null;
+    return { state, moved: false, events: [gate && !gate.open
+      ? { ...gate, type: 'gate-blocked', gate: gate.type } : { type: 'blocked', cell: state.player }] };
+  }
 
   const next = {
     ...state,
@@ -85,10 +90,11 @@ function step(level, state, action, version = 2) {
     letters: state.letters.slice(),
     seals: state.seals.slice(),
     lights: state.lights.slice(),
-    bridges: (state.bridges || []).slice(),
-    ...(state.supplies ? { supplies: state.supplies.slice() } : {})
+    bridges: (state.bridges || []).slice()
   };
   const events = [{ type: action === 'wait' ? 'wait' : 'move', cell: destination }];
+  const enteredGate = action !== 'wait' && gateStatus(level, state, destination);
+  if (enteredGate) events.push({ type: enteredGate.type + '-gate', cell: destination });
   // Entering a wind tile pushes once. Waiting does not re-trigger the tile.
   const wind = action !== 'wait' && level.winds && level.winds[destination];
   if (wind) {
@@ -96,6 +102,13 @@ function step(level, state, action, version = 2) {
     if (pushed !== null) {
       next.player = pushed;
       events.push({ type: 'wind', cell: pushed });
+      const pushedGate = gateStatus(level, state, pushed);
+      if (pushedGate) events.push({ type: pushedGate.type + '-gate', cell: pushed });
+    }
+  }
+  if (next.player !== state.player) {
+    for (const [gate, rule] of Object.entries(level.echoGates || {})) {
+      if (rule.plate === next.player) events.push({ type: 'echo-plate', cell: next.player, gate: Number(gate) });
     }
   }
   // Paper bridges carry the courier once. Leaving one tears it; the echo is
@@ -119,17 +132,11 @@ function step(level, state, action, version = 2) {
     next.seals = next.seals.filter(cell => cell !== next.echo);
     events.push({ type: 'seal', cell: next.echo });
   }
-  if (next.lights.indexOf(next.player) >= 0) {
-    next.lights = next.lights.filter(cell => cell !== next.player);
-    next.energy += 3;
-    events.push({ type: 'light', cell: next.player });
-  }
-  collectSupply(level, next, events);
   finishAction(level, next, events);
   return { state: next, moved: true, events };
 }
 
-// Movement and supplies share the same win-first completion rule.
+// Movement and video-earned items share the same win-first completion rule.
 function finishAction(level, next, events) {
   // Reaching the goal on the final unit of light is still a win.
   if (next.player === level.exit && !next.letters.length && !next.seals.length) {
@@ -190,7 +197,7 @@ function revive(level, state, version = 2) {
   return { ...state, energy: reviveEnergy(level, version), status: 'playing', revived: true, reviveCount: state.reviveCount + 1 };
 }
 
-/** Three stars at the verified minimum, two within a short margin, one for any other delivery. */
+/** Three stars at the verified route target, two within a short margin. */
 function stars(level, state) {
   const par = Math.max(1, level.par || level.budget);
   const earned = state.turn <= par ? 3 : state.turn <= par + STAR_TWO_MARGIN ? 2 : 1;

@@ -12,10 +12,10 @@ const { drawHomeDelivery } = require('./page-atmosphere');
 const { drawGuideTargets } = require('./guide-view');
 const { drawHomeArchitecture } = require('./world-art');
 const { drawRoutePreview } = require('./route-preview');
-const { drawSupplyStation, drawSupplyPickup } = require('./supply-station');
+const { drawRouteMechanic } = require('./route-mechanic-view');
 const { drawArtSprite, drawPaving } = require('./art-sprites');
 const { drawActionPreview } = require('./action-preview');
-const { drawWindRune, drawBridgeFlutter, lampFrame, drawLampFlame } = require('./prop-motion');
+const { drawWindRune, drawBridgeFlutter } = require('./prop-motion');
 const { selectedItemTargets, drawItemTarget, drawItemEffects } = require('./item-view');
 
 const COLOR = {
@@ -143,41 +143,6 @@ function postOffice(r, x, y, size, now, ready) {
   polygon(r, officeFlag(now), COLOR.gold);
   r.icon('letter', 28, -41 + flap / 2, 5, '#fff3c9');
   c.restore();
-}
-
-function lantern(r, x, y, size, now, action) {
-  if (r.artAssets && r.artAssets.ready) {
-    const flame = lampFrame(r, now, x * .13);
-    glow(r, x - size * .13, y - size * .98, size * .48, COLOR.gold, .1 + flame.warmth * .1);
-    drawArtSprite(r, 'lantern', x, y + size * .15, size * .92, size * 1.58);
-    hitProp(r, x, y - size * .55, size * .78, size * 1.4, size * .16, 0, action);
-    return;
-  }
-  const c = r.ctx; c.save(); c.translate(x, y); c.scale(size / 24, size / 24);
-  const sway = Math.sin(now / 870 + x) * .06;
-  const flame = lampFrame(r, now, x * .13);
-  ellipse(r, 0, 2, 10, 3, '#2d4b3b29');
-  if (r.effectsQuality !== 'low') {
-    c.save(); c.globalAlpha *= .1 + flame.warmth * .08;
-    ellipse(r, 3, 1, 12 + flame.warmth * 2, 3.6, '#eac27b'); c.restore();
-  }
-  r.line([[-6, 0], [-6, -27], [5, -27]], '#517064', 2);
-  c.save(); c.translate(5, -25); c.rotate(sway);
-  glow(r, 0, 7, 10 + flame.warmth * 2, COLOR.gold, .055 + flame.warmth * .045);
-  r.line([[0, -2], [0, 1]], '#b58e54', 1);
-  r.round(-4, 1, 8, 12, 2, '#bd934f'); r.round(-2.5, 3, 5, 7, 1, '#ffe6a2');
-  drawLampFlame(r, flame);
-  r.line([[-3, 3], [-3, 11]], '#fff0c2b3', .75);
-  r.line([[3, 3], [3, 11]], '#8d743d99', .75);
-  r.line([[-5, 1], [5, 1]], '#57705a', 1.7); r.line([[-5, 13], [5, 13]], '#57705a', 1.7);
-  c.restore(); c.restore();
-  const scale = size / 24, cos = Math.cos(sway), sin = Math.sin(sway);
-  const pick = (cx, cy, w, h, radius) => hitProp(r, x + (5 + cx * cos - cy * sin) * scale,
-    y + (-25 + cx * sin + cy * cos) * scale, w * scale, h * scale, radius * scale, sway, action);
-  hitProp(r, x - 6 * scale, y - 13.5 * scale, 2 * scale, 29 * scale, scale, 0, action);
-  hitProp(r, x - .5 * scale, y - 27 * scale, 13 * scale, 2 * scale, scale, 0, action);
-  pick(0, -.5, 1, 4, .5); pick(0, 7, 8, 12, 2);
-  pick(0, 1, 11.7, 1.7, .85); pick(0, 13, 11.7, 1.7, .85);
 }
 
 function diamond(r, x, y, hw, hh, fill, stroke, height, edged = false) {
@@ -345,18 +310,12 @@ function drawBoard(r, game, now, rect, guide) {
         floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#c69755', 1.45);
         ellipse(r, x, y + hh * .43, hw * .12, hh * .14, '#b68b52');
       }
+      drawRouteMechanic(r, l, s, cell, p);
       if (itemTargets && itemTargets.has(cell)) drawItemTarget(r, game.selectedItem, p, cell, time);
       const selectProp = !game.reviewing && s.status === 'playing' ? cellAction(cell) : null;
-      if (s.lights.includes(cell)) actors.push({ y, draw: () => lantern(r, x, y - 1, hw * .7, time, selectProp) });
       if (s.letters.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .76, time, cell, false, selectProp,
         l.letterOrder ? { number: l.letterOrder.indexOf(cell) + 1, next: cell === nextLetter } : null) });
       if (s.seals.includes(cell)) actors.push({ y: y + 1, draw: () => floatingMail(r, x, y, hw * .7, time, cell, true, selectProp) });
-      if (s.supplies && s.supplies.includes(cell)) actors.push({ y: y + 1, draw: () => {
-        const size = hw * .88;
-        drawSupplyStation(r, x, y, size, l.supplies[cell]);
-        hitProp(r, x, y - size * .18, size * 1.12, size * .61, 3, 0, selectProp);
-        hitProp(r, x, y - size * .76, size * .7, size * .68, 3, 0, selectProp);
-      } });
     }
     // The courier remains visual only; uncovered floor tiles keep their normal actions.
     r.hit(x - hw, y - hh, hw * 2, hh * 2, cellAction(cell), (hx, hy) => p.contains(cell, hx, hy));
@@ -380,7 +339,6 @@ function drawBoard(r, game, now, rect, guide) {
   if (!itemTargets) drawDestination(r, game, time, p, options, enterOffice);
   drawEffects(target, game, now, point, hw * 1.7, options);
   drawItemEffects(r, game, now, p);
-  drawSupplyPickup(r, game, now, p);
   drawActionPreview(r, game, p);
   c.restore();
 }

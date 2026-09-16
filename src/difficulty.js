@@ -94,7 +94,7 @@ function difficultyProfile(level) {
   const id = Number.isSafeInteger(level.id) ? level.id : 1;
   const tier = id <= 6 ? 1 : id <= 30 ? 2 : id <= 120 ? 3 : id <= 360 ? 4 : 5;
   const additions = level.difficultyAdditions || { letters: [], seals: [] };
-  const reserve = Math.max(0, level.budget + (level.lights || []).length * 3 - level.par);
+  const reserve = Math.max(0, level.budget - level.par);
   const letters = (level.letters || []).length, seals = (level.seals || []).length;
   const bridges = (level.bridges || []).length;
   const timingTargets = (additions.timingSeals || []).length;
@@ -103,7 +103,7 @@ function difficultyProfile(level) {
   const itemReason = recommendedItem === 'bridge' ? '纸桥离开即断，修桥包可补救相邻断桥。'
     : recommendedItem === 'echo' ? '先踩过蓝票，趁回声还没到时用笛提前盖好；离开后也能用，每次只盖一张，未踩过的票不能选。'
     : recommendedItem === 'kite' ? '信笺分散，纸鸢可取回两格内的信，减少折返。'
-    : recommendedItem === 'oil' ? '灯油可补充 ' + SUPPLY_ENERGY + ' 拍灯火，为规划失误留出余地。' : '先掌握三拍回声，再挑战最短路线。';
+    : recommendedItem === 'oil' ? '完整观看视频可用灯油补充 ' + SUPPLY_ENERGY + ' 拍，为等待机关与调整路线留出余地。' : '先掌握三拍回声，再挑战三星目标。';
   const routeFocus = timingTargets ? '末段有蓝票需要提前经过，等回声盖好再回邮局。'
     : level.experience ? level.experience.focus
     : bridges >= 3 ? '先安排过桥顺序，再把回声盖票与收信串成一条路。'
@@ -132,7 +132,10 @@ function challengeBrief(level, original) {
   if (level.experience) {
     // Generated briefs repeated an obsolete zero-reserve warning and raw map
     // counts. Show a playable plan instead; keep the hand-written route hints.
-    const hint = level.id <= 30 ? brief.replace('这是最终长信：', '这一封长信：') : level.difficulty.focus;
+    // Old maps used free lamps as route targets. Current rules have removed
+    // them, so those hand-written supply instructions are no longer accurate.
+    const hint = level.id <= 30 && !/补给|两盏灯|灯只补|灯火/.test(brief)
+      ? brief.replace('这是最终长信：', '这一封长信：') : level.difficulty.focus;
     return '本关' + letters + '信' + seals + '票。' + hint +
       level.experience.features.map(feature => feature.description).join('') +
       level.experience.guidance + '灯火余量' + level.difficulty.reserve + '拍，可撤销' + level.undo + '次。';

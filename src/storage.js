@@ -66,7 +66,7 @@ function profileFrom(value) {
   if (value.guideDismissed === true) next.guideDismissed = true;
   if (plain(value.mechanicGuides)) {
     const seen = {};
-    ['wind', 'bridge', 'light', 'supply', 'order'].forEach(id => { if (value.mechanicGuides[id] === true) seen[id] = true; });
+    ['wind', 'bridge', 'order', 'tide', 'echoGate'].forEach(id => { if (value.mechanicGuides[id] === true) seen[id] = true; });
     if (Object.keys(seen).length) next.mechanicGuides = seen;
   }
   // Retain historical daily scores only for save compatibility; no active mode writes them.
@@ -305,7 +305,7 @@ function createStore(adapter, options = {}) {
       return save(profileKey);
     },
     markMechanicSeen: function (id) {
-      if (!['wind', 'bridge', 'light', 'supply', 'order'].includes(id)) return false;
+      if (!['wind', 'bridge', 'order', 'tide', 'echoGate'].includes(id)) return false;
       if (!profile.mechanicGuides) profile.mechanicGuides = {};
       profile.mechanicGuides[id] = true;
       return save(profileKey);

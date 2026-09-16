@@ -4,7 +4,6 @@ const { CAMPAIGN, getLegacyLevel } = require('./levels');
 const { difficultyProfile } = require('./difficulty');
 const { preparationAdvice, supplyAdvice } = require('./supply-advice');
 const { ITEMS } = require('./items');
-const { pendingSupplyCells } = require('./supply-stations');
 const { C } = require('./theme');
 
 // Every entry returns to the existing campaign; there is no separate score,
@@ -24,9 +23,7 @@ function openRoutePlan(game, level) {
   const videoAvailable = !!(game.platform && game.platform.kind === 'wechat' && game.ads &&
     typeof game.ads.isConfigured === 'function' && game.ads.isConfigured());
   const heldSupply = item && current && game.state.inventory && game.state.inventory[item.id] > 0;
-  const stationAvailable = item && pendingSupplyCells(level, current ? game.state : null, item.id).length > 0;
   const supplyDetail = heldSupply ? '本次路线已有 ' + game.state.inventory[item.id] + ' 份，无需另看视频。' :
-    stationAvailable ? '本关补给驿站可免费领取 1 份；先走到补给箱，再点道具使用。' :
     videoAvailable ? '需要时自愿完整看视频获得 1 份，只用于本次路线；未看完不发放。' :
       '当前环境没有可用的视频补给，可直接无道具出发。';
   const credited = game.journey().creditedLevelIds.includes(level.id);

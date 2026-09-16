@@ -4,26 +4,47 @@ const { DIRECTIONS, neighbor, step } = require('./engine');
 const { ITEMS, itemTargets, itemAction } = require('./items');
 const queuedEchoCells = state => state.history.slice(Math.max(0, state.turn - 2), state.turn + 1);
 
-// This only rules out definite dead ends after a bridge has torn. Follow wind
+// This only rules out definite dead ends from torn bridges or isolated plates. Follow wind
 // landings because a forced push can prevent returning through an open corridor.
 // Future bridge damage is still optimistic, so reachable targets do not promise
 // that one route can collect them all within the remaining energy.
 function reachableLandings(level, state, initialCells = [state.player]) {
+  let blocked = [], reachable;
+  // A tide can be waited out. An echo gate is impossible only if its plate
+  // cannot be visited and no current/queued echo can still activate it.
+  // Closing one such gate may reveal another definite cut-off.
+  for (;;) {
+    reachable = topologyLandings(level, state, initialCells, blocked);
+    const next = unavailableEchoGates(level, state, reachable);
+    if (next.every(cell => blocked.includes(cell))) return reachable;
+    blocked = [...new Set([...blocked, ...next])];
+  }
+}
+
+function unavailableEchoGates(level, state, reachable) {
+  const echoes = [state.echo, ...queuedEchoCells(state)];
+  return Object.entries(level.echoGates || {}).filter(([, rule]) =>
+    !reachable.has(rule.plate) && !echoes.includes(rule.plate)).map(([cell]) => Number(cell));
+}
+
+function topologyLandings(level, state, initialCells, blocked) {
+  const topology = { ...level, walls: [...(level.walls || []), ...blocked], tideGates: {}, echoGates: {} };
   const reachable = new Set(initialCells), queue = [...reachable];
   function add(cell) {
     if (!reachable.has(cell)) { reachable.add(cell); queue.push(cell); }
   }
   for (let index = 0; index < queue.length; index++) {
     for (const direction of Object.keys(DIRECTIONS)) {
-      const entered = neighbor(level, queue[index], direction, state);
+      const entered = neighbor(topology, queue[index], direction, state);
       if (entered === null) continue;
       const wind = level.winds && level.winds[entered];
-      const pushed = wind ? neighbor(level, entered, wind, state) : null;
+      const pushed = wind ? neighbor(topology, entered, wind, state) : null;
       add(pushed === null ? entered : pushed);
-      // A currently intact bridge may tear later and stop this wind push.
+      // A bridge may tear later, or a timed door may close, stopping this push.
       // Include that possible landing too: rejecting a usable relight is worse
       // than retaining one whose full solution is not proven by this check.
-      if (pushed !== null && (state.bridges || []).includes(pushed)) add(entered);
+      if (pushed !== null && ((state.bridges || []).includes(pushed) ||
+          level.tideGates && level.tideGates[pushed] || level.echoGates && level.echoGates[pushed])) add(entered);
     }
   }
 
@@ -47,51 +68,14 @@ function targetsReachable(level, state, reachable) {
     itemTargets(level, { ...state, player, letters: [letter], status: 'playing' }, 'kite').includes(letter)));
 }
 
-/** Count only unclaimed station tools reachable by real movement rules.
- * The search tracks torn bridges, so a parcel behind a consumed bridge cannot
- * supply a repair for that same bridge. This is planning data, never a grant.
- * A null result means a legal route already reaches the delivery itself.
- */
-function withReachableStationTools(level, state) {
-  const pending = new Set((state.supplies || []).filter(cell =>
-    ['kite', 'bridge'].includes((level.supplies || {})[cell])));
-  if (!pending.size) return state;
-  const first = { ...state, status: 'playing', energy: 10000 };
-  const queue = [first], seen = new Set(), collected = new Map();
-  for (let index = 0; index < queue.length && collected.size < pending.size; index++) {
-    const current = queue[index];
-    const key = current.player + '|' + (current.bridges || []).slice().sort((a, b) => a - b).join(',');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    for (const direction of Object.keys(DIRECTIONS)) {
-      const result = step(level, current, direction);
-      if (!result.moved) continue;
-      if (result.state.status === 'won') return null;
-      for (const event of result.events) {
-        if (event.type === 'supply' && event.amount > 0 && pending.has(event.cell)) collected.set(event.cell, event.item);
-      }
-      if (result.state.status === 'playing') queue.push(result.state);
-    }
-  }
-  if (!collected.size) return state;
-  const inventory = { ...state.inventory };
-  for (const item of collected.values()) inventory[item] = Math.min(4096, (inventory[item] || 0) + 1);
-  return { ...state, inventory, supplies: state.supplies.filter(cell => !collected.has(cell)) };
-}
-
 function tornRouteBlocked(level, state) {
-  if (!(level.bridges || []).some(cell => !(state.bridges || []).includes(cell))) return false;
+  if (!(level.bridges || []).some(cell => !(state.bridges || []).includes(cell)) &&
+      !Object.keys(level.echoGates || {}).length) return false;
   return repairsBlocked(level, state, reachableLandings(level, state));
 }
 
 function repairsBlocked(level, state, reachable) {
   if (targetsReachable(level, state, reachable)) return false;
-  const supplied = withReachableStationTools(level, state);
-  if (supplied === null) return false;
-  if (supplied !== state) {
-    state = supplied;
-    if (targetsReachable(level, state, reachable)) return false;
-  }
   // Try each single repair that can be reached before spending the pack.
   // Each branch retains the existing optimistic treatment of later bridge
   // damage; this is a dead-end filter, not a full route or energy solver.
@@ -122,8 +106,10 @@ function currentBridgeDepartureBlocked(level, state) {
   if (state.player === level.exit && !state.letters.length &&
       state.seals.every(cell => queuedEchoCells(state).includes(cell))) return false;
   const active = { ...state, status: 'playing', energy: 2 };
+  const unavailable = unavailableEchoGates(level, state, reachableLandings(level, state));
+  const topology = { ...level, walls: [...(level.walls || []), ...unavailable], tideGates: {}, echoGates: {} };
   for (const direction of Object.keys(DIRECTIONS)) {
-    const result = step(level, active, direction);
+    const result = step(topology, active, direction);
     if (!result.moved || (result.state.bridges || []).includes(bridge)) continue;
     if (result.state.status === 'won' || !tornRouteBlocked(level, result.state)) return false;
   }

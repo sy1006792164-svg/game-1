@@ -16,6 +16,7 @@ const { ECHO_TIMELINE_HEIGHT, drawEchoTimeline } = require('./echo-timeline');
 const { drawStageNotice } = require('./scene-effects');
 const { previewMessage } = require('./action-preview');
 const { GAME_LAYOUT } = require('./game-layout');
+const { drawRouteMechanicLabels } = require('./route-mechanic-labels');
 
 // One- and two-line play hints share one slot, avoiding small board jumps as
 // the contextual copy changes between turns.
@@ -61,7 +62,8 @@ function drawControls(r, game, layout, now, feedback) {
     r.panel(24, hintY, 342, hintHeight, { radius: 14, fill: C.panel, stroke: C.blue, flat: true });
     const textY = hintY + (hintHeight - 24 - (hintLines.length - 1) * 18) / 2;
     hintLines.forEach((line, index) => r.text(line, 195, textY + index * 18, GAME_LAYOUT.hintSize, C.ink, 'center', '600'));
-    r.text('松手不行动 · 轻点确认这一步', 195, hintY + hintHeight - 12, 12, C.blueText, 'center');
+    r.text(layout.preview.blockedGate ? '松手不行动 · 开门后再轻点' : '松手不行动 · 轻点确认这一步',
+      195, hintY + hintHeight - 12, 12, C.blueText, 'center');
   } else if (guide) drawGuideCard(r, game, guide, hintY);
   else if (!drawItemAimHint(r, game, layout) && !drawContextFeedback(r, feedback, layout, now)) {
     // Ordinary guidance reads as a caption. Reserve a card for a changed state
@@ -149,6 +151,7 @@ function drawGame(r, game, now) {
   drawBoard(r, game, now, boardRect, game.modal ? null : layout.guide);
   drawCollectionFlights(r, game, now);
   drawGuideOverlay(r, game, layout.guide, now);
+  drawRouteMechanicLabels(r, game, game.modal ? null : layout.guide);
   if (!layout.preview) drawItemTray(r, game, layout.tray);
   drawControls(r, game, layout, now, feedback);
 }

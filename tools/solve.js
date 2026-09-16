@@ -5,18 +5,19 @@ const { createState, step, ACTIONS } = require('../src/engine');
 /**
  * Breadth-first reference solver driven only by engine.step, so it shares no
  * code with the generator's search. Light is unlimited while finding a witness.
- * Expanded states are released and history keeps only the three positions
- * the echo can still read. Rebase turn to that short history: engine.step
- * reads history[turn - 3], while route length comes from the parent chain.
+ * Expanded states are released; the compact history retains the current echo
+ * and three pending landings. Rebase turn without changing its modulo-three
+ * phase, so tide gates and echo plates retain the same movement rules.
  * `limit` caps the number of queued states; null means exhausted, not unsolvable.
  */
 function solve(level, limit = 400000) {
   const unlimited = { ...level, budget: 9999 };
   const trim = state => {
-    if (state.history.length <= 3) return state;
-    return { ...state, turn: 2, history: state.history.slice(-3) };
+    if (state.turn < 3) return state;
+    const phase = state.turn % 3;
+    return { ...state, turn: 3 + phase, history: Array(phase).fill(null).concat(state.history.slice(-4)) };
   };
-  const key = state => state.player + '|' + state.history.slice(-3).join('.') + '|' + state.letters.join('.') + '|' + state.seals.join('.') + '|' + (state.bridges || []).join('.');
+  const key = state => state.player + '|' + state.turn % 3 + '|' + state.echo + '|' + state.history.slice(-3).join('.') + '|' + state.letters.join('.') + '|' + state.seals.join('.') + '|' + (state.bridges || []).join('.');
   const first = createState(unlimited);
   const queue = [{ state: first, parent: -1, action: null }];
   const seen = new Set([key(first)]);

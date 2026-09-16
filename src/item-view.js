@@ -2,7 +2,6 @@
 
 const { ITEMS, itemOffer } = require('./items');
 const { C } = require('./theme');
-const { pendingSupplyCells } = require('./supply-stations');
 
 const ITEM_TRAY_HEIGHT = 62;
 const ITEM_TRAY_GAP = 8;
@@ -80,14 +79,13 @@ function drawItemArt(r, id, x, y, size, muted = false) {
 function itemTrayDetail(r, game, item, offer, remaining, advice, width) {
   if (game.selectedItem === item.id) return '点亮起的目标';
   if (game.state.status !== 'playing') return SHORT_REASONS[offer.reason] || offer.reason;
-  if (!remaining && pendingSupplyCells(game.level, game.state, item.id).length > 0) return '驿站免费领取';
   if (!offer.eligible) {
     r.font(11);
     return r.ctx.measureText(offer.reason).width <= width ? offer.reason : SHORT_REASONS[offer.reason] || offer.reason;
   }
   if (remaining) return item.short;
   if (game.platform.kind === 'browser') return '微信视频获取';
-  return advice && advice.itemId === item.id ? '建议看视频' : '看视频获取';
+  return advice && advice.itemId === item.id ? '按需看视频' : '看视频获取';
 }
 
 function drawItemTray(r, game, layout) {
@@ -116,13 +114,12 @@ function drawItemTray(r, game, layout) {
     r.font(13, '600');
     const stockX = x + nameInset + (spacious ? r.ctx.measureText(item.name).width + 10 : 0);
     r.text('×' + remaining, stockX, y + (spacious ? 22 : 32), 10, remaining ? C.green : C.muted, 'left', '600');
-    const station = remaining === 0 && pendingSupplyCells(game.level, game.state, item.id).length > 0;
     // Use complete, concise state labels in narrow columns. The existing item
     // inspector provides the full rule when tapped, without spending a beat.
     const detailWidth = spacious ? w - nameInset - 6 : w - 14;
     const detail = itemTrayDetail(r, game, item, offer, remaining, advice, detailWidth);
     r.text(detail, spacious ? x + nameInset : x + w / 2, y + (spacious ? 43 : 51), 11,
-      selected || station ? C.green : C.muted, spacious ? 'left' : 'center');
+      selected ? C.green : C.muted, spacious ? 'left' : 'center');
     // Temporarily unavailable tools explain their rule without changing row order.
     if (canInspect) {
       const action = Object.assign(() => game.selectItem(item.id), { itemId: item.id });

@@ -2,6 +2,7 @@
 
 const { step } = require('./engine');
 const { guideRoute } = require('./guide-route');
+const { gateMessage, routeMechanicHint } = require('./route-mechanic-view');
 
 function canGuide(level, mode) {
   return mode === 'campaign' && !!level && level.id === 1;
@@ -84,7 +85,10 @@ function playHint(game, now) {
   if (game.reviewing) return game.failureHint();
   if (s.status === 'won') return '信已送达。';
   if (s.status === 'failed') return '灯火已耗尽。' + game.failureHint();
-  if (game.blockedAt != null && now - game.blockedAt < 1400) return '这边不通，点亮起的相邻地砖试试。';
+  if (game.blockedAt != null && now - game.blockedAt < 1400) return game.blockedGate
+    ? gateMessage(l, s, game.blockedGate) : '这边不通，点亮起的相邻地砖试试。';
+  const gateHint = routeMechanicHint(l, s);
+  if (gateHint) return (s.energy <= 3 ? '剩 ' + s.energy + ' 拍。' : '') + gateHint;
   if (!s.letters.length && !s.seals.length) return '收集完成，' + (s.energy <= 3 ? '只剩 ' + s.energy + ' 拍，' : '') + '前往亮起的邮局。';
   const lowLight = s.energy <= 3 ? '只剩 ' + s.energy + ' 拍。' : '';
   const pending = pendingSeals(s);
@@ -110,11 +114,8 @@ function playHint(game, now) {
   if (s.turn === 0) {
     if (l.id <= 3) return '点亮起的相邻地砖移动，先走过蓝票。';
     if (l.experience) return l.experience.guidance;
-    if (game.mode === 'campaign' && l.id >= 301) return l.lights.length
-      ? '没有富余拍数，纸桥离开就碎，先排好路线。'
-      : '没有灯火补给，也没有富余拍数。先排好整条邮路。';
+    if (game.mode === 'campaign' && l.id >= 301) return '拍数紧凑，纸桥离开就碎，先排好整条邮路。';
     if ((l.bridges || []).length) return '纸桥离开后就会碎，先想好哪一段只走一次。';
-    if (l.lights.length) return '沿路的风灯可以补 3 拍，收信时顺路点亮。';
     if (Object.keys(l.winds).length) return '箭头会再推你一格，留意实际落点。';
     return '轻点亮格移动，长按预览；松手不会行动。';
   }

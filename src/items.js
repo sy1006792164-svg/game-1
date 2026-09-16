@@ -2,7 +2,7 @@
 
 const { SUPPLY_ENERGY, plainRecord } = require('./supply-rules');
 
-// Supplies come from actual map stations or completed rewarded videos.
+// Stock is earned only by completing a rewarded video; map movement never grants it.
 const ITEMS = Object.freeze([
   Object.freeze({ id: 'oil', name: '灯油', icon: 'oil', unlock: 4,
     description: '补充 ' + SUPPLY_ENERGY + ' 拍灯火，能再走或等 ' + SUPPLY_ENERGY + ' 次。\n灯还亮着时，点下方按钮直接补充。\n不用选格子，不移动人物，也不耗拍。', short: '灯火 +' + SUPPLY_ENERGY }),
@@ -11,7 +11,7 @@ const ITEMS = Object.freeze([
   Object.freeze({ id: 'bridge', name: '修桥包', icon: 'bridge', unlock: 16,
     description: '修好一座断纸桥，让你能再走过去。\n先走到断桥旁，上下左右紧挨一格，\n再点亮起的断桥；每次只修一座。\n修好后再离开仍会碎，修桥不耗拍。', short: '修复断桥' }),
   Object.freeze({ id: 'echo', name: '回声笛', icon: 'echo', unlock: 31,
-    description: '提前盖一张蓝票，省下等回声的时间。\n先踩上蓝票，在回声到来前使用。\n离开后也能用：点亮起的那张票即可。\n未踩过的票不能用；每次只盖一张。\n不耗拍、不补灯火，也不移动回声。', short: '提前盖蓝票' })
+    description: '提前盖一张蓝票，省下等回声的时间。\n先踩上蓝票，在回声到来前使用。\n离开后也能用：点亮起的那张票即可。\n未踩过的票不能用；每次只盖一张。\n不耗拍、不补灯火，也不移动回声。\n不能代踩回声门机关。', short: '提前盖蓝票' })
 ]);
 
 function itemDefinition(id) { return ITEMS.find(item => item.id === id); }

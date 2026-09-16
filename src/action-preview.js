@@ -1,6 +1,8 @@
 'use strict';
 
 const { ACTIONS, DIRECTIONS, neighbor, step } = require('./engine');
+const { gateStatus } = require('./route-mechanics');
+const { adjacentCell, gateMessage } = require('./route-mechanic-view');
 
 const PREVIEW_HOLD_MS = 350;
 
@@ -8,7 +10,10 @@ const PREVIEW_HOLD_MS = 350;
 function forecastAction(level, state, action) {
   if (!level || !state || state.status !== 'playing' || !ACTIONS.includes(action)) return null;
   const result = step(level, state, action);
-  if (!result.moved) return null;
+  if (!result.moved) {
+    const gate = result.events.find(event => event.type === 'gate-blocked');
+    return gate ? { level, source: state, action, state, events: result.events, entry: gate.cell, blockedGate: gate } : null;
+  }
   return { level, source: state, action, state: result.state, events: result.events,
     entry: action === 'wait' ? state.player : neighbor(level, state.player, action, state) };
 }
@@ -19,6 +24,10 @@ function actionForHit(game, hit) {
   const cell = hit.action.boardCell;
   if (!Number.isInteger(cell)) return null;
   if (cell === game.state.player) return 'wait';
+  if (adjacentCell(game.level, game.state.player, cell) && gateStatus(game.level, game.state, cell)) {
+    const dx = cell % game.level.width - game.state.player % game.level.width;
+    return dx ? dx > 0 ? 'right' : 'left' : cell > game.state.player ? 'down' : 'up';
+  }
   return Object.keys(DIRECTIONS).find(action => neighbor(game.level, game.state.player, action, game.state) === cell) || null;
 }
 
@@ -59,17 +68,27 @@ function updateActionPreview(game, now) {
 
 function previewMessage(preview) {
   if (!preview) return '';
+  if (preview.blockedGate) return gateMessage(preview.level, preview.source, preview.blockedGate) + '本次不耗拍。';
   const events = preview.events, summary = [];
   if (events.some(event => event.type === 'wind')) summary.push('顺风落到光圈');
   if (events.some(event => event.type === 'letter')) summary.push('收信');
   if (events.some(event => event.type === 'seal')) summary.push('回声盖票');
   if (events.some(event => event.type === 'bridge')) summary.push('身后纸桥断开');
-  if (events.some(event => event.type === 'light')) summary.push('风灯 +3 拍');
-  if (events.some(event => event.type === 'supply')) summary.push('领取补给');
+  if (events.some(event => event.type === 'tide-gate')) summary.push('穿过潮汐门');
+  if (events.some(event => event.type === 'echo-gate')) summary.push('借回声穿门');
+  if (events.some(event => event.type === 'echo-plate')) summary.push('留下踏板脚印');
   if (events.some(event => event.type === 'order-blocked')) summary.push('编号未到，信会留下');
   if (preview.state.status === 'won') summary.push('完成投递');
   else if (preview.state.status === 'failed') summary.push('灯火将熄灭');
-  else summary.push('灯火 ' + preview.source.energy + ' → ' + preview.state.energy);
+  else {
+    const gates = [...Object.keys(preview.level.tideGates || {}), ...Object.keys(preview.level.echoGates || {})].map(Number);
+    for (const cell of gates) {
+      if (!adjacentCell(preview.level, preview.state.player, cell)) continue;
+      const before = gateStatus(preview.level, preview.source, cell), after = gateStatus(preview.level, preview.state, cell);
+      if (before.open !== after.open) summary.push((after.type === 'tide' ? '潮汐门' : '回声门') + (after.open ? '将打开' : '将关闭'));
+    }
+    summary.push('灯火 ' + preview.source.energy + ' → ' + preview.state.energy);
+  }
   return summary.join(' · ');
 }
 
@@ -83,6 +102,11 @@ function drawActionPreview(r, game, projection) {
     c.strokeStyle = color; c.lineWidth = 2; c.stroke();
   };
   c.save();
+  if (preview.blockedGate) {
+    ring(preview.entry, '#bc805d');
+    c.restore();
+    return;
+  }
   const route = [preview.source.player, preview.entry, preview.state.player].filter((cell, i, cells) => !i || cell !== cells[i - 1]);
   if (route.length > 1) r.line(route.map(point), '#f3be68', 2.5, [4, 4]);
   c.setLineDash([]);
@@ -103,7 +127,7 @@ function drawActionPreview(r, game, projection) {
     r.icon('echo', ex, ey - halfH * .4, Math.max(12, halfW * .34), '#91eef1');
   }
   for (const event of preview.events) {
-    if (!['letter', 'seal', 'bridge', 'light', 'supply', 'order-blocked'].includes(event.type)) continue;
+    if (!['letter', 'seal', 'bridge', 'tide-gate', 'echo-gate', 'echo-plate', 'order-blocked'].includes(event.type)) continue;
     const [ex, ey] = point(event.cell), size = Math.max(12, halfW * .35);
     const warning = event.type === 'bridge' || event.type === 'order-blocked';
     r.circle(ex + halfW * .42, ey - halfH * .55, size * .6, '#182e3f');
