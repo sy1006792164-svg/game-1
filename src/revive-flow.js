@@ -75,25 +75,40 @@ async function requestRevive(game) {
   const session = game.session, level = game.level, failed = game.state;
   game.busy = true; game.pendingAction = null; game.pointer = null; game.renderer.hits = [];
   game.modal = { title: '正在连接广告', lines: ['完整观看后恢复投递并补 ' + SUPPLY_ENERGY + ' 拍。', '与灯油补给相同，不额外发放道具。'], buttons: [] };
-  game.sound.suspend('ad'); game.syncMusic();
+  const sameRoute = () => session === game.session && game.page === 'game' && game.level === level;
   let result;
-  try { result = await game.ads.showRevive(); } catch (_) { result = { rewarded: false, reason: 'error' }; }
-  game.busy = false;
-  // A completed video belongs to the exact failed route that requested it.
-  if (session === game.session && game.page === 'game' && game.level === level && game.state === failed) {
-    if (result && result.rewarded === true) applyRevive(game);
-    else {
-      showFailure(game);
-      game.toast(result && result.reason === 'cancelled' ? '视频未看完，未续灯；可重试或免费重开'
-        : '广告暂时不可用，可稍后再试或免费重开');
+  try {
+    game.sound.suspend('ad'); game.syncMusic();
+    try { result = await game.ads.showRevive(); } catch (_) { result = { rewarded: false, reason: 'error' }; }
+    game.busy = false;
+    // A completed video belongs to the exact failed route that requested it.
+    if (sameRoute() && game.state === failed) {
+      if (result && result.rewarded === true) applyRevive(game);
+      else {
+        showFailure(game);
+        game.toast(result && result.reason === 'cancelled' ? '视频未看完，未续灯；可重试或免费重开'
+          : '广告暂时不可用，可稍后再试或免费重开');
+      }
+      // Native playback may finish while the app is still in the background.
+      // Preserve the same explicit resume step as normal backgrounding and tool rewards.
+      if (game.hidden && game.state.status === 'playing') game.pause();
     }
-    // Native playback may finish while the app is still in the background.
-    // Preserve the same explicit resume step as normal backgrounding and tool rewards.
-    if (game.hidden && game.state.status === 'playing') game.pause();
+  } catch (_) {
+    if (sameRoute() && game.state !== failed && game.state.status === 'playing') {
+      // The engine and revival ledger commit before optional persistence or
+      // presentation work. Keep that earned relight usable if either fails.
+      game.modal = { kind: 'revive-recovery', title: '续灯已生效',
+        lines: ['已补充 ' + SUPPLY_ENERGY + ' 拍，沿途收集已保留。', '提示暂未完成，可以继续投递，无需重复看视频。'],
+        buttons: [{ text: '继续投递', primary: true, action: () => {
+          game.modal = null; game.persist(); game.syncMusic();
+        } }] };
+    } else if (sameRoute()) {
+      showFailure(game); game.toast('续灯处理暂未完成，可稍后重试或免费重开');
+    }
+  } finally {
+    game.busy = false; game.pointer = null; game.renderer.hits = []; game.lastFrame = -Infinity;
+    try { game.syncMusic(); } finally { if (!game.ads.isActive()) game.sound.resume('ad'); }
   }
-  game.pointer = null; game.renderer.hits = []; game.lastFrame = -Infinity;
-  game.syncMusic();
-  if (!game.ads.isActive()) game.sound.resume('ad');
 }
 
 function applyRevive(game) {

@@ -11,7 +11,7 @@ const { createState, step } = require('../src/engine');
 const root = path.resolve(__dirname, '..');
 const targets = [
   ['wind', '风推穿梭'], ['seal', '回声收蓝票'], ['letter', '拾取信笺'],
-  ['bridge', '纸桥碎裂'], ['light', '风灯补光'], ['echo-born', '回声诞生'],
+  ['bridge', '纸桥碎裂'], ['light', '灯油补光'], ['echo-born', '回声诞生'],
   ['ready', '邮局开放'], ['win', '抵达终点']
 ];
 
@@ -19,7 +19,18 @@ function collectSamples() {
   const samples = new Map();
   // Prefer the reference image's route, then fill any missing event samples.
   const reference = CAMPAIGN.find(level => level.title === '逆风回廊') || CAMPAIGN[19];
-  const levels = [reference, ...CAMPAIGN.slice(18, 80).filter(level => level.id !== reference.id)];
+  const preferred = [reference, ...CAMPAIGN.slice(18, 80).filter(level => level.id !== reference.id)];
+  const preferredIds = new Set(preferred.map(level => level.id));
+  const levels = [...preferred, ...CAMPAIGN.filter(level => !preferredIds.has(level.id))];
+  // Campaign routes no longer give free map lamps. Exercise the real oil-item
+  // action with explicit isolated QA inventory instead of inventing a light event.
+  const oilLevel = levels.find(level => level.id >= 4);
+  const itemRewards = { oil: 1 }, oilBefore = createState(oilLevel, itemRewards);
+  const oilResult = step(oilLevel, oilBefore, 'item:oil');
+  assert.ok(oilResult.moved && oilResult.events.some(event => event.type === 'light'), 'oil sample uses a legal supply action');
+  samples.set('light', { type: 'light', title: '灯油补光', levelId: oilLevel.id, levelTitle: oilLevel.title,
+    turn: oilResult.state.turn, actions: ['item:oil'], itemRewards,
+    previousState: oilBefore, state: oilResult.state, events: oilResult.events });
   for (const level of levels) {
     let state = createState(level);
     for (const [index, action] of level.solution.entries()) {
@@ -38,11 +49,11 @@ function collectSamples() {
     }
     if (samples.size === targets.length) break;
   }
-  assert.equal(samples.size, targets.length, 'all effect samples must come from real game routes');
+  assert.equal(samples.size, targets.length, 'all effect samples must come from real game actions');
   return targets.map(([type]) => samples.get(type));
 }
 
-function browserAudit(Game, levels, samples) {
+async function browserAudit(Game, levels, samples) {
   const canvas = document.getElementById('game');
   const ageInput = document.getElementById('age');
   const qualityInput = document.getElementById('quality');
@@ -55,13 +66,25 @@ function browserAudit(Game, levels, samples) {
   canvas.width = metrics.width; canvas.height = metrics.height;
   const noop = () => {};
   const platform = {
-    kind: 'browser', isDevelopment: true, canvas,
+    kind: 'browser', isDevelopment: true, canvas, createImage: () => new Image(),
     storage: { get: key => data.get(key), set: (key, value) => data.set(key, value), remove: key => data.delete(key) },
     resize: () => metrics, now: () => now, raf: () => 1, cancelRaf: noop,
     onResize: noop, onPointer: noop, onKey: noop, onHide: noop, onShow: noop,
     vibrate: noop, setFrameRate: noop
   };
   const game = new Game(platform);
+  const controls = [...document.querySelectorAll('button, input, select')];
+  controls.forEach(control => { control.disabled = true; });
+  info.textContent = '正在加载游戏原画…';
+  try {
+    await game.artAssets.load();
+    canvas.dataset.artReady = String(game.artAssets.ready);
+  } catch (error) {
+    const alert = document.getElementById('error');
+    alert.hidden = false; alert.textContent = '原画加载失败：' + error.message;
+    return;
+  }
+  controls.forEach(control => { control.disabled = false; });
   const clone = value => JSON.parse(JSON.stringify(value));
   function select(index) {
     chosen = index;
@@ -70,9 +93,11 @@ function browserAudit(Game, levels, samples) {
     game.guideEnabled = false; game.mechanicGuide = null;
     game.previousState = clone(sample.previousState); game.state = clone(sample.state);
     game.moveEvents = clone(sample.events); game.actions = sample.actions.slice();
+    game.itemRewards = clone(sample.itemRewards || {});
     game.transitionAt = 10000; game.toastUntil = 0; game.modal = null;
     game.motionPath = null; game.camera.reset();
-    info.textContent = `第 ${sample.levelId} 关 · ${sample.levelTitle} · 合法路线第 ${sample.turn} 拍`;
+    info.textContent = `第 ${sample.levelId} 关 · ${sample.levelTitle} · ` +
+      (sample.itemRewards ? '合法灯油动作 · 独立测试库存' : `合法路线第 ${sample.turn} 拍`);
     labels.textContent = sample.events.map(event => `${event.type}@${event.cell}`).join(' · ');
     document.querySelectorAll('[data-sample]').forEach((button, i) => button.setAttribute('aria-pressed', String(i === index)));
     if (!playing) ageInput.value = '280';
@@ -191,7 +216,7 @@ function bundle(samples) {
 }
 
 const html = `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="zh-CN"><head><meta charset="utf-8"><base href="/"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>对局特效 · 真实路线验收</title><style>
 *{box-sizing:border-box}body{margin:0;background:#e6ebdf;color:#244d48;font:14px/1.6 "Microsoft YaHei",sans-serif}
 main{max-width:1020px;margin:auto;padding:28px;display:grid;grid-template-columns:1fr 390px;gap:38px;align-items:center}

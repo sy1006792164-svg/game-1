@@ -12,7 +12,7 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
     { title: '你收信，回声收票', icon: 'echo', color: C.blueText,
       text: '你收橙色信笺，回声收蓝色邮票。\n先踩上蓝票格，再移动或等待 3 次，回声就会到那里收票。' },
     { title: '提前看见三拍回声', icon: 'echo', color: C.blueText,
-      text: '上方「回声预告」显示回声未来三拍的进度，\n邮票图标表示这一拍会盖票。\n棋盘上的青色光环提示下一拍回声位置；使用道具不会推进回声。' },
+      text: '上方拍数显示回声未来三拍的进度。\n点拍数查看对应落点，不耗拍；再点同一拍数收起。\n邮票图标表示这一拍会盖票；使用道具不会推进回声。' },
     { title: '收齐后，抵达邮局', icon: 'home', color: C.green,
       text: '信笺、邮票全收齐，抵达邮局即通关。' }
   ];

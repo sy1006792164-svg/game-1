@@ -29,7 +29,9 @@ function drawObjectives(r, game, now, feedback) {
   ];
   objectives.forEach((objective, index) => {
     const left = x + index * column, anchor = objectiveAnchor(index), item = objectiveFeedback(feedback, index);
-    const impactAt = item && item.collection ? item.at + COLLECTION_IMPACT_MS : game.transitionAt;
+    const impactAt = item && item.collection
+      ? Number.isFinite(item.impactAt) ? item.impactAt : item.at + COLLECTION_IMPACT_MS
+      : game.transitionAt;
     const age = now - impactAt;
     const emphasized = index ? objective.changed || item : item;
     const pulse = !r.reducedMotion && emphasized && age >= 0 && age < OBJECTIVE_PULSE_MS ? Math.sin(age / OBJECTIVE_PULSE_MS * Math.PI) : 0;

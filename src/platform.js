@@ -290,22 +290,34 @@ function createPlatform(environment) {
 
   function onKey(listener) {
     if (!win || typeof win.addEventListener !== 'function') return function () {};
+    const ownedKeys = new Set();
+    const keyId = event => event.code || event.key;
+    const release = event => ownedKeys.delete(keyId(event));
+    const reset = () => ownedKeys.clear();
     const handler = function (event) {
       // IME navigation belongs to candidate selection, including boundary
       // events where isComposing has already reset but the legacy code is 229.
-      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
-      const tag = event.target && event.target.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (event.target && event.target.isContentEditable)) return;
-      if (event.key === 'Tab') {
-        if (event.target !== canvas) return;
-        if (listener(event.shiftKey ? 'Shift+Tab' : 'Tab') === true) event.preventDefault();
-        return;
-      }
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].indexOf(event.key) !== -1) event.preventDefault();
-      listener(event.key);
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target, tag = target && target.tagName;
+      if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A', 'SUMMARY'].includes(tag) ||
+          target && (target.isContentEditable || typeof target.closest === 'function' && target.closest('button, a[href], summary'))) return;
+      // A held key is still owned by its initial game action, but it must never
+      // spend another turn or fall through to browser scrolling/navigation.
+      if (event.repeat) { if (ownedKeys.has(keyId(event))) event.preventDefault(); return; }
+      if (event.key === 'Tab' && target !== canvas) return;
+      const handled = listener(event.key === 'Tab' && event.shiftKey ? 'Shift+Tab' : event.key);
+      if (handled === true) { ownedKeys.add(keyId(event)); event.preventDefault(); }
+      else ownedKeys.delete(keyId(event));
     };
     win.addEventListener('keydown', handler);
-    return function () { win.removeEventListener('keydown', handler); };
+    win.addEventListener('keyup', release);
+    win.addEventListener('blur', reset);
+    return function () {
+      reset();
+      win.removeEventListener('keydown', handler);
+      win.removeEventListener('keyup', release);
+      win.removeEventListener('blur', reset);
+    };
   }
 
   function nativeListener(name, listener) {

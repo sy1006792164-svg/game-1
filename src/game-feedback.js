@@ -30,6 +30,8 @@ function recordEvents(items, events, at) {
   }
   counts.forEach((total, type) => {
     const style = STYLES[type], previous = items.get(type);
+    // A routine wait must not erase oil that is still flying to the lamp counter.
+    if (type === 'wait' && items.has('light')) return;
     if (style.objective === 0) {
       for (const [other, item] of items) if (other !== type && item.objective === 0) items.delete(other);
     }
@@ -37,8 +39,36 @@ function recordEvents(items, events, at) {
     const energy = total.energy + (previous && type === 'light' ? previous.energy : 0);
     const value = type === 'light' ? '+' + energy + ' 拍'
       : style.collection ? '+' + count : type === 'wait' ? '−1 拍' : '';
-    items.set(type, { ...style, type, at, count, value, ...(type === 'light' ? { energy } : {}) });
+    // Each pickup keeps its own arrival. A later pickup must not restart the
+    // earlier flight's acknowledgement delay during a quick run of moves.
+    const arrivals = style.collection ? {
+      pending: [...(previous && previous.pending || []), { at, count: total.count, energy: total.energy }],
+      deliveredCount: previous && previous.deliveredCount || 0,
+      deliveredEnergy: previous && previous.deliveredEnergy || 0,
+      firstImpactAt: previous && previous.firstImpactAt,
+      impactAt: previous && previous.impactAt
+    } : {};
+    items.set(type, { ...style, type, at, count, value, ...arrivals, ...(type === 'light' ? { energy } : {}) });
   });
+}
+
+function settleCollections(items, now, reducedMotion) {
+  for (const item of items.values()) {
+    if (!item.collection) continue;
+    const delay = reducedMotion ? 0 : COLLECTION_IMPACT_MS;
+    const pending = [];
+    for (const pickup of item.pending) {
+      if (now < pickup.at + delay) { pending.push(pickup); continue; }
+      item.deliveredCount += pickup.count;
+      item.deliveredEnergy += pickup.energy;
+      item.impactAt = pickup.at + delay;
+      if (!Number.isFinite(item.firstImpactAt)) item.firstImpactAt = item.impactAt;
+    }
+    // Settled arrivals collapse into totals, keeping only the short flight queue.
+    item.pending = pending;
+    item.value = !item.deliveredCount ? '' : item.type === 'light'
+      ? '+' + item.deliveredEnergy + ' 拍' : '+' + item.deliveredCount;
+  }
 }
 
 function gameFeedback(r, game, now) {
@@ -74,14 +104,15 @@ function gameFeedback(r, game, now) {
       gate: true, detail: gateMessage(game.level, game.state, game.blockedGate)
     });
   }
+  settleCollections(buffer.items, now, r.reducedMotion);
   const items = [...buffer.items.values()].filter(item => now >= item.at && now - item.at < item.duration);
   return items.length ? { items } : null;
 }
 
 function feedbackOpacity(r, item, now) {
   if (r.reducedMotion) return 1;
-  const delay = item.collection ? COLLECTION_IMPACT_MS : 0;
-  const age = now - item.at - delay;
+  const impactAt = item.collection ? Number.isFinite(item.firstImpactAt) ? item.firstImpactAt : item.at + COLLECTION_IMPACT_MS : item.at;
+  const age = now - impactAt;
   const enter = Math.max(0, Math.min(1, age / FEEDBACK_ENTER_MS));
   const fade = Math.max(0, Math.min(1, (item.duration - (now - item.at)) / FEEDBACK_FADE_MS));
   return enter * fade;
@@ -102,8 +133,8 @@ function drawObjectiveFeedback(r, item, bounds, now) {
   c.save(); c.globalAlpha *= opacity;
   r.font(13, '600');
   const size = Math.min(13, 13 * w / Math.max(1, c.measureText(item.value).width));
-  const rise = r.reducedMotion ? 0 : (1 - Math.min(1, Math.max(0, now - item.at -
-    (item.collection ? COLLECTION_IMPACT_MS : 0)) / FEEDBACK_FADE_MS)) * 1.5;
+  const impactAt = item.collection ? Number.isFinite(item.impactAt) ? item.impactAt : item.at + COLLECTION_IMPACT_MS : item.at;
+  const rise = r.reducedMotion ? 0 : (1 - Math.min(1, Math.max(0, now - impactAt) / FEEDBACK_FADE_MS)) * 1.5;
   r.text(item.value, x + w / 2, y + h / 2 + rise, size, item.color, 'center', '600');
   c.restore();
 }

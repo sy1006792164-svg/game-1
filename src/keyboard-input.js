@@ -18,6 +18,11 @@ function activateModalButton(game, button) {
   game.syncMusic();
 }
 
+function modalButtonReady(game, button) {
+  return game.renderer.currentModal === game.modal && button && !button.disabled &&
+    game.renderer.hits.some(hit => hit.action === button.action);
+}
+
 // A modal owns keyboard input until its own close action returns to the prior view.
 function handleGameKey(game, key) {
   if (game.hidden || game.busy || game.startupActive() || typeof key !== 'string') return false;
@@ -31,6 +36,13 @@ function handleGameKey(game, key) {
   if (game.modal) {
     const buttons = game.modal.buttons || [];
     const primary = buttons.find(button => button.primary);
+    if (game.modal.kind === 'fail' && (key.toLowerCase() === 'z' || key === 'Backspace')) {
+      const rewind = buttons.find(button => button.icon === 'undo');
+      // Preserve the familiar undo key after the last unit of light is spent.
+      // The painted result owns this action, including its presentation delay.
+      if (modalButtonReady(game, rewind)) activateModalButton(game, rewind);
+      return true;
+    }
     if (game.modal.kind === 'item') {
       if (key === 'Escape') {
         activateModalButton(game, buttons[buttons.length - 1]);
@@ -40,12 +52,12 @@ function handleGameKey(game, key) {
       }
       return true;
     }
-    if (key === 'Enter' && ['help', 'pause', 'win', 'fail', 'restart-confirm', 'journey', 'route-plan'].includes(game.modal.kind)) {
-      // Result actions become available after the final move is presented.
-      // Use the actual painted control so reduced motion and restored results
-      // keep exactly the same activation timing as pointer input.
-      if (['win', 'fail'].includes(game.modal.kind) && (game.renderer.currentModal !== game.modal ||
-          !primary || !game.renderer.hits.some(hit => hit.action === primary.action))) return true;
+    if (key === 'Enter' && ['help', 'pause', 'win', 'fail', 'restart-confirm', 'journey', 'route-plan',
+      'item-reward-recovery', 'revive-recovery'].includes(game.modal.kind)) {
+      // Results and recovery actions use the actual painted control so their
+      // presentation, reduced motion and pointer input share activation timing.
+      if (['win', 'fail', 'item-reward-recovery', 'revive-recovery'].includes(game.modal.kind) &&
+          !modalButtonReady(game, primary)) return true;
       activateModalButton(game, primary);
       return true;
     }

@@ -12,10 +12,11 @@ const { drawCollectionFlights } = require('./collection-flight');
 const { atmosphereTreatment, drawAmbientOverlay } = require('./ambient-effects');
 const { itemTrayLayout, drawItemTray, itemAimHint, drawItemAimHint } = require('./item-view');
 const { difficultyProfile } = require('./difficulty');
-const { ECHO_TIMELINE_HEIGHT, drawEchoTimeline } = require('./echo-timeline');
+const { echoTimelineHeight, drawEchoTimeline, echoInspection, echoForecastMessage, drawEchoInspection } = require('./echo-timeline');
 const { drawStageNotice } = require('./scene-effects');
 const { previewMessage } = require('./action-preview');
 const { GAME_LAYOUT } = require('./game-layout');
+const { insideRect } = require('./board-projection');
 const { drawRouteMechanicLabels } = require('./route-mechanic-labels');
 
 // One- and two-line play hints share one slot, avoiding small board jumps as
@@ -55,6 +56,7 @@ function controlLayout(r, game) {
 
 function drawControls(r, game, layout, now, feedback) {
   const { buttonY, hintY, hintHeight, hintLines, ready, guide } = layout;
+  const inspection = echoInspection(r, game);
   const waitFeedback = feedback && feedback.items.find(item => item.type === 'wait');
   const undoFeedback = feedback && feedback.items.find(item => item.type === 'undo');
   const warning = game.state.status === 'failed' || game.state.energy <= 3;
@@ -65,6 +67,16 @@ function drawControls(r, game, layout, now, feedback) {
     r.text(layout.preview.blockedGate ? '松手不行动 · 开门后再轻点' : '松手不行动 · 轻点确认这一步',
       195, hintY + hintHeight - 12, 12, C.blueText, 'center');
   } else if (guide) drawGuideCard(r, game, guide, hintY);
+  else if (inspection) {
+    const entry = inspection.entry;
+    r.round(24, hintY, 342, hintHeight, 12, warning ? C.peach : C.soft);
+    const lines = r.wrapLines(echoForecastMessage(game, entry), 310, 12);
+    lines.forEach((line, index) => r.text(line, 195, hintY + 11 + index * 14, 12, warning ? C.dangerText : C.blueText, 'center', '600'));
+    const offscreen = entry.cell !== null && r.boardProjection && r.boardRect &&
+      !insideRect(r.boardRect, ...r.boardProjection.point(entry.cell));
+    r.text(offscreen ? '落点在画面外，缩小或拖动查看' : '再点上方拍数收起 · 行动后自动收起',
+      195, hintY + hintHeight - 11, 11, C.muted, 'center');
+  }
   else if (!drawItemAimHint(r, game, layout) && !drawContextFeedback(r, feedback, layout, now)) {
     // Ordinary guidance reads as a caption. Reserve a card for a changed state
     // that needs attention, so the tools, help and actions no longer compete.
@@ -103,7 +115,7 @@ function drawControls(r, game, layout, now, feedback) {
 }
 
 function gameBoardRect(r, layout) {
-  const timelineSpace = layout.guide && !layout.guide.interactive ? 0 : ECHO_TIMELINE_HEIGHT + GAME_LAYOUT.gap;
+  const timelineSpace = layout.guide && !layout.guide.interactive ? 0 : echoTimelineHeight(r) + GAME_LAYOUT.gap;
   const top = GAME_LAYOUT.boardTop + timelineSpace, gap = 4;
   const itemSpace = layout.tray ? layout.tray.reserve : 0;
   return { x: r.viewport.x, y: top, w: r.viewport.w,
@@ -135,7 +147,7 @@ function drawGame(r, game, now) {
     style: 'text', icon: game.reviewing ? 'route' : 'pause', disabled: !!game.modal || game.busy || (!game.reviewing && game.state.status !== 'playing')
   });
   drawObjectives(r, game, now, feedback);
-  const timeline = { x: GAME_LAYOUT.x, y: GAME_LAYOUT.timelineY, w: GAME_LAYOUT.width, h: ECHO_TIMELINE_HEIGHT };
+  const timeline = { x: GAME_LAYOUT.x, y: GAME_LAYOUT.timelineY, w: GAME_LAYOUT.width, h: echoTimelineHeight(r) };
   const blockingGuide = layout.guide && !layout.guide.interactive;
   // Pending blue tickets need the forecast even when all orange letters were
   // just collected; the objectives already acknowledge that milestone.
@@ -152,6 +164,7 @@ function drawGame(r, game, now) {
   drawCollectionFlights(r, game, now);
   drawGuideOverlay(r, game, layout.guide, now);
   drawRouteMechanicLabels(r, game, game.modal ? null : layout.guide);
+  drawEchoInspection(r, game, now);
   if (!layout.preview) drawItemTray(r, game, layout.tray);
   drawControls(r, game, layout, now, feedback);
 }

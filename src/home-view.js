@@ -39,13 +39,15 @@ function drawBrand(r, top) {
 }
 
 function drawLinks(r, game, y, height) {
-  const links = [['选关', 'levels'], ['邮票', 'collection'], ['排行', 'leaderboard'], ['设置', 'settings']];
+  const links = [['选关', 'levels'], ['邮票', 'collection'], ['排行', 'leaderboard']];
+  const width = 342 / links.length;
   r.line([[24, y - 10], [366, y - 10]], C.line, 1);
   links.forEach(([title, page], index) => {
-    r.button(title, 27 + index * 86, y, 78, height, () => game.openPage(page),
+    const x = 24 + index * width;
+    r.button(title, x + 4, y, width - 8, height, () => game.openPage(page),
       { style: 'text', size: 14, color: C.ink });
-    if (index < links.length - 1) r.line([[109 + index * 86, y + height / 2 - 7],
-      [109 + index * 86, y + height / 2 + 7]], C.line, 1);
+    if (index < links.length - 1) r.line([[x + width, y + height / 2 - 7],
+      [x + width, y + height / 2 + 7]], C.line, 1);
   });
 }
 
@@ -55,6 +57,8 @@ function drawHome(r, game, now) {
   const mood = r.atmosphereMood, quietMotion = r.reducedMotion || r.effectsQuality === 'low';
   const sceneNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   drawBrand(r, ui.top);
+  r.button('', 366 - ui.compactHeight, ui.top + 7, ui.compactHeight, ui.compactHeight,
+    () => game.openPage('settings'), { style: 'quiet', icon: 'settings', label: '设置' });
   const hero = ui.hero;
   r.ctx.save();
   r.round(hero.x, hero.y, hero.w, hero.h, 24);
