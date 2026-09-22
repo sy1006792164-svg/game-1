@@ -14,7 +14,7 @@ const { itemTrayLayout, drawItemTray, itemAimHint, drawItemAimHint } = require('
 const { difficultyProfile } = require('./difficulty');
 const { echoTimelineHeight, drawEchoTimeline, echoInspection, echoForecastMessage, drawEchoInspection } = require('./echo-timeline');
 const { drawStageNotice } = require('./scene-effects');
-const { previewMessage } = require('./action-preview');
+const { forecastAction, previewMessage } = require('./action-preview');
 const { GAME_LAYOUT } = require('./game-layout');
 const { insideRect } = require('./board-projection');
 const { drawRouteMechanicLabels } = require('./route-mechanic-labels');
@@ -31,6 +31,20 @@ function routeStatus(game) {
   if (assisted) return { text: '已走 ' + turn + ' 拍 · ' + source + '封顶二星 · ' + two + ' 拍内', warning: true };
   const target = turn > level.par ? '二星目标 ' + two : '三星目标 ' + level.par;
   return { text: '第 ' + String(level.id).padStart(3, '0') + ' 封 · 已走 ' + turn + ' 拍 · ' + target + ' 拍', warning: false };
+}
+
+function waitStatus(r, game) {
+  let cached = r.waitStatus;
+  if (!cached || cached.state !== game.state || cached.level !== game.level) {
+    const forecast = forecastAction(game.level, game.state, 'wait');
+    const failed = forecast && forecast.state.status === 'failed';
+    const won = forecast && forecast.state.status === 'won';
+    const stamped = forecast && forecast.events.some(event => event.type === 'seal');
+    cached = r.waitStatus = { state: game.state, level: game.level, warning: !!failed,
+      caption: failed ? '等待后灯灭 · 长按预览' : won ? '再等 1 拍 · 完成投递'
+        : stamped ? '消耗 1 拍 · 回声盖票' : '消耗 1 拍 · 长按预览' };
+  }
+  return cached;
 }
 
 function controlLayout(r, game) {
@@ -93,11 +107,13 @@ function drawControls(r, game, layout, now, feedback) {
   }
   const canUndo = game.canUndo(), remaining = game.undoLeft();
   const canAct = game.state.status === 'playing' && !game.modal && !game.busy;
+  const waiting = waitStatus(r, game);
   if (guide && guide.control === 'restart') {
     r.button('重新学一遍', 24, buttonY, 165, CONTROL.height, () => game.restartGuide(), { style: 'primary', icon: 'restart', disabled: !canAct });
   } else {
     r.button('撤回（' + remaining + '）', 24, buttonY, 165, CONTROL.height, () => game.undo(), {
-      style: guide && guide.control === 'undo' ? 'primary' : 'text', icon: 'undo',
+      style: guide && guide.control === 'undo' ? 'primary' : 'quiet', icon: 'undo',
+      caption: canUndo ? '恢复上一步状态' : remaining ? '当前无可撤回行动' : '本程次数已用完',
       feedbackAt: undoFeedback && undoFeedback.at, disabled: !canUndo || layout.aiming || !!guide && guide.kind === 'mechanic' && !guide.interactive
     });
   }
@@ -108,7 +124,8 @@ function drawControls(r, game, layout, now, feedback) {
     style: 'primary', icon: 'arrow-right', disabled: !canAct
   });
   else r.button('等一拍', 201, buttonY, 165, CONTROL.height, Object.assign(() => game.act('wait'), { previewAction: 'wait' }), {
-    style: guide && guide.control === 'wait' ? 'primary' : 'secondary', icon: 'hourglass',
+    style: guide && guide.control === 'wait' ? 'primary' : waiting.warning ? 'danger' : 'secondary', icon: 'hourglass',
+    caption: waiting.caption,
     feedbackAt: waitFeedback && waitFeedback.at, disabled: !canAct || !!guide && !guide.interactive && guide.action !== 'wait'
   });
   drawGuideWait(r, game, guide, { x: 201, y: buttonY, w: 165, h: CONTROL.height }, now);
@@ -169,4 +186,4 @@ function drawGame(r, game, now) {
   drawControls(r, game, layout, now, feedback);
 }
 
-module.exports = { PLAY_HINT_HEIGHT, drawGame, gameBoardRect, controlLayout, routeStatus };
+module.exports = { PLAY_HINT_HEIGHT, drawGame, gameBoardRect, controlLayout, routeStatus, waitStatus };

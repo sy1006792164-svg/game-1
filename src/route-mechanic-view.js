@@ -32,7 +32,7 @@ function routeMechanicHint(level, state) {
     return '已踩过回声踏板：3 拍后回声到这里；趁它压住时穿门。';
   if (state.turn === 0 && gates.length) return Object.keys(level.echoGates || {}).length
     ? '同纹踏板与门相连，让晚 3 拍的回声压住踏板，再穿门收信。'
-    : '潮汐门每 3 拍开一次，看门上的开闭提示，安排移动与等待。';
+    : '潮汐门每 3 拍开启，按门旁倒计时通行。';
   return '';
 }
 

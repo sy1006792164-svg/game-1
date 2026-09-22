@@ -3,9 +3,36 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { collectExperienceSamples, bundle } = require('../tools/experience-audit');
-const { CAMPAIGN } = require('../src/levels');
+const { CAMPAIGN, getLegacyLevel } = require('../src/levels');
+const { PHASES } = require('../src/campaign-design');
 const { replay, step, stars } = require('../src/engine');
 const { itemOffer } = require('../src/items');
+const { waitStatus } = require('../src/game-view');
+
+test('budget tuning preserves every v8 route and its earned video supply on resume', () => {
+  for (const current of CAMPAIGN) {
+    const legacy = getLegacyLevel(current.id, '8');
+    const phase = PHASES[current.id === 999 ? 5 : (current.id - 1) % 6];
+    const reserve = Math.max(phase.minimum, Math.ceil(current.par * Math.round(phase.ratio * 100) / 100));
+    assert.equal(legacy.revision, '8');
+    assert.equal(legacy.budget, current.par + reserve);
+    assert.equal(legacy.undo, current.undo);
+    const completed = replay(legacy, legacy.solution);
+    assert.equal(completed.status, 'won', String(current.id));
+    assert.equal(stars(legacy, completed), 3);
+    assert.equal(completed.energy, reserve);
+    if (current.id <= 30) assert.equal(current.budget, legacy.budget, 'teaching budget stays unchanged');
+  }
+  const legacy = getLegacyLevel(601, '8');
+  const actions = Array(legacy.budget).fill('wait');
+  const restored = replay(legacy, actions, [actions.length], { oil: 1 });
+  assert.equal(restored.status, 'playing');
+  assert.equal(restored.energy, require('../src/supply-rules').SUPPLY_ENERGY);
+  assert.equal(restored.inventory.oil, 1);
+  assert.equal(restored.reviveCount, 1);
+  assert.throws(() => replay(CAMPAIGN[600], actions, [actions.length], { oil: 1 }),
+    'the same paid route would be invalid if silently replayed against the smaller budget');
+});
 
 test('all 23 experience specimens remain available, with replayable routes for all 15 game scenes', () => {
   const samples = collectExperienceSamples();
@@ -46,4 +73,28 @@ test('echo ready, target and finish form one legal route completed by one owned 
   assert.equal(stars(level, result.state), 2);
   assert.ok(result.events.some(event => event.type === 'seal' && event.cell === target.targetCell));
   assert.ok(result.events.some(event => event.type === 'win'));
+});
+
+test('wait guidance distinguishes a fatal wait from a real echo delivery without spending a beat', () => {
+  const samples = collectExperienceSamples(), renderer = {};
+  const low = samples.find(sample => sample.id === 'low-light');
+  const game = { level: CAMPAIGN[low.levelId - 1] };
+  game.state = replay(game.level, low.actions, [], low.itemRewards);
+  while (game.state.energy > 1) game.state = step(game.level, game.state, 'wait').state;
+  const source = game.state, before = JSON.stringify(source);
+  const warning = waitStatus(renderer, game);
+  assert.equal(warning.warning, true);
+  assert.match(warning.caption, /等待后灯灭/);
+  assert.equal(step(game.level, source, 'wait').state.status, 'failed');
+  assert.equal(waitStatus(renderer, game), warning, 'unchanged frames reuse the real forecast');
+  assert.equal(game.state, source);
+  assert.equal(JSON.stringify(game.state), before);
+
+  const ready = samples.find(sample => sample.id === 'echo-ready');
+  game.level = CAMPAIGN[ready.levelId - 1];
+  game.state = step(game.level, replay(game.level, ready.actions, [], ready.itemRewards), 'wait').state;
+  const delivery = waitStatus(renderer, game);
+  assert.equal(delivery.warning, false);
+  assert.match(delivery.caption, /完成投递/);
+  assert.equal(step(game.level, game.state, 'wait').state.status, 'won');
 });

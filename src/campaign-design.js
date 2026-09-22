@@ -6,12 +6,12 @@ const { addRouteMechanics } = require('./mechanic-placement');
 // Each chapter gives players room to learn, vary a route and finish a trial.
 // Every star target is backed by a complete route through its actual mechanics.
 const PHASES = Object.freeze([
-  { id: 'learn', name: '启程', ratio: .32, minimum: 6, undo: 6, guidance: '先认清目标，留些脚步试一试路线。' },
-  { id: 'practice', name: '练习', ratio: .28, minimum: 5, undo: 5, guidance: '把收信与盖票接在一起，练习少走回头路。' },
-  { id: 'variation', name: '变奏', ratio: .24, minimum: 4, undo: 4, guidance: '换一条邮路，观察本关机关与回声的配合。' },
-  { id: 'rest', name: '漫游', ratio: .38, minimum: 7, undo: 6, guidance: '这一程灯火更宽裕，可以从容探索岔路。' },
-  { id: 'refine', name: '进阶', ratio: .22, minimum: 4, undo: 4, guidance: '出发前安排远端目标，把最后三拍留给回声。' },
-  { id: 'trial', name: '试炼', ratio: .16, minimum: 3, undo: 3, guidance: '串起本章所学；先送达，再向三星目标挑战。' }
+  { id: 'learn', name: '启程', ratio: .32, minimum: 6, maximum: 10, undo: 6, guidance: '先认清目标，留些脚步试一试路线。' },
+  { id: 'practice', name: '练习', ratio: .28, minimum: 5, maximum: 9, undo: 5, guidance: '把收信与盖票接在一起，练习少走回头路。' },
+  { id: 'variation', name: '变奏', ratio: .24, minimum: 4, maximum: 8, undo: 4, guidance: '换一条邮路，观察本关机关与回声的配合。' },
+  { id: 'rest', name: '漫游', ratio: .38, minimum: 7, maximum: 14, undo: 6, guidance: '这一程灯火更宽裕，可以从容探索岔路。' },
+  { id: 'refine', name: '进阶', ratio: .22, minimum: 4, maximum: 7, undo: 4, guidance: '出发前安排远端目标，把最后三拍留给回声。' },
+  { id: 'trial', name: '试炼', ratio: .16, minimum: 3, maximum: 5, undo: 3, guidance: '串起本章所学；先送达，再向三星目标挑战。' }
 ]);
 
 const THEMES = Object.freeze({
@@ -29,9 +29,18 @@ function phaseFor(index) {
   return PHASES[index === 998 ? 5 : index % PHASES.length];
 }
 
-function practiceReserve(index, par) {
+function legacyPracticeReserve(index, par) {
   const phase = phaseFor(index);
   return Math.max(phase.minimum, Math.ceil(par * Math.round(phase.ratio * 100) / 100));
+}
+
+function practiceReserve(index, par) {
+  const reserve = legacyPracticeReserve(index, par), maximum = phaseFor(index).maximum;
+  // Preserve the first 30 teaching routes, then tighten gradually through 300.
+  // Long routes still cover their complete witness; spare turns stop growing
+  // without bound, so one +6 relight remains a meaningful correction.
+  const progress = Math.max(0, Math.min(1, (index - 29) / 270));
+  return reserve - Math.floor(Math.max(0, reserve - maximum) * progress);
 }
 
 function themeFor(level) {
@@ -92,4 +101,4 @@ function campaignExperience(level) {
   };
 }
 
-module.exports = { PHASES, THEMES, phaseFor, practiceReserve, addCampaignMechanics, campaignExperience };
+module.exports = { PHASES, THEMES, phaseFor, practiceReserve, legacyPracticeReserve, addCampaignMechanics, campaignExperience };

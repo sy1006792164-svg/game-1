@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { CAMPAIGN } = require('../src/levels');
 const { createState, step, replay } = require('../src/engine');
-const { requestRevive } = require('../src/revive-flow');
+const { requestRevive, showFailure } = require('../src/revive-flow');
 const { SUPPLY_ENERGY } = require('../src/supply-rules');
 
 function failedGame() {
@@ -100,4 +100,56 @@ test('a stale completed video cannot credit a different session', async () => {
   assert.equal(game.reviveHistory.length, 0);
   assert.equal(saved.length, 0);
   assert.equal(suspended.size, 0);
+});
+
+test('a stranded route cannot sell a relight against a hypothetical later tool video', async () => {
+  const { game, saved } = failedGame();
+  game.level = { id: 16, width: 3, height: 1, start: 0, exit: 2,
+    walls: [], letters: [2], seals: [], bridges: [1], budget: 8, par: 2 };
+  game.state = { ...createState(game.level), status: 'failed', energy: 0, bridges: [] };
+  let requests = 0;
+  game.ads.showRevive = async () => { requests++; return { rewarded: true }; };
+  showFailure(game);
+  assert.equal(game.modal.buttons.some(button => button.text.includes('看广告')), false);
+  assert.ok(game.modal.buttons.some(button => button.text.includes('免费再试')));
+  await requestRevive(game);
+  assert.equal(requests, 0);
+  assert.equal(saved.length, 0);
+  // A previously earned repair changes the real route's prospects.
+  game.state = { ...game.state, inventory: { ...game.state.inventory, bridge: 1 } };
+  showFailure(game);
+  assert.ok(game.modal.buttons.some(button => button.text.includes('看广告')));
+});
+
+test('a permanent wind trap also suppresses an unusable relight', () => {
+  const { game } = failedGame();
+  game.level = { id: 7, width: 3, height: 1, start: 0, exit: 2,
+    walls: [], letters: [], seals: [], bridges: [], winds: { 1: 'left' }, budget: 8, par: 2 };
+  game.state = { ...createState(game.level), status: 'failed', energy: 0 };
+  showFailure(game);
+  assert.equal(game.modal.buttons.some(button => button.text.includes('看广告')), false);
+  assert.ok(game.modal.buttons.some(button => button.text.includes('免费再试')));
+});
+
+test('revive opportunities are counted once and late ad results keep the original content version', async () => {
+  const { game } = failedGame(), events = [];
+  game.level = { ...game.level, revision: 'original-route' };
+  const originalId = game.level.id;
+  game.undoLeft = () => 2;
+  game.reportEvent = (id, fields) => events.push({ id, fields });
+  showFailure(game); showFailure(game);
+  const offers = events.filter(event => event.id === 'revive_offer');
+  assert.equal(offers.length, 1);
+  assert.equal(offers[0].fields.source, 'video');
+  assert.equal(offers[0].fields.undo_left, 2);
+  game.ads.showRevive = async () => {
+    game.session++; game.level = { ...game.level, id: originalId + 1, revision: 'new-route' };
+    return { rewarded: true, reason: 'completed' };
+  };
+  await requestRevive(game);
+  const completed = events.find(event => event.id === 'ad_complete');
+  assert.equal(completed.fields.level_id, originalId);
+  assert.equal(completed.fields.content_version, 'original-route');
+  assert.equal(completed.fields.route_current, 0);
+  assert.equal(game.state.status, 'failed');
 });

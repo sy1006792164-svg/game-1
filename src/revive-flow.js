@@ -4,9 +4,12 @@ const { STAR_TWO_MARGIN, revive, reviveEnergy, step } = require('./engine');
 const { SUPPLY_ENERGY, RELIGHT_ACTION } = require('./supply-rules');
 const { isReviveRouteBlocked } = require('./revive-policy');
 const { MOVE_MS } = require('./motion');
+const { reportGameEvent } = require('./analytics');
 
 const BLOCKED_HINT = '这条路线补拍也无法送达，请免费重新规划。';
-const routeBlocked = game => isReviveRouteBlocked(game.level, game.state, { canAcquireItems: game.ads.isConfigured() });
+// A video relight must be useful with the tools already earned. A hypothetical
+// second tool video must never turn a stranded route into a revive offer.
+const routeBlocked = game => isReviveRouteBlocked(game.level, game.state);
 const hasStoredOil = game => Number.isSafeInteger(game.state && game.state.inventory && game.state.inventory.oil) && game.state.inventory.oil > 0;
 
 function reviveScoreHint(level, state) {
@@ -19,7 +22,11 @@ function reviveScoreHint(level, state) {
 function failureHint(game, blocked = routeBlocked(game)) {
   const s = game.state, l = game.level;
   if (blocked) return BLOCKED_HINT;
-  if (!s.letters.length && !s.seals.length) return '下次为回到邮局留出更多拍数。';
+  if (!s.letters.length && !s.seals.length) return '收集已完成；接下来只需回到邮局。';
+  const queued = s.history.slice(Math.max(0, s.turn - 2), s.turn + 1);
+  if (!s.letters.length && s.seals.every(cell => queued.includes(cell))) return s.player === l.exit
+    ? '已到邮局，蓝票已踩过；续灯后等待回声盖票。'
+    : '蓝票已踩过；回邮局途中让回声把票盖完。';
   if ((l.bridges || []).length && !s.bridges.length) return '纸桥都碎了。先想清楚哪一段只走一次，再踏上去。';
   if (!s.letters.length) return '先踩过蓝色邮票，再给回声留出三拍。';
   if (Object.keys(l.echoGates || {}).length) return '先踩门的机关，再让回声接力压住，安排好过门时机。';
@@ -30,11 +37,17 @@ function failureHint(game, blocked = routeBlocked(game)) {
 function showFailure(game) {
   game.pendingAction = null; game.toastUntil = 0; game.reviewing = false;
   const blocked = routeBlocked(game);
-  const needsToolVideo = !blocked && isReviveRouteBlocked(game.level, game.state);
   const recordFull = game.actions && game.actions.length >= 4096;
   const storedOil = hasStoredOil(game) && !blocked && !recordFull;
   const canRevive = !storedOil && game.platform.kind === 'wechat' && game.ads.isConfigured() && !blocked && !recordFull;
   const canContinue = storedOil || canRevive;
+  if (game.reviveOfferState !== game.state) {
+    game.reviveOfferState = game.state;
+    reportGameEvent(game, 'revive_offer', { available: canContinue ? 1 : 0,
+      source: storedOil ? 'stored_oil' : canRevive ? 'video' : 'none',
+      undo_left: typeof game.undoLeft === 'function' ? game.undoLeft() : 0,
+      reason: recordFull ? 'record-full' : blocked ? 'route-blocked' : canContinue ? 'available' : 'unconfigured' });
+  }
   const canRewind = typeof game.undo === 'function' && typeof game.undoLeft === 'function' &&
     game.undoLeft() > 0 && game.actions.length > (game.reviveAt == null ? 0 : game.reviveAt);
   const remaining = [];
@@ -43,7 +56,7 @@ function showFailure(game) {
   game.modal = {
     kind: 'fail', title: canContinue ? '灯灭了，路线还在' : '换条路线，再寄一次',
     lines: [remaining.length ? '还差 ' + remaining.join(' / ') : '信笺和邮票已收齐',
-      recordFull ? '本次路线记录已满，请重新规划。' : needsToolVideo ? '此路线还需道具；续灯后需另看视频获取。' : failureHint(game, blocked),
+      recordFull ? '本次路线记录已满，请重新规划。' : failureHint(game, blocked),
       ...(canContinue ? [storedOil ? '用已有灯油补 ' + SUPPLY_ENERGY + ' 拍，无需再看视频。' : '每次视频补 ' + SUPPLY_ENERGY + ' 拍，和投递中的灯油相同。',
         '保留路线与收集 · ' + reviveScoreHint(game.level, game.state)] : [])],
     buttons: [
@@ -73,13 +86,19 @@ async function requestRevive(game) {
     game.toast('激励视频尚未配置或当前环境不支持，可免费重新出发'); return;
   }
   const session = game.session, level = game.level, failed = game.state;
+  const context = { placement: 'revive', level_id: level.id, content_version: level.revision || '', mode: game.mode, turn: failed.turn,
+    energy: failed.energy, revive_count: failed.reviveCount || 0,
+    remaining_letters: failed.letters.length, remaining_seals: failed.seals.length };
   game.busy = true; game.pendingAction = null; game.pointer = null; game.renderer.hits = [];
   game.modal = { title: '正在连接广告', lines: ['完整观看后恢复投递并补 ' + SUPPLY_ENERGY + ' 拍。', '与灯油补给相同，不额外发放道具。'], buttons: [] };
   const sameRoute = () => session === game.session && game.page === 'game' && game.level === level;
   let result;
   try {
+    reportGameEvent(game, 'ad_request', context);
     game.sound.suspend('ad'); game.syncMusic();
     try { result = await game.ads.showRevive(); } catch (_) { result = { rewarded: false, reason: 'error' }; }
+    reportGameEvent(game, result && result.rewarded === true ? 'ad_complete' : result && result.reason === 'cancelled' ? 'ad_cancel' : 'ad_error',
+      { ...context, reason: result && result.reason || 'error', route_current: sameRoute() && game.state === failed ? 1 : 0 });
     game.busy = false;
     // A completed video belongs to the exact failed route that requested it.
     if (sameRoute() && game.state === failed) {
@@ -119,6 +138,7 @@ function applyRevive(game) {
   game.moveEvents = [{ type: 'light', cell: next.player, amount: SUPPLY_ENERGY, source: 'oil' }];
   game.motionPath = null; game.transitionAt = game.platform.now() - MOVE_MS;
   game.modal = null; game.reviewing = false;
+  reportGameEvent(game, 'revive_applied', { source: 'video', amount: SUPPLY_ENERGY });
   game.persist(); game.cue('light'); game.toast('续灯成功，已增加 ' + next.energy + ' 拍，沿途收集已保留');
 }
 
@@ -131,6 +151,7 @@ function useStoredOil(game) {
   if (!result.moved) return false;
   game.cancelItem(); game.modal = null; game.reviewing = false; game.blockedAt = null;
   game.commitAction(result, RELIGHT_ACTION, game.platform.now());
+  reportGameEvent(game, 'revive_applied', { source: 'stored_oil', amount: SUPPLY_ENERGY });
   game.toast('已用已有灯油续灯 +' + SUPPLY_ENERGY + ' 拍，无需再看视频');
   game.syncMusic();
   return true;

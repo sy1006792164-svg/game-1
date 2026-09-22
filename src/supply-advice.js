@@ -1,7 +1,7 @@
 'use strict';
 
 const { ITEMS, itemOffer } = require('./items');
-const { DIRECTIONS, STAR_TWO_MARGIN, neighbor, step } = require('./engine');
+const { ACTIONS, DIRECTIONS, STAR_TWO_MARGIN, neighbor, step } = require('./engine');
 const { SUPPLY_ENERGY } = require('./supply-rules');
 const { difficultyProfile } = require('./difficulty');
 const { gateStatus } = require('./route-mechanics');
@@ -28,10 +28,16 @@ function routeDistances(level, state) {
       if (entered === null) continue;
       const wind = level.winds && level.winds[entered];
       const pushed = wind ? neighbor(topology, entered, wind, state) : null;
-      const landing = pushed === null ? entered : pushed;
-      if (distances.has(landing)) continue;
-      distances.set(landing, distances.get(from) + 1);
-      queue.push(landing);
+      const landings = [pushed === null ? entered : pushed];
+      // Match recovery's optimistic topology: a later closed gate or torn
+      // bridge can stop the gust, leaving the courier on the wind cell.
+      if (pushed !== null && ((state.bridges || []).includes(pushed) ||
+          level.tideGates && level.tideGates[pushed] || level.echoGates && level.echoGates[pushed])) landings.push(entered);
+      for (const landing of landings) {
+        if (distances.has(landing)) continue;
+        distances.set(landing, distances.get(from) + 1);
+        queue.push(landing);
+      }
     }
   }
   return distances;
@@ -42,6 +48,25 @@ function remainingTargets(level, state) {
   const queuedEcho = history.slice(Math.max(0, state.turn - 2), state.turn + 1);
   return [...new Set([level.exit, ...(state.letters || []),
     ...(state.seals || []).filter(cell => !queuedEcho.includes(cell))])];
+}
+
+// Prove only a short, ordinary finish with the actual wind, gates and echo.
+// This bounded check avoids suggesting oil just because the counter is low.
+function canFinishSoon(level, state) {
+  let frontier = [state];
+  for (let turn = 0; turn < Math.min(3, state.energy); turn++) {
+    const next = [];
+    for (const current of frontier) {
+      for (const action of ACTIONS) {
+        const result = step(level, current, action);
+        if (!result.moved) continue;
+        if (result.state.status === 'won') return true;
+        if (result.state.status === 'playing') next.push(result.state);
+      }
+    }
+    frontier = next;
+  }
+  return false;
 }
 
 function unlockedForPlanning(level, id) {
@@ -60,7 +85,9 @@ function preparationAdvice(level) {
   const itemId = [profile.recommendedItem, 'oil'].find(id => unlockedForPlanning(level, id));
   if (!itemId) return result(null, profile.focus || '先掌握三拍回声，把收信与盖票串成一路。');
   if (itemId === 'bridge') return result(itemId, '先安排过桥顺序；走到断桥旁时，修桥包可修复一座。');
-  if (itemId === 'kite') return result(itemId, '信笺分散；靠近两格内时，纸鸢可取一封，蓝票仍靠回声。');
+  if (itemId === 'kite') return result(itemId, level.letterOrder
+    ? '按编号依次收信；下一封编号信在两格内时，纸鸢可隔墙取回，蓝票仍靠回声。'
+    : '信笺分散；靠近两格内时，纸鸢可取一封，蓝票仍靠回声。');
   if (itemId === 'echo') return result(itemId, '先踩过蓝票，趁回声还没到时用笛提前盖好；离开后也能用，每次只盖一张。未踩过的票不能选，不补灯火，也不能代踩回声门机关。');
   const reserve = profile.reserve;
   const context = reserve === 0 ? '本关灯火零余量；' : Number.isFinite(reserve) && reserve <= 2 ? '本关灯火余量' + reserve + '拍；' : '';
@@ -77,7 +104,7 @@ function supplyAdvice(level, state) {
   if (!ITEMS.some(item => offers[item.id].eligible)) return null;
 
   // Do not ask for a supply when one ordinary move or wait already finishes.
-  for (const action of [...Object.keys(DIRECTIONS), 'wait']) {
+  for (const action of ACTIONS) {
     const next = step(level, state, action);
     if (next.moved && next.state.status === 'won') return null;
   }
@@ -126,6 +153,13 @@ function supplyAdvice(level, state) {
   }
 
   if (offers.oil.eligible) {
+    // More light cannot reconnect an unreachable target. Pending stamps share
+    // the courier's next turns, so counting every target as two extra moves
+    // overstates the shortage and used to push oil during safe deliveries.
+    if (targets.some(cell => !routes.has(cell))) return null;
+    const farthest = Math.max(0, ...targets.map(cell => routes.get(cell)));
+    const needsMargin = state.energy <= SUPPLY_ENERGY || state.energy <= farthest + 2;
+    if (needsMargin && canFinishSoon(level, state)) return null;
     const gates = [...Object.keys(level.tideGates || {}), ...Object.keys(level.echoGates || {})]
       .map(Number).filter(cell => distance(level, state.player, cell) === 1)
       .map(cell => gateStatus(level, state, cell)).filter(gate => gate && !gate.open);
@@ -135,7 +169,7 @@ function supplyAdvice(level, state) {
     if (state.energy <= SUPPLY_ENERGY && gates.some(gate => gate.type === 'echo'))
       return result('oil', '回声门仍需机关接力；灯油可补' + SUPPLY_ENERGY + '拍用于布置路线，仍要让回声压住机关才能过门。');
     const count = (state.letters || []).length + (state.seals || []).length;
-    if (state.energy <= 6 || state.energy <= count * 2 + 3) {
+    if (needsMargin) {
       const goal = count ? '还有' + count + '个收集目标' : '还需抵达邮局';
       return result('oil', '余下' + state.energy + '拍，' + goal + '；灯油可补' + SUPPLY_ENERGY + '拍。');
     }

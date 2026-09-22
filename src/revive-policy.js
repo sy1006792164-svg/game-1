@@ -1,7 +1,7 @@
 'use strict';
 
 const { DIRECTIONS, neighbor, step } = require('./engine');
-const { ITEMS, itemTargets, itemAction } = require('./items');
+const { itemTargets, itemAction } = require('./items');
 const queuedEchoCells = state => state.history.slice(Math.max(0, state.turn - 2), state.turn + 1);
 
 // This only rules out definite dead ends from torn bridges or isolated plates. Follow wind
@@ -70,7 +70,7 @@ function targetsReachable(level, state, reachable) {
 
 function tornRouteBlocked(level, state) {
   if (!(level.bridges || []).some(cell => !(state.bridges || []).includes(cell)) &&
-      !Object.keys(level.echoGates || {}).length) return false;
+      !Object.keys(level.echoGates || {}).length && !Object.keys(level.winds || {}).length) return false;
   return repairsBlocked(level, state, reachableLandings(level, state));
 }
 
@@ -126,18 +126,8 @@ function currentBridgeDepartureBlocked(level, state) {
   return true;
 }
 
-function isReviveRouteBlocked(level, state, options = {}) {
+function isReviveRouteBlocked(level, state) {
   if (!level || !state) return false;
-  if (options.canAcquireItems === true) {
-    const inventory = { ...state.inventory };
-    for (const item of ITEMS) {
-      if (level.id >= item.unlock && ['kite', 'bridge'].includes(item.id)) inventory[item.id] = Math.max(inventory[item.id] || 0,
-        item.id === 'kite' ? state.letters.length : (level.bridges || []).length);
-    }
-    // This only allows the offer of a relight. The player must still complete
-    // each separate tool video; this hypothetical stock is never granted.
-    state = { ...state, inventory };
-  }
   const departureBlocked = currentBridgeDepartureBlocked(level, state);
   return departureBlocked === null ? tornRouteBlocked(level, state) : departureBlocked;
 }

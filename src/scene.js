@@ -5,7 +5,7 @@ const { insideRect } = require('./board-projection');
 const { getBoardGeometry } = require('./board-geometry');
 const { OFFICE, officeFlag, hitPostOffice } = require('./post-office-geometry');
 const { drawIslandSurface } = require('./island-surface');
-const { drawActorTrails, drawDestination, drawCollectibleAura } = require('./scene-effects');
+const { drawMoveTarget, drawActorTrails, drawDestination, drawCollectibleAura } = require('./scene-effects');
 const { drawDistantAtmosphere, windState } = require('./ambient-effects');
 const { chapterMood } = require('./chapter-atmosphere');
 const { drawHomeDelivery } = require('./page-atmosphere');
@@ -306,9 +306,7 @@ function drawBoard(r, game, now, rect, guide) {
         } });
       }
       if (!itemTargets && !game.reviewing && s.status === 'playing' && adjacent.has(cell) && (!guide || guide.interactive || guide.visual.tapCell === cell)) {
-        diamond(r, x, y, hw - 3, hh - 2, '#f4d49b66', null);
-        floorLine(r, p, x, y, [[0, -hh + 2], [hw - 3, 0], [0, hh - 2], [-hw + 3, 0], [0, -hh + 2]], '#c69755', 1.45);
-        ellipse(r, x, y + hh * .43, hw * .12, hh * .14, '#b68b52');
+        drawMoveTarget(r, p, s.player, cell);
       }
       drawRouteMechanic(r, l, s, cell, p);
       if (itemTargets && itemTargets.has(cell)) drawItemTarget(r, game.selectedItem, p, cell, time);

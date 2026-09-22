@@ -8,7 +8,8 @@ const CONTROL = Object.freeze({ height: 52, compactHeight: 44, icon: UI_ICON.siz
 const TONES = Object.freeze({
   primary: { face: C.green, held: '#204d42', ink: C.white, icon: '#f4e9d5' },
   secondary: { face: C.panel, held: '#e4ece2', ink: C.ink, icon: C.green },
-  quiet: { face: C.soft, held: '#d9e5da', ink: C.ink, icon: C.green }
+  quiet: { face: C.soft, held: '#d9e5da', ink: C.ink, icon: C.green },
+  danger: { face: C.peach, held: '#efd6c4', ink: C.dangerText, icon: C.dangerText }
 });
 
 function optionsFor(style) { return style && typeof style === 'object' ? style : { style }; }
@@ -63,6 +64,8 @@ function drawButton(r, text, x, y, w, h, action, style) {
     c.restore();
   }
   const middle = top + faceH / 2;
+  const caption = options.caption && ui.lines.length === 1 ? options.caption : null;
+  const labelMiddle = middle - (caption ? 8 : 0);
   const feedbackAge = Number.isFinite(options.feedbackAt) ? r.now - options.feedbackAt : -1;
   const feedback = !disabled && !r.reducedMotion && feedbackAge >= 0 && feedbackAge < 650;
   const response = feedback ? Math.sin(feedbackAge / 650 * Math.PI) : 0;
@@ -75,21 +78,23 @@ function drawButton(r, text, x, y, w, h, action, style) {
   if (options.icon) {
     const iconOnly = String(text).length === 0;
     const iconX = iconOnly ? x + w / 2 : groupX + CONTROL.icon / 2;
-    c.save(); c.translate(iconX, middle);
+    c.save(); c.translate(iconX, labelMiddle);
     if (feedback) c.rotate(options.icon === 'hourglass' ? Math.PI * (1 - (1 - feedbackAge / 650) ** 3) : -.18 * response);
     drawUiIcon(r, options.icon, 0, 0, disabled ? C.muted : tab && options.selected ? C.white : options.color || tone.icon);
     c.restore();
   }
   const textX = groupX + ui.leading + ui.textSpan / 2;
-  const textY = middle - (ui.lines.length - 1) * ui.lineHeight / 2;
+  const textY = labelMiddle - (ui.lines.length - 1) * ui.lineHeight / 2;
   const ink = disabled ? C.muted : options.color || (tab ? options.selected ? C.white : C.muted : textOnly ? C.green : tone.ink);
   ui.lines.forEach((line, index) => r.text(line, textX, textY + index * ui.lineHeight, ui.size, ink, 'center', ui.weight));
+  if (caption) r.label(caption, x + w / 2, middle + 13, w - ui.inset * 2, 12,
+    disabled ? C.muted : primary ? C.white : options.style === 'danger' ? tone.ink : C.muted, 'center');
   if (options.trailing) drawUiIcon(r, options.trailing, x + w - ui.inset - CONTROL.icon / 2, middle, disabled ? C.muted : options.color || tone.icon);
   c.restore();
   if (!disabled) {
     const minimum = 44 / (r.scale || 1), hitW = Math.max(w, minimum), hitH = Math.max(h, minimum);
     r.hit(x - (hitW - w) / 2, y - (hitH - h) / 2, hitW, hitH, action, undefined,
-      options.label || String(text) || options.icon);
+      options.label || (caption ? text + '，' + caption : String(text)) || options.icon);
   }
 }
 

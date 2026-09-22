@@ -7,7 +7,7 @@ const ITEMS = Object.freeze([
   Object.freeze({ id: 'oil', name: '灯油', icon: 'oil', unlock: 4,
     description: '补充 ' + SUPPLY_ENERGY + ' 拍灯火，能再走或等 ' + SUPPLY_ENERGY + ' 次。\n灯还亮着时，点下方按钮直接补充。\n不用选格子，不移动人物，也不耗拍。', short: '灯火 +' + SUPPLY_ENERGY }),
   Object.freeze({ id: 'kite', name: '纸鸢', icon: 'kite', unlock: 7,
-    description: '隔空取回一封橙色信笺，省下绕路。\n直着数最多 2 格，拐弯数各 1 格。\n点亮起的信即可；隔墙也能取，不耗拍。\n只收信，不收蓝票，也不会踩桥。', short: '隔空收信' }),
+    description: '隔空取回一封橙色信笺，省下绕路。\n直着数最多 2 格，拐弯数各 1 格。\n点亮起的信即可；隔墙也能取，不耗拍。\n编号投递时，只能取下一封编号信。\n只收信，不收蓝票，也不会踩桥。', short: '隔空收信' }),
   Object.freeze({ id: 'bridge', name: '修桥包', icon: 'bridge', unlock: 16,
     description: '修好一座断纸桥，让你能再走过去。\n先走到断桥旁，上下左右紧挨一格，\n再点亮起的断桥；每次只修一座。\n修好后再离开仍会碎，修桥不耗拍。', short: '修复断桥' }),
   Object.freeze({ id: 'echo', name: '回声笛', icon: 'echo', unlock: 31,

@@ -9,6 +9,46 @@ function ellipse(c, x, y, width, height, color, lineWidth, start = 0, end = TAU)
   else { c.fillStyle = color; c.fill(); }
 }
 
+function drawMoveTarget(r, projection, player, cell) {
+  const c = r.ctx, { halfW: hw, halfH: hh, point } = projection;
+  const [x, y] = point(cell), [px, py] = point(player);
+  const corners = [[x, y - hh + 2], [x + hw - 3, y], [x, y + hh - 2], [x - hw + 3, y]];
+  c.save();
+  c.beginPath(); corners.forEach(([cx, cy], i) => i ? c.lineTo(cx, cy) : c.moveTo(cx, cy)); c.closePath();
+  c.fillStyle = '#f5ddad59'; c.fill();
+  c.strokeStyle = '#a17c43'; c.lineWidth = 1.3; c.stroke();
+  // A small floor arrow sits near the entry edge, leaving the prop in the
+  // center readable. Work in tile coordinates so the arrow shares its tilt.
+  const dx = (x - px) / hw, dy = (y - py) / hh;
+  const markerX = x - (x - px) * .28, markerY = y - (y - py) * .28;
+  ellipse(c, markerX, markerY, hw * .24, hh * .24, '#fff8e4e8');
+  const position = (forward, side) => [markerX + hw * (dx * forward - dy * side),
+    markerY + hh * (dy * forward + dx * side)];
+  r.line([position(-.12, 0), position(.12, 0)], '#85622f', 1.5);
+  r.line([position(.01, -.1), position(.12, 0), position(.01, .1)], '#85622f', 1.5);
+  c.restore();
+}
+
+function playerPresence(r, frame, now, unit, still, low) {
+  if (!frame.alpha) return;
+  const c = r.ctx, pulse = still || low || frame.moving ? .5 : .5 + Math.sin(now / 1350) * .5;
+  c.save(); c.globalAlpha *= frame.alpha;
+  c.save(); c.globalAlpha *= .13;
+  ellipse(c, frame.x, frame.y + 1, unit * .39, unit * .15, '#e8c573');
+  c.restore();
+  c.save(); c.globalAlpha *= .7 + pulse * .1;
+  ellipse(c, frame.x, frame.y + 1, unit * .36, unit * .133, '#947344', 1.1);
+  ellipse(c, frame.x, frame.y + 1, unit * .32, unit * .115, '#fff2c4', 1.4);
+  if (!low) {
+    for (const side of [-1, 1]) {
+      const x = frame.x + side * unit * .43;
+      r.line([[x - unit * .035, frame.y + 1], [x, frame.y - unit * .025],
+        [x + unit * .035, frame.y + 1]], '#a8874a', 1.1);
+    }
+  }
+  c.restore(); c.restore();
+}
+
 function echoPresence(r, frame, now, unit, still, low) {
   if (!frame.alpha) return;
   const c = r.ctx, phase = still || low ? 0 : now / 1450;
@@ -33,7 +73,10 @@ function drawActorTrails(r, game, now, point, unit, options = {}) {
   if (game.reviewing) return;
   const c = r.ctx, reduced = !!(options.reducedMotion || r.reducedMotion), low = r.effectsQuality === 'low';
   const ambient = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
-  const echo = actorFrame(game, now, point, true, { reducedMotion: reduced });
+  const frameOptions = { reducedMotion: reduced, quality: r.effectsQuality, ambientNow: ambient };
+  const player = actorFrame(game, now, point, false, frameOptions);
+  if (game.state.status === 'playing') playerPresence(r, player, ambient, unit, reduced, low);
+  const echo = actorFrame(game, now, point, true, frameOptions);
   const sharedOffset = game.state.echo === game.state.player ? unit * .28 / 1.7 : 0;
   echo.x += sharedOffset;
   echoPresence(r, echo, ambient, unit, reduced, low);
@@ -233,4 +276,4 @@ function drawStageNotice(r, game, now, rect, suppressed = false) {
   return true;
 }
 
-module.exports = { drawActorTrails, drawDestination, drawCollectibleAura, drawStageNotice };
+module.exports = { drawMoveTarget, drawActorTrails, drawDestination, drawCollectibleAura, drawStageNotice };

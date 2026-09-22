@@ -2,11 +2,11 @@
 
 const { createState, step } = require('./engine');
 const { strengthenObjectives, difficultyProfile, challengeBrief } = require('./difficulty');
-const { phaseFor, practiceReserve, addCampaignMechanics, campaignExperience } = require('./campaign-design');
+const { phaseFor, practiceReserve, legacyPracticeReserve, addCampaignMechanics, campaignExperience } = require('./campaign-design');
 
-// Version 8 removes automatic supplies and adds clock/echo cooperation gates.
-// Every map ships a replayed, item-free route including its required waits.
-const CONTENT_VERSION = '8';
+// Version 9 tightens mature-route reserves while keeping the same legal maps.
+// In-progress v8 routes retain their original light until the next departure.
+const CONTENT_VERSION = '9';
 const PER_CHAPTER = 6;
 const chapterNames = [
   '初寄微光', '双生回廊', '风过纸巷', '灯火借路', '星夜长信',
@@ -140,10 +140,21 @@ function parseLevel(spec, index, code) {
 }
 
 const CAMPAIGN = specs.map((spec, index) => parseLevel(spec, index));
-/** Old runs restart under v8; recorded campaign results are managed separately. */
+const legacyLevels = new Map();
+/** Budget changes must not erase a route or a video reward already in progress. */
 function getLegacyLevel(id, revision) {
   if (!Number.isSafeInteger(id) || id < 1 || id > CAMPAIGN.length) return null;
   if (revision === CONTENT_VERSION) return CAMPAIGN[id - 1];
+  if (revision === '8') {
+    if (!legacyLevels.has(id)) {
+      const current = CAMPAIGN[id - 1];
+      const level = { ...current, revision: '8', budget: current.par + legacyPracticeReserve(id - 1, current.par) };
+      level.difficulty = difficultyProfile(level);
+      level.brief = challengeBrief(level, specs[id - 1][2]);
+      legacyLevels.set(id, level);
+    }
+    return legacyLevels.get(id);
+  }
   return null;
 }
 

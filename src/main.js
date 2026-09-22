@@ -3,6 +3,7 @@ const { confirmRestart } = require('./restart-flow');
 const { createPlatform } = require('./platform');
 const { createStore } = require('./storage');
 const { createAds } = require('./ads');
+const { createReporter, reportGameEvent } = require('./analytics');
 const { createFriendLeaderboard } = require('./friend-leaderboard');
 const { createRankingAuthorization } = require('./ranking-authorization');
 const { createSystemMessageSubscription, SYSTEM_MESSAGE_TYPES } = require('./system-message-subscription');
@@ -49,6 +50,7 @@ const SETTING_KEYS = Object.freeze(['sound', 'music', 'haptics', 'reducedMotion'
 class Game {
   constructor(platform) {
     this.platform = platform;
+    this.reportEvent = createReporter(platform);
     Object.defineProperty(this, 'development', { value: platform.isDevelopment === true });
     this.store = createStore(platform.storage, { development: this.development });
     this.sound = createSound(platform);
@@ -115,6 +117,7 @@ class Game {
       return handled;
     });
     platform.onHide(() => {
+      this.ads.suspend();
       this.renderer.pauseAmbient(platform.now());
       this.startupLastAt = null;
       this.friendResumeRevision++;
@@ -131,6 +134,7 @@ class Game {
     platform.onShow(() => {
       this.startupLastAt = null;
       this.hidden = false;
+      this.ads.preload();
       this.rankingAuthorization.show();
       this.refreshFriendSession();
       if (this.page === 'leaderboard') this.rankMessageSubscription.refresh();
@@ -191,7 +195,7 @@ class Game {
     // Discard touches crossing the page transition.
     this.pointer = null; this.pendingAction = null; this.renderer.hits = [];
     this.lastFrame = -Infinity;
-    if (!this.startupActive()) this.syncMusic();
+    if (!this.startupActive()) { this.syncMusic(); this.ads.preload(); }
     return true;
   }
   // Reuse cloned snapshots until the store revision changes.
@@ -427,6 +431,7 @@ class Game {
       this.pointer = null; this.camera.enter(this.platform.now());
       this.modal = null; this.reviewing = false;
       if (run.supplyPolicy === undefined) this.persist();
+      reportGameEvent(this, 'level_resume');
       if (state.status === 'failed') this.failure();
       else { this.cue('start'); this.toast('已接上上次的风，继续投递吧'); }
       return true;
@@ -434,6 +439,8 @@ class Game {
   }
   start(level, mode = 'campaign', carriedRewards) {
     if (this.busy || this.startupActive() || mode !== 'campaign' || !level) return;
+    const source = carriedRewards ? 'upgrade' : this.level && this.level.id === level.id &&
+      this.state && this.state.status !== 'won' ? 'retry' : 'new';
     // Every new departure uses the current rules, including upgraded saves.
     if (level.revision !== CONTENT_VERSION && CAMPAIGN[level.id - 1]) level = CAMPAIGN[level.id - 1];
     this.cancelRankingPointer();
@@ -449,6 +456,8 @@ class Game {
     this.page = 'game'; this.modal = null; this.reviewing = false; this.session++; this.transitionAt = this.platform.now() - MOVE_MS; this.toastUntil = 0;
     this.pointer = null; this.camera.enter(this.platform.now());
     this.persist(); this.cue('start');
+    reportGameEvent(this, 'level_start', { source, budget: level.budget, par: level.par,
+      phase: level.experience && level.experience.phase || '' });
   }
   primary() {
     if (!this.ensureStoredProgressReady()) return;
@@ -473,6 +482,8 @@ class Game {
     const offer = itemOffer(this.level, this.state, id);
     const needsVideo = !(this.state.inventory && this.state.inventory[id] > 0), canWatch = this.ads.isConfigured();
     const canUse = offer.eligible && (!needsVideo || canWatch);
+    reportGameEvent(this, 'item_open', { item_id: id, eligible: offer.eligible ? 1 : 0,
+      owned: needsVideo ? 0 : 1 });
     const session = this.session, state = this.state;
     const close = () => { this.modal = null; this.cancelItem(); this.syncMusic(); };
     this.modal = {
@@ -542,6 +553,10 @@ class Game {
     this.previousState = this.state; this.state = result.state;
     this.actions.push(action); this.transitionAt = now;
     this.moveEvents = result.events; this.motionPath = null;
+    const item = parseItemAction(action);
+    if (item || action === RELIGHT_ACTION) reportGameEvent(this, 'item_used', {
+      item_id: item ? item.id : 'oil', source: action === RELIGHT_ACTION ? 'relight' : 'playing'
+    });
     if (this.mechanicGuide) {
       const learned = triggeredMechanics(this.level, this.previousState, action, result)
         .filter(id => this.mechanicGuide.ids.includes(id));
@@ -557,7 +572,10 @@ class Game {
     }
     this.persist();
     if (this.state.status === 'won') this.victory();
-    else if (this.state.status === 'failed') this.failure();
+    else if (this.state.status === 'failed') {
+      reportGameEvent(this, 'level_fail', { undo_left: this.undoLeft() });
+      this.failure();
+    }
     else if (this.state.player === this.level.exit && (this.state.letters.length || this.state.seals.length)) this.toast(this.playHint());
   }
   get reviveAt() {
@@ -590,6 +608,7 @@ class Game {
     this.previousState = this.state; this.state = state; this.actions = actions; this.undosUsed += 1;
     this.supplyPolicy = supplyPolicy;
     this.moveEvents = [{ type: 'undo', cell: state.player }]; this.transitionAt = this.platform.now(); this.persist(); this.cue('undo');
+    reportGameEvent(this, 'undo_used', { undo_left: this.undoLeft() });
   }
   victory() {
     this.pendingAction = null; this.toastUntil = 0;
@@ -597,6 +616,8 @@ class Game {
     const rating = stars(this.level, this.state), before = this.record(this.level, this.mode);
     const journeyBefore = this.journey();
     this.store.settleWin(this.level.id, rating, scoredTurns(this.level, this.state), this.mode, { date: localDate(new Date()) });
+    reportGameEvent(this, 'level_win', { stars: rating, items_used: this.state.itemsUsed || 0,
+      first_clear: before ? 0 : 1 });
     this.syncFriendScore();
     // Replaying for stars must continue the main route, just like the home page.
     const candidate = this.nextLevel();

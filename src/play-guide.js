@@ -51,10 +51,11 @@ function guideStep(game, now) {
   if (first) {
     lesson.title = '点亮格，走出第一步';
     lesson.text = '点手指指向的格子，送信员就会走过去。';
+    lesson.tip = '移动耗 1 拍；长按亮格只预览，松手不走。';
   } else if (action === 'wait') {
     lesson.title = '等一拍，让回声跟上';
     lesson.text = '点下方“等一拍”，等回声收齐蓝票。';
-    lesson.tip = '等待也算行动，会让回声继续走。';
+    lesson.tip = '等待同样耗 1 拍，会让回声继续走。';
   } else if (next.state.status === 'won') {
     lesson.title = '点邮局，完成投递';
     lesson.text = s.seals.length ? '信已收好，走进邮局时回声会收齐蓝票。'
@@ -87,9 +88,9 @@ function playHint(game, now) {
   if (s.status === 'failed') return '灯火已耗尽。' + game.failureHint();
   if (game.blockedAt != null && now - game.blockedAt < 1400) return game.blockedGate
     ? gateMessage(l, s, game.blockedGate) : '这边不通，点亮起的相邻地砖试试。';
+  if (!s.letters.length && !s.seals.length) return '收集完成，' + (s.energy <= 3 ? '只剩 ' + s.energy + ' 拍，' : '') + '前往亮起的邮局。';
   const gateHint = routeMechanicHint(l, s);
   if (gateHint) return (s.energy <= 3 ? '剩 ' + s.energy + ' 拍。' : '') + gateHint;
-  if (!s.letters.length && !s.seals.length) return '收集完成，' + (s.energy <= 3 ? '只剩 ' + s.energy + ' 拍，' : '') + '前往亮起的邮局。';
   const lowLight = s.energy <= 3 ? '只剩 ' + s.energy + ' 拍。' : '';
   const pending = pendingSeals(s);
   const unvisited = pending.filter(item => item.turns === null);
@@ -112,7 +113,7 @@ function playHint(game, now) {
     return '顺序来信 · 先收第 ' + (l.letterOrder.indexOf(next) + 1) + ' 封信，再按编号继续；蓝票仍交给回声。';
   }
   if (s.turn === 0) {
-    if (l.id <= 3) return '点亮起的相邻地砖移动，先走过蓝票。';
+    if (l.id <= 3) return '轻点相邻亮格，移动耗 1 拍；先经过蓝票。';
     if (l.experience) return l.experience.guidance;
     if (game.mode === 'campaign' && l.id >= 301) return '拍数紧凑，纸桥离开就碎，先排好整条邮路。';
     if ((l.bridges || []).length) return '纸桥离开后就会碎，先想好哪一段只走一次。';

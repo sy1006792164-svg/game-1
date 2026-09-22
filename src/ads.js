@@ -12,6 +12,8 @@ function createAds(platform, config, onActiveChange) {
   let activeAd = null;
   let activeAttempt = null;
   let errorListener = null;
+  let preloadAttempt = null;
+  let suspended = false;
 
   function defer(callback) {
     Promise.resolve().then(callback).catch(function () { /* Never leak SDK callback failures. */ });
@@ -56,6 +58,7 @@ function createAds(platform, config, onActiveChange) {
 
   function discardAd(ad) {
     if (!ad || activeAd !== ad) return;
+    if (preloadAttempt && preloadAttempt.ad === ad) preloadAttempt.finish(false);
     detachErrorListener(ad);
     activeAd = null;
     try { if (typeof ad.destroy === 'function') ad.destroy(); } catch (_) { /* A broken SDK object is already detached. */ }
@@ -64,9 +67,9 @@ function createAds(platform, config, onActiveChange) {
   function initializeAd() {
     if (!isConfigured()) return 'unsupported';
     try {
-      // Reuse the SDK singleton for the lifetime of this game instance.
-      // Mini Games default to a global singleton. Multiton mode (base library
-      // 2.8.0+) is required so destroy/recreate yields an isolated emitter.
+      // Retain the prepared object until its video ends. Mini Games default
+      // to a global singleton; multiton mode is required so the next video
+      // can use an isolated emitter after this one is destroyed.
       if (!activeAd) activeAd = api.createRewardedVideoAd({ adUnitId, multiton: true });
       if (!activeAd || typeof activeAd.show !== 'function' || typeof activeAd.onClose !== 'function' || typeof activeAd.onError !== 'function') {
         discardAd(activeAd);
@@ -77,7 +80,13 @@ function createAds(platform, config, onActiveChange) {
         const listener = function (error) {
           if (destroyed || activeAd !== ad || errorListener !== listener) return;
           const attempt = pending || activeAttempt;
-          if (!attempt || attempt.ad !== ad || !attempt.error) return;
+          if (!attempt) {
+            // Idle loading can fail too. Retire this native emitter so the
+            // next user request can initialize a clean advertisement.
+            defer(function () { if (!pending && !activeAttempt && activeAd === ad) discardAd(ad); });
+            return;
+          }
+          if (attempt.ad !== ad || !attempt.error) return;
           const systemError = isAdSystemError(error);
           // Capture the owning attempt now. A synchronous error emitted while
           // registering this listener must remain an idle preload error.
@@ -96,6 +105,47 @@ function createAds(platform, config, onActiveChange) {
       discardAd(activeAd);
       return 'error';
     }
+  }
+
+  // Warming an ad never displays it and never grants a reward. It only reduces
+  // the wait after the player's explicit tap; show retains its normal retry.
+  function preload() {
+    suspended = false;
+    if (!isConfigured() || pending || activeAttempt) return Promise.resolve(false);
+    if (preloadAttempt) return preloadAttempt.promise;
+    if (initializeAd()) return Promise.resolve(false);
+    const ad = activeAd;
+    if (typeof ad.load !== 'function') return Promise.resolve(false);
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    const load = { ad, promise, timer: null, finish(success) {
+      if (preloadAttempt !== load) return;
+      preloadAttempt = null; clearTimeout(load.timer); resolve(success);
+    } };
+    preloadAttempt = load;
+    load.timer = setTimeout(function () {
+      load.finish(false);
+      if (!pending && !activeAttempt) discardAd(ad);
+    }, 30000);
+    if (load.timer && typeof load.timer.unref === 'function') load.timer.unref();
+    Promise.resolve().then(function () {
+      if (preloadAttempt === load && activeAd === ad) return ad.load();
+    }).then(function () { load.finish(activeAd === ad && !destroyed && !suspended); }, function () {
+      load.finish(false);
+      if (!pending && !activeAttempt) discardAd(ad);
+    });
+    return promise;
+  }
+
+  function preloadNext() {
+    defer(function () { if (!destroyed && !suspended && !pending && !activeAttempt) preload(); });
+  }
+
+  function suspend() {
+    suspended = true;
+    // Native video playback backgrounds the game too. Its explicit close
+    // callback still owns the earned reward, so never destroy a playing ad.
+    if (!pending && !activeAttempt) discardAd(activeAd);
   }
 
   function showRevive() {
@@ -136,10 +186,16 @@ function createAds(platform, config, onActiveChange) {
       if (!attempt.settled) {
         attempt.settled = true;
         clearTimeout(attempt.timer);
+        // A new attempt gets its own native emitter, not just a new listener.
+        // A delayed duplicate close from this video cannot reward the next one.
+        detachCloseListener(attempt.ad);
+        discardAd(attempt.ad);
+        attempt.ad = null;
         if (pending === attempt) pending = null;
         attempt.resolve(result(reason));
       }
       endDisplay();
+      preloadNext();
     }
     attempt.settle = settle;
 
@@ -157,7 +213,7 @@ function createAds(platform, config, onActiveChange) {
       discardAd(ad);
       attempt.generation += 1;
       if (pending === attempt) pending = null;
-      try { releaseDisplay(); } finally { attempt.resolve(result(reason)); }
+      try { releaseDisplay(); } finally { attempt.resolve(result(reason)); preloadNext(); }
     }
     attempt.failClosed = failClosed;
 
@@ -250,7 +306,8 @@ function createAds(platform, config, onActiveChange) {
     if (activeAttempt) activeAttempt.endDisplay();
   }
 
-  return { isConfigured, isActive: function () { return activeAttempt !== null; }, showRewarded: showRevive, showRevive, destroy };
+  return { isConfigured, isActive: function () { return activeAttempt !== null; }, preload, suspend,
+    showRewarded: showRevive, showRevive, destroy };
 }
 
 module.exports = { createAds };

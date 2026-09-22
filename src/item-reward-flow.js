@@ -3,6 +3,7 @@
 const { replay, step } = require('./engine');
 const { ITEMS, itemOffer, itemAvailability, itemAction } = require('./items');
 const { MOVE_MS } = require('./motion');
+const { reportGameEvent } = require('./analytics');
 
 // A video is tied to the selected tool, target and exact route that requested it.
 // The reward ledger survives undo; consumption is recorded in the route actions.
@@ -19,19 +20,27 @@ async function requestItemReward(game, id, cell) {
   }
   const session = game.session, level = game.level, before = game.state;
   const item = ITEMS.find(entry => entry.id === id);
+  const context = { placement: 'item', item_id: id, target_cell: cell, level_id: level.id, content_version: level.revision || '',
+    mode: game.mode, turn: before.turn, energy: before.energy, revive_count: before.reviveCount || 0,
+    remaining_letters: before.letters.length, remaining_seals: before.seals.length };
   game.cancelItem(); game.busy = true; game.renderer.hits = [];
   game.modal = { kind: 'item-ad', title: '正在连接广告',
     lines: ['完整观看后获得并使用 1 份' + item.name + '。', '未看完不会发放，也不会消耗拍数。'], buttons: [] };
-  game.sound.suspend('ad'); game.syncMusic();
   let reward, earnedReward = false;
   try {
+    reportGameEvent(game, 'ad_request', context);
+    game.sound.suspend('ad'); game.syncMusic();
     try { reward = await game.ads.showRewarded(); } catch (_) { reward = { rewarded: false, reason: 'error' }; }
+    reportGameEvent(game, reward && reward.rewarded === true ? 'ad_complete' : reward && reward.reason === 'cancelled' ? 'ad_cancel' : 'ad_error',
+      { ...context, reason: reward && reward.reason || 'error',
+        route_current: session === game.session && game.page === 'game' && game.level === level && game.state === before ? 1 : 0 });
     game.busy = false;
     if (session === game.session && game.page === 'game' && game.level === level && game.state === before) {
       game.modal = null;
       if (reward && reward.rewarded === true) {
         game.itemRewards = { ...game.itemRewards, [id]: (game.itemRewards[id] || 0) + 1 };
         earnedReward = true;
+        reportGameEvent(game, 'item_reward', { item_id: id, amount: 1 });
         // Record completion before replay, effects or score settlement can fail.
         // The fallback route restores with this reward still held.
         game.persist();

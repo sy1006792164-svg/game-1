@@ -81,28 +81,33 @@ function drawEchoInspection(r, game, now) {
 function drawEchoTimeline(r, game, rect) {
   if (game.reviewing || game.state.status !== 'playing' || game.selectedItem) return;
   const c = r.ctx, { x, y, w, h = ECHO_TIMELINE_HEIGHT } = rect;
-  const titleWidth = 100, column = (w - titleWidth) / 3;
-  const faceY = y + (h - 28) / 2;
+  const titleWidth = 80, column = (w - titleWidth) / 3;
+  const faceY = y + (h - 40) / 2, faceWidth = column - 8;
   const inspection = echoInspection(r, game), inspectable = canInspectEcho(game);
   c.save();
-  r.icon('echo', x + 12, y + h / 2, 18, C.blueText);
-  r.text(inspectable ? '点拍数预览' : '回声预告', x + 28, y + h / 2, 12, C.blueText, 'left', '600');
+  r.icon('echo', x + 12, y + h / 2 - 8, 17, C.blueText);
+  r.text('回声', x + 26, y + h / 2 - 8, 13, C.blueText, 'left', '700');
+  r.text(inspectable ? '点选预览' : '回声预告', x + 4, y + h / 2 + 10, 12, C.muted);
   for (const entry of getEchoForecast(game)) {
     const left = x + titleWidth + (entry.beat - 1) * column;
     const selected = inspection && inspection.entry.beat === entry.beat;
-    const ink = entry.seal ? C.white : entry.cell === null ? C.muted : C.blueText;
-    if (entry.seal) r.round(left, faceY + 1, column - 7, 26, 8, C.blueText);
-    else if (selected) r.round(left, faceY + 1, column - 7, 26, 8, '#dcebe5');
-    else if (entry.beat > 1) r.line([[left - 4, faceY + 9], [left - 4, faceY + 19]], C.line, 1);
-    if (selected) r.round(left, faceY + 1, column - 7, 26, 8, null, C.blueText);
-    if (entry.seal) r.icon('stamp', left + 15, y + h / 2, 15, ink);
-    else if (entry.cell === null) r.text('—', left + 15, y + h / 2, 12, ink, 'center');
-    else r.circle(left + 15, y + h / 2, 3, ink);
-    r.text(entry.beat + ' 拍', left + 30, y + h / 2, 12, ink, 'left', '600');
+    const pending = entry.cell === null;
+    const needsLight = entry.beat > game.state.energy;
+    const ink = selected ? C.white : !inspectable ? C.muted : needsLight ? C.dangerText : pending ? C.muted : C.blueText;
+    const fill = selected ? C.blueText : !inspectable ? C.raised : needsLight ? C.peach : pending ? C.raised : entry.seal ? C.bluePale : C.panel;
+    r.round(left, faceY, faceWidth, 40, 10, fill, selected || entry.seal ? C.blueText : C.line);
+    const center = left + faceWidth / 2;
+    r.text(entry.beat + ' 拍后', center, faceY + 12, 13, ink, 'center', '700');
+    if (selected) r.icon('check', left + faceWidth - 8, faceY + 8, 9, C.white);
+    const label = needsLight ? entry.seal ? '补拍后盖票' : '需先补拍' : pending ? '未出现' : entry.seal ? '盖蓝票' : '有落点';
+    const stamp = entry.seal && !needsLight;
+    if (stamp) r.icon('stamp', center - 24, faceY + 29, 12, ink);
+    r.text(label, center + (stamp ? 5 : 0), faceY + 29, 12, ink, 'center');
     if (inspectable) {
       const source = game.state, session = game.session;
       const action = Object.assign(() => inspectEcho(r, game, entry, source, session), { focusId: 'echo-beat:' + entry.beat });
-      r.hit(left - 2, y, column - 3, h, action, undefined, '查看回声：' + echoForecastMessage(game, entry));
+      r.hit(left - 2, y, column - 3, h, action, undefined,
+        '查看回声：' + echoForecastMessage(game, entry) + (selected ? ' 当前预览，再次选择收起。' : ''));
     }
   }
   c.restore();

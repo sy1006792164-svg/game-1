@@ -109,3 +109,16 @@ test('forecast touch targets retain 44 pixels on small screens without overlappi
     }
   }
 });
+
+test('forecast cells beyond remaining light carry a visible text warning without disabling inspection', () => {
+  const game = sample(), labels = [], hits = [], noop = () => {};
+  while (game.state.energy > 1) game.state = step(game.level, game.state, 'wait').state;
+  const renderer = { ctx: { save: noop, restore: noop }, icon: noop,
+    text: label => labels.push(label), round: noop, line: noop, circle: noop,
+    hit: (x, y, w, h, action) => hits.push(action) };
+  drawEchoTimeline(renderer, game, { x: 24, y: 154, w: 342 });
+  assert.equal(labels.filter(label => label === '需先补拍' || label === '补拍后盖票').length, 2);
+  assert.equal(hits.length, 3);
+  hits[2]();
+  assert.equal(echoInspection(renderer, game).entry.beat, 3);
+});
