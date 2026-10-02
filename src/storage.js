@@ -9,7 +9,7 @@ const DEV_PROFILE_KEY = 'minigame.development.profile.v1';
 const DEV_RUN_KEY = 'minigame.development.run.v1';
 const MAX_BYTES = 384 * 1024;
 const BAD_KEYS = ['__proto__', 'prototype', 'constructor'];
-const SETTING_KEYS = Object.freeze(['sound', 'music', 'haptics', 'reducedMotion']);
+const SETTING_KEYS = Object.freeze(['sound', 'music', 'haptics', 'reducedMotion', 'lowEffects']);
 const NATIVE_OBJECT_SOURCE = Function.prototype.toString.call(Object);
 
 function plain(value) {
@@ -40,7 +40,7 @@ function dateId(id) {
 function defaults() {
   return {
     version: 1, completed: {}, daily: {},
-    settings: { sound: true, music: true, haptics: true, reducedMotion: false },
+    settings: { sound: true, music: true, haptics: true, reducedMotion: false, lowEffects: false },
     totalWins: 0
   };
 }

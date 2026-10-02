@@ -250,7 +250,8 @@ class Renderer {
     this.now = now;
     this.reducedMotion = typeof game.reducedMotion === 'function' ? game.reducedMotion() :
       !!(game.platform && game.platform.reducedMotion);
-    this.effectsQuality = game.platform && game.platform.effectsQuality === 'low' ? 'low' : 'high';
+    this.effectsQuality = typeof game.effectsQuality === 'function' ? game.effectsQuality() :
+      game.platform && game.platform.effectsQuality === 'low' ? 'low' : 'high';
     const pageProgress = pageFrame(this, game, now);
     if (!game.modal) this.ambientFreezeAt = null;
     else if (!Number.isFinite(this.ambientFreezeAt)) this.ambientFreezeAt = now;

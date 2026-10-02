@@ -105,7 +105,7 @@ test('win and failure reviews return to their original result without settling t
 });
 
 test('review target sizes and board stay separated on narrow, safe-area and standard screens', () => {
-  for (const scale of [1, 320 / 390, .7]) {
+  for (const scale of [1, 320 / 390, .7, 490 / 732]) {
     for (const height of [700, 760, 900]) {
       const ui = reviewLayout(height, scale);
       assert.ok(ui.touch * scale >= 44);
@@ -119,4 +119,24 @@ test('review target sizes and board stay separated on narrow, safe-area and stan
   }
   assert.deepEqual(reviewWindow(0, 20, 6), [0, 1, 2, 3, 4, 5]);
   assert.deepEqual(reviewWindow(19, 20, 6), [14, 15, 16, 17, 18, 19]);
+});
+
+
+test('storage warnings plus deep safe areas keep the review subtitle outside header controls and objectives', () => {
+  const metrics = { width: 320, height: 568, pixelRatio: 1, safeTop: 44, safeBottom: 34 };
+  const { game, draw } = createHarness({ metrics });
+  game.start(CAMPAIGN[0]); game.guideEnabled = false; game.act(CAMPAIGN[0].solution[0]);
+  game.platform.storage.set = () => { throw new Error('quota'); };
+  game.persist(); game.pause(); game.openReview();
+  const labels = [], original = game.renderer.label;
+  game.renderer.label = function (...args) { labels.push(args); return original.apply(this, args); };
+  draw();
+  assert.equal(game.store.getStatus().persisted, false);
+  const subtitle = labels.find(args => String(args[0]).includes('只回看'));
+  assert.ok(subtitle);
+  const [, x, y, width, size] = subtitle;
+  assert.ok(y + size / 2 < 82, 'text bottom stays above the objectives');
+  assert.ok(x + width < 290, 'text stays to the left of the enlarged return target');
+  const back = game.renderer.hits.find(hit => hit.label === '返回');
+  assert.ok(back && back.h * game.renderer.scale >= 44);
 });

@@ -24,8 +24,8 @@ function drawRouteReview(r, game, now) {
   const { model, index } = review, frame = model.at(index), moment = model.moments[index];
   const layout = reviewLayout(r.H, r.scale);
   r.label('路线复盘', 24, 31, 254, 23, C.ink, 'left', '700');
-  r.button('返回', 290, 10, 76, layout.touch, () => closeReview(game), { style: 'text', icon: 'arrow-left' });
-  r.label('第 ' + game.level.id + ' 封 · 第 ' + frame.state.turn + ' 拍 · 只回看，不消耗', 24, 67, 342, 12, C.muted);
+  r.button('返回', 290, 0, 76, layout.touch, () => closeReview(game), { style: 'text', icon: 'arrow-left' });
+  r.label('第 ' + game.level.id + ' 封 · 第 ' + frame.state.turn + ' 拍 · 只回看，不消耗', 24, 67, 254, 12, C.muted);
   // Rendering reads a separate state and camera. The actual run, save and result
   // keep their original identities throughout review, including backgrounding.
   const view = Object.assign(Object.create(game), { state: frame.state, previousState: null,

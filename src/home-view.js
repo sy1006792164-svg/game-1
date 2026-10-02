@@ -1,6 +1,6 @@
 'use strict';
 
-const { CAMPAIGN } = require('./levels');
+const { homeGoal } = require('./player-goals');
 const { C } = require('./theme');
 const { CONTROL } = require('./controls');
 const { drawVignette } = require('./scene');
@@ -14,22 +14,15 @@ function homeLayout(height, scale = 1) {
   const journeyY = height - 24 - compactHeight;
   const linksY = journeyY - 10 - linksHeight, buttonY = linksY - 28 - primaryHeight;
   const routeY = buttonY - 84, top = Math.max(0, (height - 844) * .2), heroY = 150 + top;
-  const heroH = Math.max(120, routeY - heroY - 26), hero = featuredVignetteRect(heroY, heroH);
+  const goalY = routeY - 81;
+  const heroH = Math.max(100, goalY - heroY - 14), hero = featuredVignetteRect(heroY, heroH);
   // Safe areas make the home hero shorter than the startup hero on many phones.
   // Contain the complete island instead of preserving a larger shared scale and
   // clipping its lower edge behind the route copy.
   const artScale = Math.min(hero.w / VIGNETTE_SOURCE.w, hero.h / VIGNETTE_SOURCE.h);
   return { top, heroY, heroH, hero, artScale,
-    artAlignY: 'center', routeY, buttonY,
+    artAlignY: 'center', routeY, goalY, buttonY,
     primaryHeight, compactHeight, linksHeight, linksY, journeyY };
-}
-
-function departure(next, saved, completed) {
-  const level = saved && CAMPAIGN.find(item => item.id === saved.levelId) || next;
-  return {
-    title: saved || completed ? '继续送信' : '开始送信',
-    detail: '第 ' + String(level.id).padStart(3, '0') + ' 封 · ' + level.title
-  };
 }
 
 function drawBrand(r, top) {
@@ -51,9 +44,24 @@ function drawLinks(r, game, y, height) {
   });
 }
 
+function drawHomeGoal(r, game, goal, y) {
+  const { chapter } = goal;
+  r.panel(24, y, 342, 68, { fill: C.panel, radius: 16, flat: true });
+  r.label(goal.chapterLabel, 38, y + 18, 280, 13, C.green, 'left', '600');
+  r.label(goal.chapterDetail, 38, y + 39, 290, 11, C.muted);
+  r.icon('chevron', 345, y + 27, 16, C.green);
+  const gap = 5, width = (314 - (chapter.count - 1) * gap) / chapter.count;
+  chapter.levels.forEach((level, index) => {
+    const done = !!game.profile().completed[String(level.id)];
+    r.round(38 + index * (width + gap), y + 55, width, 4, 2, done ? C.green : C.soft);
+  });
+  r.hit(24, y, 342, 68, () => game.openLevelBrowser('all', goal.level.id), undefined,
+    goal.chapterLabel + '，' + goal.chapterDetail + '，查看本章');
+}
+
 function drawHome(r, game, now) {
   const saved = game.savedRun(), completed = game.completion();
-  const route = departure(game.nextLevel(), saved, completed), ui = homeLayout(r.H, r.scale || 1);
+  const goal = homeGoal(game), ui = homeLayout(r.H, r.scale || 1);
   const mood = r.atmosphereMood, quietMotion = r.reducedMotion || r.effectsQuality === 'low';
   const sceneNow = Number.isFinite(r.ambientNow) ? r.ambientNow : now;
   drawBrand(r, ui.top);
@@ -70,12 +78,13 @@ function drawHome(r, game, now) {
     deliveryStory: r.effectsQuality !== 'low' });
   r.ctx.restore();
 
+  drawHomeGoal(r, game, goal, ui.goalY);
   r.text(saved ? '接着上次的旅程' : completed ? '下一站' : '你的第一封信', 26, ui.routeY, 11, C.muted);
-  r.label(route.detail, 26, ui.routeY + 28, 338, 21, C.ink, 'left', '600');
+  r.label(goal.detail, 26, ui.routeY + 28, 338, 21, C.ink, 'left', '600');
   const persisted = !game.store || game.store.getStatus().persisted;
-  r.text(saved ? persisted ? '路线已保存，随时接着走。' : '本次运行内可以继续这段路线。' :
-    '拾起信笺，让回声替你收集蓝票。', 26, ui.routeY + 55, 12, C.muted);
-  r.button(route.title, 24, ui.buttonY, 342, ui.primaryHeight, () => game.primary(),
+  r.label(saved ? persisted ? '已走 ' + goal.recordedTurns + ' 拍 · 已自动保存，接着走。' : '本次运行内可以继续这段路线。' :
+    goal.stampDetail, 26, ui.routeY + 55, 338, 12, C.muted);
+  r.button(goal.title, 24, ui.buttonY, 342, ui.primaryHeight, () => game.primary(),
     { style: 'primary', icon: 'letter', trailing: 'arrow-right', size: 17 });
   drawLinks(r, game, ui.linksY, ui.linksHeight);
   if (typeof game.journey === 'function') {

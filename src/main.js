@@ -15,6 +15,7 @@ const { ITEMS, itemAvailability, itemOffer, itemAction, parseItemAction, normali
 const { requestItemReward } = require('./item-reward-flow');
 const { upgradeVideoRewards } = require('./run-migration');
 const { SUPPLY_ENERGY, RELIGHT_ACTION, normalizeSupplyPolicy } = require('./supply-rules');
+const { nextDeliveryGoal } = require('./player-goals');
 const { deliveryResultLines } = require('./delivery-result');
 const reviveFlow = require('./revive-flow');
 const { CAMPAIGN, CONTENT_VERSION, getLegacyLevel } = require('./levels');
@@ -46,7 +47,7 @@ const { helpContent } = require('./help-view');
 
 // Each route supplies its undo allowance through levels.undoFor.
 const DEFAULT_UNDO = 3;
-const SETTING_KEYS = Object.freeze(['sound', 'music', 'haptics', 'reducedMotion']);
+const SETTING_KEYS = Object.freeze(['sound', 'music', 'haptics', 'reducedMotion', 'lowEffects']);
 
 class Game {
   constructor(platform) {
@@ -357,17 +358,19 @@ class Game {
     if (force || enabled !== this.musicActive) { this.musicActive = enabled; this.sound.ambience(enabled); }
   }
   reducedMotion() { return this.platform.reducedMotion || this.profile().settings.reducedMotion; }
+  effectsQuality() { return this.platform.effectsQuality === 'low' || this.profile().settings.lowEffects ? 'low' : 'high'; }
   toggle(setting) {
     if (!SETTING_KEYS.includes(setting)) return false;
     const enabled = !this.profile().settings[setting];
     const now = this.platform.now();
-    const from = togglePosition(this.settingChange, setting, !enabled, now, this.reducedMotion() || this.platform.effectsQuality === 'low');
+    const from = togglePosition(this.settingChange, setting, !enabled, now, this.reducedMotion() || this.effectsQuality() === 'low');
     this.store.updateSettings({ [setting]: enabled });
     this.settingChangedAt = now;
     this.settingChange = { key: setting, enabled, from, at: now };
     if (setting === 'sound' && !enabled && this.sound.stopEffects) this.sound.stopEffects();
     if (setting === 'music') this.syncMusic(true);
     if (setting === 'reducedMotion' && enabled) this.camera.stopShake();
+    if (setting === 'lowEffects') this.renderer.clearCaches();
     this.cue('toggle');
     this.lastFrame = -Infinity;
     return enabled;
@@ -625,6 +628,7 @@ class Game {
     const next = this.mode === 'campaign' && !this.record(candidate, this.mode) ? candidate : null;
     const saved = this.store.getStatus().persisted;
     const lines = deliveryResultLines(this.level, this.state, rating, before, saved);
+    lines.push(nextDeliveryGoal(this.level, this.state, rating, this.album()));
     const rewards = this.album().stamps.filter(stamp => stamp.owned && !albumBefore.stamps[stamp.index].owned);
     if (rewards.length) lines.push(rewards.length > 1 ? '收到 ' + rewards.length + ' 枚新邮票' : '收到新邮票「' + rewards[0].name + '」');
     this.modal = {
@@ -934,7 +938,7 @@ class Game {
     const activeList = !!list && (list.touching || Math.abs(list.velocity) > 4 || list.wheelTarget !== null ||
       list.offset < 0 || list.offset > list.max);
     const reducedMotion = this.reducedMotion();
-    const quietMotion = reducedMotion || this.platform.effectsQuality === 'low';
+    const quietMotion = reducedMotion || this.effectsQuality() === 'low';
     const listTransition = !!list && !quietMotion &&
       (now - list.enteredAt < 600 || now - list.activeAt < 360);
     const smoothList = !!list && !this.modal && (activeList || listTransition);
