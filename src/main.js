@@ -1,4 +1,5 @@
 'use strict';
+const { openReview } = require('./route-review');
 const { confirmRestart } = require('./restart-flow');
 const { createPlatform } = require('./platform');
 const { createStore } = require('./storage');
@@ -453,7 +454,7 @@ class Game {
     this.itemRewards = normalizeItemRewards(level, carriedRewards);
     this.state = createState(level, this.itemRewards); this.previousState = null; this.moveEvents = []; this.motionPath = null; this.actions = []; this.reviveHistory = []; this.undosUsed = 0;
     this.supplyPolicy = normalizeSupplyPolicy(undefined, 0, 0);
-    this.page = 'game'; this.modal = null; this.reviewing = false; this.session++; this.transitionAt = this.platform.now() - MOVE_MS; this.toastUntil = 0;
+    this.page = 'game'; this.routeReview = null; this.modal = null; this.reviewing = false; this.session++; this.transitionAt = this.platform.now() - MOVE_MS; this.toastUntil = 0;
     this.pointer = null; this.camera.enter(this.platform.now());
     this.persist(); this.cue('start');
     reportGameEvent(this, 'level_start', { source, budget: level.budget, par: level.par,
@@ -634,11 +635,13 @@ class Game {
       lines,
       buttons: [
         { text: next ? '下一封信' : '返回邮局', primary: true, action: () => next ? this.start(next, this.mode) : this.home() },
+        { text: '路线复盘', textOnly: true, icon: 'route', action: () => this.openReview() },
         { text: '再走一次', textOnly: true, icon: 'restart', action: () => this.start(this.level, this.mode) },
         ...(next ? [{ text: '返回邮局', textOnly: true, icon: 'home', action: () => this.home() }] : [])
       ]
     };
   }
+  openReview() { return openReview(this); }
   failureHint() { return reviveFlow.failureHint(this); }
   failure() { reviveFlow.showFailure(this); }
   requestRevive() { return reviveFlow.requestRevive(this); }
@@ -664,6 +667,7 @@ class Game {
     const saveLine = this.store.getStatus().persisted ? '路线已自动保存，没有倒计时。' : '没有倒计时。路线仅在本次运行保留。';
     this.modal = { kind: 'pause', title: '歇一会', lines: [saveLine], buttons: [
       { text: '继续投递', primary: true, action: () => { this.modal = null; this.syncMusic(); } },
+      ...(this.actions.length ? [{ text: '路线复盘', icon: 'route', action: () => this.openReview() }] : []),
       { text: '重新开始', icon: 'restart', action: () => confirmRestart(this) },
       ...(this.camera.isAdjusted() ? [{ text: '恢复视角', textOnly: true, icon: 'grid', action: () => this.resetView() }] : []),
       ...(this.canShowGuide() ? [{ text: '操作引导', textOnly: true, icon: 'route', action: () => this.showGuide() }] : []),
@@ -685,13 +689,13 @@ class Game {
       }),
       buttons: [{ text: '明白了', primary: true, action: () => { this.modal = old; } }] };
   }
-  home() { if (this.busy || this.startupActive()) return; this.cancelRankingPointer(); this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.actionPreview = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.pointer = null; this.stopListScrolling(); this.session++; }
+  home() { if (this.busy || this.startupActive()) return; this.cancelRankingPointer(); this.rankingAuthorization.close(); this.friendLeaderboard.close(); this.pendingAction = null; this.actionPreview = null; this.persist(); this.modal = null; this.reviewing = false; this.page = 'home'; this.routeReview = null; this.pointer = null; this.stopListScrolling(); this.session++; }
   openPage(page) {
     if (this.busy || this.startupActive() || !['home', 'levels', 'collection', 'leaderboard', 'settings'].includes(page)) return;
     this.cancelRankingPointer();
     this.rankingAuthorization.close();
     this.friendLeaderboard.close();
-    this.pendingAction = null; this.actionPreview = null; this.persist(); this.page = page; this.modal = null; this.reviewing = false; this.pointer = null; this.stopListScrolling();
+    this.pendingAction = null; this.actionPreview = null; this.persist(); this.routeReview = null; this.page = page; this.modal = null; this.reviewing = false; this.pointer = null; this.stopListScrolling();
     if (page === 'levels') this.scrollToProgress();
     if (page === 'collection') this.collectionScroll.reset(this.platform.now());
     if (page === 'leaderboard') {
