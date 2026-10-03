@@ -1,5 +1,6 @@
 'use strict';
 
+const { reviewKey } = require('./route-review');
 const { DIRECTIONS } = require('./engine');
 const { stampDetailKey } = require('./stamp-detail-view');
 const { handleFocusKey } = require('./keyboard-focus');
@@ -33,6 +34,7 @@ function handleGameKey(game, key) {
   const focused = handleFocusKey(game, key);
   if (focused !== null) return focused;
   if (stampDetailKey(game, key)) return true;
+  if (reviewKey(game, key)) return true;
   if (game.modal) {
     const buttons = game.modal.buttons || [];
     const primary = buttons.find(button => button.primary);

@@ -62,7 +62,7 @@ function hasActiveUiMotion(game, now) {
   const pointer = game.pointer;
   if (pointer && !pointer.dragging && !pointer.scene && active(now, pointer.time, 220)) return true;
   if (sameScope(r.uiFeedback, game) && active(now, r.uiFeedback.at, TOUCH_MS)) return true;
-  if (game.page === 'game' || game.platform && game.platform.effectsQuality === 'low') return false;
+  if (game.page === 'game' || (typeof game.effectsQuality === 'function' ? game.effectsQuality() === 'low' : game.platform && game.platform.effectsQuality === 'low')) return false;
   if (!r.uiPage || r.uiPage.page !== game.page || active(now, r.uiPage.at, PAGE_MS)) return true;
   if (game.modal && (r.currentModal !== game.modal || active(now, r.modalAt, 260))) return true;
   return active(now, game.settingChangedAt, 240) || active(now, game.toastAt, 160);

@@ -13,6 +13,8 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
       text: '你收橙色信笺，回声收蓝色邮票。\n先踩上蓝票格，再移动或等待 3 次，回声就会到那里收票。' },
     { title: '提前看见三拍回声', icon: 'echo', color: C.blueText,
       text: '上方拍数显示回声未来三拍的进度。\n点拍数查看对应落点，不耗拍；再点同一拍数收起。\n邮票图标表示这一拍会盖票；使用道具不会推进回声。' },
+    { title: '回看自己的路线', icon: 'route', color: C.green,
+      text: '暂停、失败或送达后，点「路线复盘」。\n逐步看人物、回声与灯火的变化，跳到关键一步。\n复盘不消耗拍数和道具，也不会改变成绩与存档。' },
     { title: '收齐后，抵达邮局', icon: 'home', color: C.green,
       text: '信笺、邮票全收齐，抵达邮局即通关。' }
   ];
@@ -53,9 +55,9 @@ function helpContent(level, reviveCount, platformKind, options = {}) {
         : '三星：' + level.par + ' 拍内 · 二星：' + two + ' 拍内\n超过 ' + two + ' 拍通关得一星。' });
     if (level.id >= 4) sections[sections.length - 1].text += (assisted ? '' : '\n使用道具或续灯，本次最高二星。') +
       '\n道具局纪录至少按三星目标 +1 拍计，\n已获得的三星与更短纪录会保留。';
-    if (platformKind === 'browser') sections.push({ title: '电脑操作', icon: 'grid', color: C.green,
-      text: '方向键 / WASD：移动\n空格：等一拍 · Z / 退格：撤回\nTab / Shift+Tab：切换按钮或道具目标\nEnter：选择 · 1 / 2 / 3 / 4：查看道具\n鼠标点亮起的目标使用道具\nEsc：取消选择、暂停或返回\n滚轮缩放，放大后可拖动棋盘。\n暂停里的「恢复视角」可还原棋盘。' });
   }
+  if (platformKind === 'browser') sections.push({ title: '电脑操作', icon: 'grid', color: C.green,
+      text: '方向键 / WASD：移动\n空格：等一拍 · Z / 退格：撤回\nTab / Shift+Tab：切换按钮或道具目标\nEnter：选择 · 1 / 2 / 3 / 4：查看道具\n鼠标点亮起的目标使用道具\nEsc：取消选择、暂停或返回\n滚轮缩放，放大后可拖动棋盘。\n暂停里的「恢复视角」可还原棋盘。\n复盘：左右键逐步看，Home/End跳首尾，\nPageUp/PageDown跳关键步。' });
   return { sections, lines: level && videoAvailable
     ? ['可用时看视频续灯 +' + SUPPLY_ENERGY + ' 拍，不另送灯油；已有油优先使用。', '续灯封顶二星，并按总拍数结算。'] : [] };
 }

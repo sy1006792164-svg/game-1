@@ -8,11 +8,13 @@ const ROWS = Object.freeze([
   Object.freeze({ key: 'music', title: '背景音乐', detail: '邮路中的环境音乐' }),
   Object.freeze({ key: 'haptics', title: '硬件振动', detail: '收集与送达时轻振' }),
   Object.freeze({ key: 'reducedMotion', title: '减少动态效果', detail: '关闭位移过渡与装饰动画' }),
+  Object.freeze({ key: 'lowEffects', title: '轻量画面', detail: '减少装饰粒子，保留操作反馈' }),
 ]);
 
 function settingStatus(game, row, enabled, supported) {
   if (!supported) return '当前平台不支持硬件振动';
   if (row.key === 'reducedMotion' && !enabled && game.platform.reducedMotion) return '手动关闭 · 系统仍保持开启';
+  if (row.key === 'lowEffects' && !enabled && game.platform.effectsQuality === 'low') return '设备已自动使用轻量画面';
   return (enabled ? '已开启 · ' : '已关闭 · ') + row.detail;
 }
 
@@ -57,7 +59,11 @@ function drawSettings(r, game) {
   r.header('体验设置', '声音、反馈与动态效果', () => game.home());
   const settings = game.profile().settings;
   const y = drawSettingGroup(r, game, '声音', ROWS.slice(0, 2), settings, 92);
-  drawSettingGroup(r, game, '反馈与动态', ROWS.slice(2), settings, y + 16);
+  const end = drawSettingGroup(r, game, '反馈与动态', ROWS.slice(2), settings, y + 16);
+  const touch = Math.max(44, 44 / (r.scale || 1));
+  r.button('玩法与操作速查', 24, end + 18, 342, touch, () => game.help(), { style: 'quiet', icon: 'book' });
+  const persisted = game.store.getStatus().persisted;
+  r.label(persisted ? '设置自动保存在本机' : '存储暂不可用，设置仅本次运行有效', 195, end + 18 + touch + 20, 342, 11, persisted ? C.muted : C.dangerText, 'center');
 }
 
 module.exports = { drawSettings, ROWS };

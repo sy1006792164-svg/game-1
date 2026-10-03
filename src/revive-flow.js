@@ -67,7 +67,7 @@ function showFailure(game) {
       ...(canRevive ? [{ text: '看广告续灯 +' + reviveEnergy(game.level) + ' 拍 · 接着送', primary: !canRewind,
         icon: 'lamp', action: () => game.requestRevive() }] : []),
       { text: '重新规划 · 免费再试', primary: !canContinue && !canRewind, icon: 'restart', action: () => game.start(game.level, game.mode) },
-      { text: '看看刚才的路线', icon: 'route', action: () => { game.modal = null; game.reviewing = true; } },
+      { text: '路线复盘', icon: 'route', action: () => typeof game.openReview === 'function' ? game.openReview() : null },
       { text: '返回邮局', textOnly: true, action: () => game.home() }
     ]
   };

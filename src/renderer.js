@@ -5,6 +5,7 @@ const { CONTROL, drawButton } = require('./controls');
 const { drawUiIcon, UI_ICON } = require('./ui-icons');
 const { drawHome } = require('./home-view');
 const { drawStartup, drawPublication } = require('./startup-view');
+const { drawRouteReview } = require('./route-review-view');
 const { drawGame } = require('./game-view');
 const { drawLevels, levelBrowserChapter } = require('./level-view');
 const { drawCollection } = require('./collection-view');
@@ -28,7 +29,7 @@ const NO_LINE_START = '，。！？、；：）】》〉」』〕］｝’”…
 const NO_LINE_END = '（【《〈「『〔［｛‘“([{';
 
 function atmosphereChapter(game, height) {
-  if (game.page === 'game' && game.level) return game.level.chapter || 0;
+  if (['game', 'review'].includes(game.page) && game.level) return game.level.chapter || 0;
   if (game.page === 'levels' && game.levelScroll) return levelBrowserChapter(game, height);
   if (['home', 'collection', 'settings'].includes(game.page) && typeof game.nextLevel === 'function') {
     const next = game.nextLevel();
@@ -249,7 +250,8 @@ class Renderer {
     this.now = now;
     this.reducedMotion = typeof game.reducedMotion === 'function' ? game.reducedMotion() :
       !!(game.platform && game.platform.reducedMotion);
-    this.effectsQuality = game.platform && game.platform.effectsQuality === 'low' ? 'low' : 'high';
+    this.effectsQuality = typeof game.effectsQuality === 'function' ? game.effectsQuality() :
+      game.platform && game.platform.effectsQuality === 'low' ? 'low' : 'high';
     const pageProgress = pageFrame(this, game, now);
     if (!game.modal) this.ambientFreezeAt = null;
     else if (!Number.isFinite(this.ambientFreezeAt)) this.ambientFreezeAt = now;
@@ -279,6 +281,7 @@ class Renderer {
     c.save(); c.globalAlpha *= .76 + pageProgress * .24;
     if (game.page === 'startup') drawStartup(this, game, pageNow);
     else if (game.page === 'publication') drawPublication(this, game);
+    else if (game.page === 'review') drawRouteReview(this, game, pageNow);
     else if (game.page === 'game') this.game(game, pageNow);
     else if (game.page === 'levels') this.levels(game);
     else if (game.page === 'collection') this.collection(game);
